@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 102 · array: typed sequences without a list's per-item overhead</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 102 · ~20 min · 8 Nov 2026</p>
+<h1><code>array</code>: typed sequences without a list's per-item overhead</h1>
+<p class="byline">A plain <code>list</code> never actually stores its values directly — it stores a pointer to each one, and every <code>int</code> or <code>float</code> it points at is its own separate Python object with its own header overhead. That is flexible (a <code>list</code> can mix any types at all) but wasteful the moment every element is the same primitive kind — a million sensor readings, a column of integer IDs, a buffer of raw samples. The standard-library <dfn data-en="The standard-library module providing a sequence type that stores its elements packed directly as fixed-width machine values of one declared type (int, float, etc.), instead of a list's array of pointers to separate full Python objects -- array.array('typecode', values) creates one, and it supports most of the same methods a list does (append, extend, pop, slicing) with one restriction: every element must match the declared typecode, enforced with TypeError on anything else." data-vn="giữ nguyên &quot;array module&quot; — module chuẩn cung cấp 1 sequence type lưu trực tiếp giá trị dạng machine value độ rộng cố định của 1 kiểu khai báo (int, float, v.v.), khác với list lưu dãy pointer trỏ tới các object Python riêng biệt -- array.array('typecode', values) tạo ra nó, hỗ trợ hầu hết method giống list (append, extend, pop, slicing) với 1 ràng buộc: mọi phần tử phải khớp typecode đã khai báo, sai thì raise TypeError">array</dfn> module is the plain-Python answer: a sequence that behaves like a <code>list</code> but packs its values directly, at the cost of allowing only one declared type.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>array</code> is still genuinely zero-hit as a dedicated topic — the handful of existing hits are all passing mentions inside other lessons' own "Why today" gap-list callouts, not actual teaching (same true of the other standing candidates, <code>types.SimpleNamespace</code>, <code>locale</code>, and <code>socket</code>). Per Day 101's cadence note, Day 102 is fresh day 3 of the current three-fresh-then-review cycle (Day 99 closed the prior one; Day 103 should be the next review, covering Days 100-102). Picked <code>array</code> over the remaining candidates: it is squarely language/stdlib, needs nothing from the still-untaught FastAPI track, and gives a clean, honest contrast to the kind of homogeneous numeric data <code>data/</code>'s NumPy arrays generalize much further — stated here as a single-line pointer, never a worked pandas/NumPy example.</div>
+
+<h2>1 · Declaring one: a typecode, then values</h2>
+<p><code>array.array(typecode, iterable)</code> takes a one-character typecode fixing what every element must be, then builds the array from any iterable of matching values:</p>
+<pre><code><span class="kw">import</span> array
+
+ids = array.array(<span class="str">'i'</span>, [101, 102, 103])   <span class="cm"># 'i' = signed int, platform-dependent width (commonly 4 bytes)</span>
+<span class="kw">print</span>(ids.typecode, ids.itemsize)        <span class="cm"># i 4 -- confirmed live</span>
+<span class="kw">print</span>(<span class="kw">list</span>(ids))                      <span class="cm"># [101, 102, 103]</span></code></pre>
+<p>Most of a <code>list</code>'s API works unchanged — indexing, slicing, <code>append()</code>, <code>extend()</code>, <code>pop()</code>, iteration, even slice assignment with another <code>array</code> of the same typecode — confirmed live. The difference that matters is typecode choice: <code>'i'</code>/<code>'l'</code> for signed integers of different guaranteed minimum widths, <code>'f'</code>/<code>'d'</code> for single- and double-precision floats. The full table of typecodes and their guaranteed minimum sizes is in the docs linked below; reaching for <code>'i'</code> or <code>'d'</code> covers the overwhelming majority of real use.</p>
+
+<h2>2 · The one restriction, enforced at every write</h2>
+<p>Every element must match the declared typecode — not "close enough," checked on every <code>append()</code>, every construction, every assignment:</p>
+<pre><code>nums = array.array(<span class="str">'i'</span>, [1, 2, 3])
+<span class="kw">try</span>:
+    nums.append(3.5)
+<span class="kw">except</span> <span class="kw">TypeError</span> <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># 'float' object cannot be interpreted as an integer -- confirmed live</span></code></pre>
+<p>A <code>list</code> would have silently accepted <code>3.5</code> sitting right next to three ints, no complaint. This is the trade a <code>list</code> never makes: an <code>array</code> gives up mixed-type flexibility and gets, in exchange, an early, specific <code>TypeError</code> the moment a value doesn't belong — the same "fail loudly near the mistake" instinct Day 8's narrow exception handling already taught, applied here to data shape instead of control flow.</p>
+
+<h2>3 · Why bother: the packed-storage payoff, measured</h2>
+<p>A <code>list</code> of <code>int</code> stores one pointer per element, each pointing at a separate full Python <code>int</code> object elsewhere in memory. An <code>array</code> stores the raw fixed-width value directly, back to back, with no per-element object at all. Measured directly rather than assumed, for 100,000 integers outside Python's small-int cache (so each one is genuinely a distinct object, not a shared cached value):</p>
+<pre><code><span class="kw">import</span> array, sys
+
+n = 100_000
+values = <span class="kw">range</span>(1000, 1000 + n)
+
+lst = <span class="kw">list</span>(values)
+arr = array.array(<span class="str">'l'</span>, values)
+
+list_total = sys.getsizeof(lst) + <span class="kw">sum</span>(sys.getsizeof(x) <span class="kw">for</span> x <span class="kw">in</span> lst)
+array_total = sys.getsizeof(arr)
+
+<span class="kw">print</span>(list_total, array_total)       <span class="cm"># 3600056 816640 -- confirmed live</span>
+<span class="kw">print</span>(list_total / array_total)      <span class="cm"># ~4.4 -- the list uses about 4.4x the memory, for the same 100,000 values</span></code></pre>
+<p>That gap is <code>array</code>'s whole reason to exist: once every element genuinely is the same primitive numeric type, paying for a full object per element buys nothing. Two round-trip methods move an <code>array</code>'s raw bytes in and out directly — <code>tobytes()</code> returns the packed bytes, and <code>frombytes()</code> (called on an empty array of the matching typecode) rebuilds one from them, confirmed live to round-trip exactly — handy for writing a buffer straight to a binary file or socket without going through Day 96's <code>struct</code> format strings one field at a time.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> <code>array.array</code> is one-dimensional, plain Python, and has no vectorized math — <code>arr + arr</code> raises <code>TypeError</code>, not element-wise addition. NumPy's <code>ndarray</code> generalizes this exact packed-storage idea to N dimensions plus a huge vectorized operation set, and is <code>data/</code>'s territory entirely — not demonstrated here.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/102_array_typed_sequences.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/102_array_typed_sequences.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a typed <code>array</code> from a typecode and an iterable, catching the <code>TypeError</code> a mismatched value raises, measuring the memory gap between an equivalent <code>list</code> and <code>array</code> directly, and round-tripping an array's bytes through <code>tobytes()</code>/<code>frombytes()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="array.array enforces its declared typecode on every write, confirmed live: appending 3.5 to an array.array('i', ...) raises TypeError immediately, 'float object cannot be interpreted as an integer'. A plain list would have accepted the same float with no complaint at all, mixed right in with the existing ints.">
+    <p class="stem">What happens when <code>3.5</code> is appended to an <code>array.array('i', [1, 2, 3])</code>?</p>
+    <button class="opt" data-ok>a TypeError is raised right away, since 3.5 is not an integer</button>
+    <button class="opt">it gets silently truncated down into the plain int value of 3</button>
+    <button class="opt">it gets stored just fine, same as any ordinary mixed-type list would</button>
+  </div>
+  <div class="q" data-why="Measured directly: a list of 100,000 non-cached ints totals about 3,600,056 bytes once each separate int object is counted, against 816,640 bytes for an equivalent array.array('l', ...) storing the same values packed directly -- roughly a 4.4x gap, because the list pays for one full Python int object per element on top of its own pointer array, while array stores raw fixed-width values back to back with no per-element object at all.">
+    <p class="stem">Why did the measured 100,000-element <code>list</code> use roughly 4.4x the total memory of the equivalent <code>array.array('l', ...)</code>?</p>
+    <button class="opt" data-ok>the list also pays for one separate full int object per stored element</button>
+    <button class="opt">array.array always reserves far more spare storage capacity than any list here instead</button>
+    <button class="opt">Python silently compresses every single array.array object down right with some built-in step</button>
+  </div>
+  <div class="q" data-why="array.array is strictly one-dimensional with no vectorized math of its own -- confirmed by the module's documented behavior, arr + arr on two array.array instances raises TypeError rather than adding element-wise. NumPy's ndarray is the library-level generalization of this exact packed-storage idea to N dimensions plus a full vectorized operation set, and stays data/'s territory, never taught here.">
+    <p class="stem">What does <code>array.array</code> notably lack that NumPy's <code>ndarray</code> (taught in <code>data/</code>, not here) adds on top of the same packed-storage idea?</p>
+    <button class="opt" data-ok>multiple dimensions at once, plus a full set of real element-wise vectorized operations</button>
+    <button class="opt">the ability to restrict its own stored elements to one single fixed type</button>
+    <button class="opt">any real working way to convert packed values back into raw bytes again</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/array.html"><code>array</code></a> docs — the full typecode table with each one's guaranteed minimum byte width, the complete list-like method set this lesson didn't need to enumerate, and <code>tobytes()</code>/<code>frombytes()</code>/<code>tolist()</code> covered directly.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day102">glossary</a> under Day 102.<br>
+💬 Anything unclear — when Day 53's <code>collections.deque</code> beats a plain <code>array</code> for queue-like work, or why the <code>'u'</code> (Unicode character) typecode is documented as deprecated since Python 3.3, even though it still works today? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

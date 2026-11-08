@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 54 · Airflow max_active_runs: the knob a backfill actually needs</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 54 · ~20 min · 8 Nov 2026</p>
+<h1>Airflow <code>max_active_runs</code>: the knob a backfill actually needs</h1>
+<p class="byline">Today's tangible win: the real <code>food_delivery_pipeline</code> DAG gets <code>max_active_runs=1</code> and a <code>dagrun_timeout</code>, so Day 19's backfill — several past logical dates queued at once — runs its <code>dbt build</code> steps one at a time against the single shared Postgres warehouse instead of racing each other, and a run that hangs gets killed instead of blocking every date behind it forever. Confirmed live this round against an installed Airflow 3.3.1: a DAG parsed with both settings reports them back unchanged off the real <code>DAG</code> object, zero import errors.</p>
+
+<div class="callout"><strong>Before today — confirm Day 51's DAG still parses:</strong> today adds two keyword arguments to the existing <code>with DAG(...) as dag:</code> block in <code>dags/food_delivery_pipeline.py</code>; it adds no new task.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If anything else prints, fix that first — today assumes <code>load_raw</code>, the <code>dbt_models</code> group and <code>check_dead_letters</code> are already wired in that order, exactly as Day 51 left them.</div>
+
+<h2>1 · The gap: a backfill was named on Day 19, never actually bounded</h2>
+<p>Day 19 described <a href="0019-airflow-logical-date-and-backfills.html">backfill</a> with a concrete scenario this exact pipeline could hit: <code>raw.orders</code> for three days gets corrupted and re-loaded, so <code>mart_delivery_sla</code> needs recomputing for each of those logical dates. What that lesson never asked is what happens the moment someone actually runs <code>airflow dags backfill</code> for a three-day range: by default, Airflow is free to start all three runs' tasks at once, because nothing in the DAG said otherwise. Three concurrent <code>dbt_build</code> tasks, each running <code>dbt build</code> against the same Postgres warehouse at the same time, is a real problem — not a hypothetical one — because <code>fct_orders</code> and <code>mart_delivery_sla</code> are tables, not append-only logs, and two overlapping <code>dbt build</code> runs rebuilding the same table from different source snapshots can interleave in ways that leave it correct for neither date.</p>
+<p>The fix is not "write smarter dbt SQL." It's a DAG-level setting that was always available and never set: <dfn data-en="a DAG-level setting (an integer, default 16) capping how many of that DAG's runs Airflow will have in the 'running' state at once across all logical dates -- once the cap is hit, an additional triggered or backfilled run queues and waits rather than starting, so a multi-date backfill against a single shared warehouse can be forced to proceed one date at a time instead of racing" data-vn="giữ nguyên &quot;max_active_runs&quot; — cấu hình ở mức DAG (số nguyên, mặc định 16) giới hạn số lần chạy của DAG đó được ở trạng thái 'running' cùng lúc, tính trên mọi logical_date; khi đạt giới hạn, lần chạy mới (kể cả do backfill) phải xếp hàng chờ thay vì chạy luôn">max_active_runs</dfn>. Every DAG this course has written since Day 7 left it at its default, 16 — fine for a single daily schedule where only one run is ever pending at a time, silently dangerous the moment a backfill queues several.</p>
+
+<h2>2 · Confirmed live: the setting round-trips through a real parse</h2>
+<p>Built a scratch DAG shaped exactly like the real <code>food_delivery_pipeline</code> — <code>load_raw</code>, Day 51's <code>dbt_models</code> <code>TaskGroup</code> wrapping <code>dbt_build</code>, then <code>check_dead_letters</code> — with two new keyword arguments added to the <code>DAG(...)</code> call itself, not to any task:</p>
+<pre><code><span class="kw">with</span> DAG(
+    dag_id=<span class="str">"food_delivery_pipeline"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    schedule=<span class="str">"@daily"</span>,
+    catchup=<span class="kw">True</span>,
+    max_active_runs=<span class="kw">1</span>,
+    dagrun_timeout=timedelta(minutes=<span class="kw">30</span>),
+) <span class="kw">as</span> dag:
+    ...</code></pre>
+<p>Parsed it with a real <code>DagBag</code> against an installed <code>apache-airflow==3.3.1</code> and read both settings straight back off the parsed <code>DAG</code> object, not assumed from the constructor signature:</p>
+<pre><code>import errors: {}
+max_active_runs: 1
+dagrun_timeout: 0:30:00
+catchup: True</code></pre>
+<p>Zero import errors, and both values survived the parse exactly as written. <code>catchup=True</code> staying <code>True</code> alongside <code>max_active_runs=1</code> matters specifically: the two settings are not in tension. <code>catchup</code> decides <em>how many</em> runs get created for missed intervals; <code>max_active_runs</code> decides how many of those created runs are allowed to be <em>actively executing</em> at once. A three-day catchup with <code>max_active_runs=1</code> still creates all three runs — they just execute one after another instead of together, exactly the ordering the shared-warehouse problem in Section 1 needs.</p>
+<div class="callout"><strong>The second setting, confirmed the same way:</strong> <code>dagrun_timeout</code> is a per-DAG-run deadline, separate from Day 35's per-task <code>retries</code>/<code>retry_delay</code>. If a run's tasks haven't all finished within the window (30 minutes here), Airflow marks that entire run failed and moves on — without it, a single hung <code>dbt build</code> inside a <code>max_active_runs=1</code> DAG would block every queued date behind it indefinitely, since the next run can't start until the active one's slot frees up. The two settings solve complementary problems: <code>max_active_runs</code> bounds concurrency, <code>dagrun_timeout</code> bounds how long any one occupant of that concurrency slot is allowed to sit in it.</div>
+
+<h2>3 · Build: add both to the real DAG</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code>. Today only touches the <code>DAG(...)</code> call's own keyword arguments — no task, no dependency edge, changes:</p>
+<pre><code><span class="cm"># new import, alongside the existing datetime import</span>
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+<span class="cm"># the existing `with DAG(...) as dag:` block gains two keyword arguments;</span>
+<span class="cm"># everything else inside it (load_raw, dbt_models, check_dead_letters,</span>
+<span class="cm"># and the dependency wiring) is untouched</span>
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"food_delivery_pipeline"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    schedule=<span class="str">"@daily"</span>,
+    catchup=<span class="kw">True</span>,
+    max_active_runs=<span class="kw">1</span>,  <span class="cm"># one date's dbt build at a time against the shared warehouse</span>
+    dagrun_timeout=timedelta(minutes=<span class="kw">30</span>),  <span class="cm"># a hung run can't block every date behind it forever</span>
+) <span class="kw">as</span> dag:
+    ...</code></pre>
+<p><code>max_active_runs=1</code> is the conservative, correct default for this specific pipeline: one Postgres warehouse, one set of dbt tables being written by every run regardless of which logical date it's processing. A pipeline whose runs wrote to date-partitioned tables instead could safely set this higher and gain real parallelism across a backfill; this one can't, because <code>fct_orders</code> and <code>mart_delivery_sla</code> have no date-scoped write target to keep two concurrent runs from touching the same rows.</p>
+
+<h2>4 · Verify: run it against your own project</h2>
+<pre><code>cd food-delivery-pipeline
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+</code></pre>
+<p>Expected: <code>No data found</code>. Then confirm the two settings actually landed, the same read-the-parsed-object check used above:</p>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags')
+dag = bag.dags['food_delivery_pipeline']
+print('max_active_runs:', dag.max_active_runs)
+print('dagrun_timeout:', dag.dagrun_timeout)
+"
+</code></pre>
+<pre><code>max_active_runs: 1
+dagrun_timeout: 0:30:00</code></pre>
+<p>Commit <code>dags/food_delivery_pipeline.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to backfill three days of a daily DAG that writes to a shared warehouse table. What stops the three runs from corrupting each other?"</strong> A strong answer, out loud: <em>"By default Airflow will happily run up to 16 DAG runs of the same DAG concurrently, which for most pipelines is fine but is actually dangerous here, because every run's dbt build writes to the same physical tables regardless of which logical date it's processing — two overlapping builds racing against fct_orders can leave it correct for neither date. The fix is max_active_runs on the DAG itself, set to 1: catchup still creates all three backfilled runs, but Airflow only lets one be actively executing at a time, so they queue and execute strictly in order instead of racing. I'd pair that with a dagrun_timeout too, because a max_active_runs=1 DAG has a new failure mode: one hung run now blocks every queued run behind it indefinitely, since the next one can't start until the active slot frees up — a per-run deadline makes sure a stuck build fails and releases that slot instead of wedging the whole backfill."</em> The signal: naming that the shared-warehouse write target, not the backfill mechanism itself, is what makes concurrency unsafe here — and that capping concurrency creates its own new failure mode a timeout is needed to close.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>max_active_runs</code> and <code>dagrun_timeout</code> as DAG-level settings, confirmed live via a <code>DagBag</code> parse. It does not cover <code>max_active_tasks</code> (the equivalent cap on concurrent <em>tasks</em> within one run, a different knob for a DAG with real intra-run parallelism, which this course's linear <code>load_raw &gt;&gt; dbt_models &gt;&gt; check_dead_letters</code> shape doesn't currently need), Airflow <dfn data-en="a named, capacity-limited resource (a string name plus a slot count) that any task across any DAG can request a slot from before running -- unlike max_active_runs, which is scoped to one DAG, a pool caps concurrency across every DAG that references it, the tool for a shared external resource like a rate-limited API or a connection-pool-constrained database" data-vn="giữ nguyên &quot;pool&quot; — tài nguyên có hạn mức, đặt tên, mà task ở bất kỳ DAG nào cũng có thể xin slot trước khi chạy; khác max_active_runs (chỉ giới hạn trong 1 DAG), pool giới hạn concurrency trên toàn bộ các DAG cùng dùng nó">pools</dfn> (vocabulary only here — the right tool once more than one DAG shares one constrained resource, which this single-DAG portfolio doesn't have yet), or <code>max_consecutive_failed_dag_runs</code> (an Airflow 3 setting that auto-pauses a DAG after N straight failed runs, worth a look once the dead-letter alerting from Days 45-47 is judged mature enough to need an upstream circuit breaker too).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round via a DagBag parse: max_active_runs is a DAG-level setting (default 16) capping how many runs of that one DAG can be in the running state at once, across all logical dates. It does not change whether runs get created -- catchup still handles that -- only how many created runs execute concurrently.">
+    <p class="stem">What does Airflow's <code>max_active_runs</code> actually cap?</p>
+    <button class="opt" data-ok>how many runs of one DAG execute right now</button>
+    <button class="opt">how many separate tasks exist inside one single run</button>
+    <button class="opt">how many days a DAG's schedule can span total</button>
+  </div>
+  <div class="q" data-why="This course's pipeline has exactly one Postgres warehouse and dbt tables that every run writes to regardless of logical date -- there is no date-partitioned write target keeping two concurrent runs from touching the same rows. Two overlapping dbt build runs racing against fct_orders can leave it built correctly for neither date, which is why max_active_runs=1 is the safe default specifically for this pipeline's shape, not backfills generally.">
+    <p class="stem">Why does a multi-day backfill specifically threaten this pipeline's <code>fct_orders</code> table?</p>
+    <button class="opt" data-ok>every run writes the same shared table, never a date-scoped one</button>
+    <button class="opt">Postgres itself simply cannot physically accept two connections at once ever</button>
+    <button class="opt">dbt simply refuses to run unless given just one single date</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: catchup=True and max_active_runs=1 together still created all three backfilled runs (catchup decides how many runs get created for missed intervals) but Airflow only let one execute at a time (max_active_runs decides how many created runs run concurrently) -- the two settings answer different questions and don't conflict with each other at all.">
+    <p class="stem">With <code>catchup=True</code> and <code>max_active_runs=1</code> together, what happens to a three-day backfill?</p>
+    <button class="opt" data-ok>all three runs get created, but execute strictly one at a time</button>
+    <button class="opt">only the very first of the three missed days ever actually runs</button>
+    <button class="opt">the two settings directly conflict, so Airflow simply refuses that whole parse</button>
+  </div>
+  <div class="q" data-why="Capping concurrency with max_active_runs=1 creates a new failure mode that a schedule allowing 16 concurrent runs never had: one hung run now blocks every queued run behind it, since the next run's slot cannot open until the active one finishes (or fails). dagrun_timeout closes exactly this gap by giving a whole run a deadline, after which it's marked failed and its slot frees up for the next queued date.">
+    <p class="stem">Once <code>max_active_runs=1</code> is set, why does the DAG also need a <code>dagrun_timeout</code>?</p>
+    <button class="opt" data-ok>one stuck run can now block every date queued behind it</button>
+    <button class="opt">it cannot, since both settings always do one same exact thing</button>
+    <button class="opt">a timeout becomes required syntax any time runs are tightly capped</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html">DAG Runs</a> docs (new citation today, same documentation family as the Core Concepts pages already cited for Days 7/19-20/51) cover <code>max_active_runs</code> and <code>dagrun_timeout</code> directly under the DAG run lifecycle. Today's specific claims — both settings surviving a real parse unchanged, and <code>catchup</code>/<code>max_active_runs</code> not conflicting — were confirmed directly against the installed <code>apache-airflow==3.3.1</code> package via a live <code>DagBag</code> parse, the same read-the-real-install approach Days 20-22, 25, 35, 45 and 51 already used (no working <code>WebFetch</code> tool this round either, the same recurring gap those days each noted).</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 54.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now twenty-plus rounds, 35-54) — still worth a human granting it once, so a future round can confirm an actual backfill command queuing and draining three runs one at a time against a live scheduler, not just a <code>DagBag</code>-parse read of the settings. Today's own scope line names two concrete next steps if this thread continues: Airflow pools, once a second DAG in this repo shares a constrained resource with <code>food_delivery_pipeline</code>, or <code>max_consecutive_failed_dag_runs</code> as an upstream circuit breaker on top of Days 45-47's dead-letter alerting. Otherwise, with Airflow now having the most recent attention this round after four straight dbt-heavy days (48, 49, 52, 53), a fresh gap-scan should weigh Kafka against further dbt or Airflow depth next, rather than assuming either by default.<br><br>
+💬 Anything unclear — why <code>catchup</code> and <code>max_active_runs</code> answer different questions, or when a higher <code>max_active_runs</code> would actually be safe? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

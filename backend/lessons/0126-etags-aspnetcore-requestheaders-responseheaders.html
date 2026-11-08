@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 126 · ETags, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 126 · ~20 min</p>
+<h1>ETags, now in C# too</h1>
+<p class="byline">Lesson 51 covered ETags and conditional requests as HTTP-native mechanisms: a fingerprint header plus two companion headers, <code>If-None-Match</code> for cheap reads and <code>If-Match</code> for safe writes. Nothing about that mechanism is Go-specific — it lives in the HTTP spec, not in <code>net/http</code>. What ASP.NET Core adds isn't a new concept, just strongly-typed C# access to the same three headers, instead of reading and comparing raw strings by hand.</p>
+
+<h2>1 · The same headers, parsed instead of string-compared</h2>
+<p>Lesson 51's Go handlers read <code>ETag</code>/<code>If-None-Match</code>/<code>If-Match</code> as plain strings via <code>r.Header.Get(...)</code> and compared them with <code>==</code>. ASP.NET Core offers a typed alternative: <dfn data-en="an extension method on HttpRequest (and the matching one on HttpResponse) that returns a strongly-typed view over the raw header dictionary -- RequestHeaders for the request side, ResponseHeaders for the response side -- so headers like If-Match parse into real objects instead of raw strings the caller has to split and compare by hand" data-vn="GetTypedHeaders() (giữ nguyên) — extension method của HttpRequest (và HttpResponse) trả về view đã parse sẵn của header dictionary -- RequestHeaders cho phía request, ResponseHeaders cho phía response -- nên header như If-Match ra thẳng object thật, không phải string thô phải tự tách tự so sánh">GetTypedHeaders()</dfn>, which parses the raw header text into real objects:</p>
+<pre><code><span class="kw">var</span> requestHeaders = HttpContext.Request.GetTypedHeaders();
+IList&lt;EntityTagHeaderValue&gt; ifNoneMatch = requestHeaders.IfNoneMatch;
+IList&lt;EntityTagHeaderValue&gt; ifMatch = requestHeaders.IfMatch;
+
+<span class="kw">var</span> responseHeaders = HttpContext.Response.GetTypedHeaders();
+responseHeaders.ETag = <span class="kw">new</span> EntityTagHeaderValue(<span class="st">"\"a1b2c3d4\""</span>);</code></pre>
+<p><dfn data-en="a class (Microsoft.AspNetCore.Http.Headers.RequestHeaders) returned by HttpRequest.GetTypedHeaders(), exposing the request's conditional headers as properties -- IfMatch and IfNoneMatch are each an IList of EntityTagHeaderValue, since a client is allowed to send more than one candidate ETag separated by commas" data-vn="RequestHeaders (giữ nguyên) — class (Microsoft.AspNetCore.Http.Headers.RequestHeaders) trả về từ HttpRequest.GetTypedHeaders(), expose header điều kiện của request qua property -- IfMatch và IfNoneMatch đều là IList của EntityTagHeaderValue, vì client được phép gửi nhiều ETag ứng viên cách nhau bằng dấu phẩy">RequestHeaders</dfn>'s <code>IfMatch</code> and <code>IfNoneMatch</code> are each an <code>IList&lt;EntityTagHeaderValue&gt;</code>, not a single value — the spec allows a client to send several candidate ETags separated by commas, asking "does the current one match any of these?" On the response side, <dfn data-en="a class (Microsoft.AspNetCore.Http.Headers.ResponseHeaders) returned by HttpResponse.GetTypedHeaders(), exposing an ETag property typed as a single EntityTagHeaderValue -- setting it writes the correctly quoted, correctly escaped ETag response header instead of a hand-built string" data-vn="ResponseHeaders (giữ nguyên) — class (Microsoft.AspNetCore.Http.Headers.ResponseHeaders) trả về từ HttpResponse.GetTypedHeaders(), expose property ETag kiểu EntityTagHeaderValue -- set vào là ghi ra header ETag đúng format có quote, không cần tự dựng string">ResponseHeaders</dfn>'s <code>ETag</code> property is a single value, since a response only ever has one current fingerprint.</p>
+
+<h2>2 · EntityTagHeaderValue: a real type instead of a quoted string</h2>
+<p>Lesson 51's Go <code>etag()</code> function returned a plain string with the quotes baked in by hand (<code>fmt.Sprintf(`"%x"`, sum)</code>) — easy to get wrong (forgetting a quote, double-quoting, not handling a weak-validator prefix). ASP.NET Core's <dfn data-en="a class (Microsoft.Net.Http.Headers.EntityTagHeaderValue) representing one parsed ETag value -- its Tag property holds the quoted tag text, its IsWeak property reports whether the value carries the W/ weak-validator prefix, and its Compare method implements RFC 7232's matching rules (strong comparison requires an exact match and neither side marked weak; weak comparison ignores the W/ prefix and only requires the tag text itself to match)" data-vn="EntityTagHeaderValue (giữ nguyên) — class (Microsoft.Net.Http.Headers.EntityTagHeaderValue) đại diện 1 giá trị ETag đã parse -- property Tag giữ phần tag có quote, property IsWeak báo có tiền tố W/ (weak validator) hay không, method Compare áp theo đúng luật so khớp của RFC 7232 (strong comparison cần khớp chính xác và cả 2 bên không đánh dấu weak; weak comparison bỏ qua tiền tố W/, chỉ cần tag khớp)">EntityTagHeaderValue</dfn> class owns that formatting instead:</p>
+<pre><code><span class="kw">var</span> tag = <span class="kw">new</span> EntityTagHeaderValue(<span class="st">"\"a1b2c3d4\""</span>); <span class="cm">// quotes are part of the tag text</span>
+tag.IsWeak;   <span class="cm">// false -- no "W/" prefix</span>
+tag.Tag;      <span class="cm">// the quoted text itself</span>
+
+<span class="cm">// Compare(other, useStrongComparison) implements RFC 7232's two matching
+// modes -- strong demands an exact match with neither side weak; weak
+// comparison ignores the W/ prefix, only the tag text must agree.</span>
+<span class="kw">bool</span> matches = tag.Compare(otherTag, useStrongComparison: <span class="kw">true</span>);</code></pre>
+<p>Lesson 51 didn't need the strong-vs-weak distinction because the Go example never generated weak ETags. It is worth naming once here since <code>Compare</code> is the method that actually enforces it: a <dfn data-en="an ETag prefixed with W/, signaling the value is a weaker guarantee than a normal (strong) ETag -- two weak ETags can be treated as equivalent even if the underlying bytes differ slightly, as long as the resource is semantically the same, which is why RFC 7232 defines a separate weak-comparison mode that a strong comparison must not use" data-vn="weak ETag (giữ nguyên) — ETag có tiền tố W/, báo hiệu đây là guarantee yếu hơn ETag thường (strong) -- 2 weak ETag có thể coi là tương đương dù byte gốc khác chút ít, miễn resource về mặt ý nghĩa là giống nhau, nên RFC 7232 định nghĩa riêng 1 kiểu so khớp weak mà strong comparison không được dùng">weak ETag</dfn> (one prefixed <code>W/</code>) signals "semantically equivalent, not necessarily byte-identical" — a strong comparison must reject two weak ETags outright regardless of their tag text, which is exactly what <code>Compare</code>'s <code>useStrongComparison</code> flag exists to enforce.</p>
+
+<h2>3 · The same two handler shapes, now with typed headers</h2>
+<p>Lesson 51's two handlers port directly — same logic, same status codes, same "check before touching the DB" order, just reading parsed objects instead of raw header strings:</p>
+<pre><code><span class="kw">app</span>.MapGet(<span class="st">"/orders/{id:int}"</span>, (<span class="dt">int</span> id, HttpContext ctx) =&gt;
+{
+    <span class="kw">var</span> order = LoadOrder(id);
+    <span class="kw">var</span> tag = <span class="kw">new</span> EntityTagHeaderValue(<span class="st">$"\"{ComputeEtag(order)}\""</span>);
+    ctx.Response.GetTypedHeaders().ETag = tag;
+
+    <span class="kw">var</span> ifNoneMatch = ctx.Request.GetTypedHeaders().IfNoneMatch;
+    <span class="kw">if</span> (ifNoneMatch.Any(candidate =&gt; candidate.Compare(tag, useStrongComparison: <span class="kw">true</span>)))
+        <span class="kw">return</span> Results.StatusCode(StatusCodes.Status304NotModified); <span class="cm">// 304, no body</span>
+
+    <span class="kw">return</span> Results.Ok(order);
+});
+
+<span class="kw">app</span>.MapPatch(<span class="st">"/orders/{id:int}"</span>, (<span class="dt">int</span> id, UpdateOrder body, HttpContext ctx) =&gt;
+{
+    <span class="kw">var</span> current = LoadOrder(id);
+    <span class="kw">var</span> currentTag = <span class="kw">new</span> EntityTagHeaderValue(<span class="st">$"\"{ComputeEtag(current)}\""</span>);
+
+    <span class="kw">var</span> ifMatch = ctx.Request.GetTypedHeaders().IfMatch;
+    <span class="kw">if</span> (ifMatch.Count &gt; <span class="kw">0</span> && !ifMatch.Any(candidate =&gt; candidate.Compare(currentTag, useStrongComparison: <span class="kw">true</span>)))
+        <span class="kw">return</span> Results.StatusCode(StatusCodes.Status412PreconditionFailed); <span class="cm">// 412, reject before writing</span>
+
+    <span class="cm">// ... persist the change, same shape as Lesson 51's patchOrderHandler</span>
+    <span class="kw">return</span> Results.Ok(current);
+});</code></pre>
+<p>Nothing about the decision logic changed from Lesson 51 — still 304 for a matching read, still 412 for a stale write, still checked before any database call runs. The only difference is that <code>ifNoneMatch</code>/<code>ifMatch</code> arrive pre-parsed as a list of <code>EntityTagHeaderValue</code>, so the comparison is <code>.Compare(...)</code> against a real object instead of a raw string <code>==</code>.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 51: Go</th><th>Lesson 126: ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>Reading the header</th><td><code>r.Header.Get("If-Match")</code> — a raw string</td><td><code>HttpContext.Request.GetTypedHeaders().IfMatch</code> — an <code>IList&lt;EntityTagHeaderValue&gt;</code></td></tr>
+<tr><th>Writing the header</th><td><code>w.Header().Set("ETag", tag)</code> — a hand-built string</td><td><code>HttpContext.Response.GetTypedHeaders().ETag = tag</code> — an <code>EntityTagHeaderValue</code></td></tr>
+<tr><th>Comparing two tags</th><td><code>want == etag(current)</code> string equality</td><td><code>tag.Compare(other, useStrongComparison: true)</code>, RFC 7232 rules</td></tr>
+<tr><th>Multiple candidate ETags</th><td>not handled — one string, one comparison</td><td>native — <code>IfNoneMatch</code>/<code>IfMatch</code> are already lists</td></tr>
+<tr><th>Weak vs strong</th><td>not distinguished</td><td><code>IsWeak</code> property, enforced by <code>Compare</code>'s flag</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>GetTypedHeaders()</code>, <code>RequestHeaders.IfMatch</code>/<code>IfNoneMatch</code>, <code>ResponseHeaders.ETag</code>, and <code>EntityTagHeaderValue</code> as the C# mechanism for Lesson 51's conditional-request headers. It does not cover ASP.NET Core's separate static-file conditional-request handling (the built-in <code>StaticFileMiddleware</code> and MVC's output-caching features already compute and check ETags automatically for served files) or <code>ActionResult</code> helpers some controller-based APIs build on top of these same typed headers — both real, both out of scope for a first pass at the raw mechanism.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="GetTypedHeaders() is an extension method on HttpRequest and HttpResponse that returns a strongly-typed view over the raw header dictionary, so conditional headers like If-Match parse into real objects (EntityTagHeaderValue) instead of raw strings the handler has to split and compare by hand.">
+    <p class="stem">What does HttpContext.Request.GetTypedHeaders() actually return?</p>
+    <button class="opt" data-ok>a strongly-typed view over the raw header text itself</button>
+    <button class="opt">a brand new outbound HTTP request sent to servers</button>
+    <button class="opt">a cached response body saved from an earlier request</button>
+    <button class="opt">a connection string freshly pulled from app configuration now</button>
+  </div>
+  <div class="q" data-why="RequestHeaders.IfMatch and IfNoneMatch are each typed as an IList of EntityTagHeaderValue, not a single value, because the HTTP spec allows a client to send several candidate ETags in one header, separated by commas.">
+    <p class="stem">Why are RequestHeaders.IfMatch and IfNoneMatch typed as a list?</p>
+    <button class="opt" data-ok>a client may send several candidate ETags at once</button>
+    <button class="opt">ASP.NET Core always requires at least two headers total</button>
+    <button class="opt">every list in C# must contain precisely one entry</button>
+    <button class="opt">lists serialize to JSON noticeably faster than single values</button>
+  </div>
+  <div class="q" data-why="EntityTagHeaderValue.Compare(other, useStrongComparison) implements RFC 7232's two matching modes -- strong comparison demands an exact match with neither side marked weak, while weak comparison ignores the W/ prefix and only requires the tag text to agree.">
+    <p class="stem">What does EntityTagHeaderValue.Compare's useStrongComparison flag control?</p>
+    <button class="opt" data-ok>whether a weak-prefixed tag can still count as matching</button>
+    <button class="opt">whether the comparison itself runs synchronously or asynchronously now</button>
+    <button class="opt">how many bytes a single generated tag string becomes</button>
+    <button class="opt">whether the response body gets gzip compression applied, period</button>
+  </div>
+  <div class="q" data-why="The decision logic is identical to Lesson 51's Go handlers -- still 304 for a read whose If-None-Match already matches, still 412 for a write whose If-Match doesn't match, checked before any database call runs. Only the header access changed, from raw strings to typed objects.">
+    <p class="stem">What actually changed between Lesson 51's Go handlers and this lesson's C# port?</p>
+    <button class="opt" data-ok>only how the headers get read and written now</button>
+    <button class="opt">the status codes returned for a match now differ</button>
+    <button class="opt">conditional writes no longer get checked before persisting changes</button>
+    <button class="opt">ETags stopped being compared for equality at all ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.http.headers.requestheaders">Microsoft Learn: RequestHeaders Class</a> and <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.http.headers.responseheaders">ResponseHeaders Class</a> confirm the <code>IfMatch</code>/<code>IfNoneMatch</code> (each an <code>IList&lt;EntityTagHeaderValue&gt;</code>) and <code>ETag</code> (a single <code>EntityTagHeaderValue</code>) properties this lesson uses. <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.net.http.headers.entitytagheadervalue">Microsoft Learn: EntityTagHeaderValue Class</a> confirms the <code>Tag</code>/<code>IsWeak</code> properties and the <code>Compare(EntityTagHeaderValue, bool)</code> method's explicit citation of RFC 7232 §2.3.2 for its matching rules. Lesson 51's own MDN conditional-requests citation and RFC 9110 §13 still cover the HTTP-level semantics in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 51's ETags and conditional requests. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "IfNoneMatch là list, vậy server nên so khớp với tag `*` (any) như thế nào, và khi nào client thực sự gửi nhiều ETag trong 1 header?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

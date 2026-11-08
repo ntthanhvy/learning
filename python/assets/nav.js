@@ -210,6 +210,8 @@
       file: "lessons/0100-timeit-benchmarking-small-code.html" },
     { n: 101, date: "2026-11-07", title: "importlib: imports as data, not syntax",
       file: "lessons/0101-importlib-dynamic-imports.html" },
+    { n: 102, date: "2026-11-08", title: "array: typed sequences without a list's per-item overhead",
+      file: "lessons/0102-array-typed-sequences.html" },
   ];
 
   const REFS = [

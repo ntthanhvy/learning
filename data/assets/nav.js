@@ -250,6 +250,8 @@
       file: "lessons/0120-np-lexsort.html" },
     { n: 121, date: "2026-11-07", title: "np.partition() / np.argpartition(): the fast \"top N\" primitive under nlargest()",
       file: "lessons/0121-np-partition-argpartition.html" },
+    { n: 122, date: "2026-11-08", title: "np.isin(): the array primitive under Series.isin(), and two traps it doesn't share",
+      file: "lessons/0122-np-isin.html" },
   ];
 
   const REFS = [

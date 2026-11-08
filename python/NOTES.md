@@ -12509,4 +12509,124 @@ fail *gracefully* so the learner sees which task failed.
   --lesson 0101-importlib-dynamic-imports.html --detail
   '{"by":"headless"}' was run from the repo root at the end of this round
   and succeeded.
+- 2026-11-08 generation (Lesson 102, headless run): per Day 101's own
+  cadence note, Day 102 is fresh day 3 of the current three-fresh-then-
+  review cycle (Day 99 closed the prior one; Day 103 should be the next
+  review, covering Days 100-102) — idempotency check first confirmed no
+  `lessons/0102-*.html` on disk, no `n: 102` entry in `nav.js`, and no
+  2026-11-08 entry already in this file, before writing anything. Read
+  `MISSION.md` (no-pandas/no-NumPy exclusion re-confirmed before writing a
+  line), `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, the tail of this file
+  through Day 101's own closing note, `assets/nav.js`'s tail, the sole
+  file in `learning-records/`, and Lessons 100-101 plus their practice
+  files as structural templates (Day 99 was a review-day shape,
+  deliberately not templated off). A fresh orchestrator query of
+  `course_progress` (last 40 rows, all courses) found no new
+  `lesson_completed`/`quiz`/`kata` signal since 2026-10-15 — same fallback
+  this file's own convention has used in recent rounds, so a routine
+  fresh-topic pick followed the course's own settled cadence instead.
+  Re-ran the fresh-gap grep across every lesson title/body, every practice
+  file, `glossary.html`, and `RESOURCES.md` rather than trusting Day 101's
+  carried-forward list blindly: `array`, `types.SimpleNamespace`,
+  `locale`, and `socket` were all still genuinely zero-hit as dedicated
+  topics — every existing hit on those words was a passing mention inside
+  another lesson's own "Why today" gap-list callout, not actual teaching.
+  Picked `array` over the remaining candidates: it is squarely
+  language/stdlib, needs nothing from the still-untaught FastAPI track,
+  and gives an honest, falsifiable contrast to the homogeneous numeric
+  data NumPy's `ndarray` generalizes much further — stated as a single
+  boundary-callout line, never a worked pandas/NumPy example, keeping the
+  hard no-pandas rule intact. Probed every behavioral claim live in a
+  scratch dir (`.scratch-python-102/`, created inside the repo per this
+  file's established convention since `/tmp` scratch paths are unavailable
+  in this sandbox, deleted after; `uv run python3 probe.py`) rather than
+  trusting memory: confirmed `array.array('i', [1, 2, 3])` round-trips
+  through `list()` unchanged with `typecode == 'i'` and `itemsize == 4`;
+  confirmed appending a `float` (`3.5`) to an int-typed array raises
+  `TypeError` ("'float' object cannot be interpreted as an integer"),
+  while a plain `list` would have accepted it silently; confirmed, for
+  100,000 non-cached ints (built from `range(1000, 1000 + n)` specifically
+  to avoid Python's small-int cache skewing the comparison), that a `list`
+  totals roughly 4.4x the memory of an equivalent `array.array('l', ...)`
+  once each separate `int` object's own `sys.getsizeof()` is added to the
+  list's own size — 3,600,056 bytes versus 816,640 bytes — settling the
+  "why bother" question with a measured number rather than an assumed one;
+  confirmed `tobytes()`/`frombytes()` round-trip a packed array's raw
+  bytes exactly; confirmed the itemsize table for `'b'`, `'i'`, `'l'`,
+  `'f'`, `'d'` matches the docs' guaranteed-minimum-width claims on this
+  sandbox's Python 3.12.3. One correction caught mid-draft: an initial
+  closing-note line claimed the `'u'` typecode had been removed from
+  current Python, inferred from a misread of `array.typecodes`'
+  `'bBuhHiIlLqQfd'` string; rereading it directly showed `'u'` is still
+  present (confirmed live, `array.array('u', 'abc')` still works with no
+  warning raised on this Python version), so the line was corrected to the
+  accurate, weaker claim the docs actually support — deprecated since
+  Python 3.3, not removed. A second correction: the closing note first
+  credited Day 3 with teaching `collections.deque`; grepping the glossary
+  showed `deque` actually lives under Day 53 (`collections.deque &
+  namedtuple`), so the callback was fixed to cite Day 53 instead of
+  guessing from memory. Checked the glossary for term collisions before
+  writing — grepped `array module`, `typecode`, `itemsize`, `tobytes`, and
+  `frombytes` case-insensitively across the full `glossary.html`, zero
+  existing rows. **New jargon: 1 inline `<dfn>`** (array module, defined
+  once in the byline) **folded into 3 glossary rows** (`array` module
+  itself, `typecode`/`itemsize` combined, and `tobytes()`/`frombytes()`
+  combined), added as a new `<h2 id="day102">` section directly after Day
+  101's. Verification performed mechanically, from dedicated scripts in
+  `.scratch-python-102/` (deleted after): (1) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new
+  lesson — balanced (div 6/6, p 16/16, code 72/72, button 9/9, script
+  3/3, dfn 1/1, pre 4/4, h2 6/6, h1 1/1, em 0/0, strong 3/3, a 2/2); (2) a
+  raw-unescaped-`&` regex scan on the new lesson — zero hits; (3) a
+  per-question quiz option word-count check via regex-strip-tags
+  extraction — first draft mismatched on all three questions (12/11/11,
+  13/11/9, 10/12/13), iterated option-by-option across several passes
+  until all three landed on equal per-question counts: 12/12/12,
+  13/13/13, 13/13/13; (4) an `html.parser.HTMLParser` full-document parse
+  of the new lesson and of `glossary.html` — no parse errors on either;
+  (5) a table/tr/th/td/h2/p/div balance check on `glossary.html` after its
+  new section, plus a duplicate-`id="dayNN"` scan — balanced (table
+  86/86, tr 377/377, th 258/258, td 873/873, h2 86/86) with zero
+  duplicates among 86 ids, `day102` present exactly once; a
+  case-insensitive duplicate-term scan across the glossary's term column
+  reproduced the one pre-existing collision already on record
+  (`dependency`), confirmed none of today's three new terms collide with
+  it or any other existing row; (6) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all three clean; (7) a
+  duplicate `n:` scan across `nav.js`'s `LESSONS` array — 102 entries,
+  zero duplicates, max `n` is 102; (8) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 8 hits
+  total, all confirmed by direct line lookup to sit inside the required
+  "Why today" scope mention and the required "Where pandas/NumPy go from
+  here" boundary callout (naming NumPy's `ndarray` as the N-dimensional,
+  vectorized generalization of the same packed-storage idea, not
+  demonstrated), and zero hits in the practice file — no worked
+  pandas/NumPy example anywhere. The shipped (unsolved)
+  `practice/102_array_typed_sequences.py` was executed directly from its
+  real `practice/` location and printed exactly 4 ✗ with no raw traceback.
+  A solved copy built in `.scratch-python-102/` (copied from the shipped
+  file, then each TODO body filled in directly — never editing the
+  shipped file itself, deleted after) printed all 4 ✓ and "All green" on
+  two consecutive runs; the shipped file was re-run afterward and
+  reproduced the identical all-✗ result, confirming no leakage back into
+  the baseline. Added one new `RESOURCES.md` line for `array`, placed
+  directly after Day 101's `importlib` line and before the PEP 8 line,
+  following the file's chronological-by-day ordering. Registered Lesson
+  102 in `nav.js` with today's date (2026-11-08) right after the `n: 101`
+  entry. `python/learning-records/` was not touched this round — a fresh
+  orchestrator query of `course_progress` (last 40 rows, all courses)
+  before this round started found no new `lesson_completed`/`quiz`/`kata`
+  signal since 2026-10-15, so a routine fresh-topic pick following the
+  course's own settled cadence was the right call, same fallback this
+  file's own convention has used in recent rounds. Cadence note for the
+  next round: Day 102 closes this fresh-topic cycle — Day 103 should be
+  the nineteenth review/retrieval day, covering Days 100-102, following
+  Day 99's own review-day shape. Standing fresh-gap candidates still open
+  going into whichever day resumes fresh topics after that:
+  `types.SimpleNamespace`, `locale`, and `socket` — `array` should be
+  dropped from this list going forward, now fully taught. `bin/record-
+  progress python lesson_generated --day 102 --lesson
+  0102-array-typed-sequences.html --detail '{"by":"headless"}'` was run
+  from the repo root at the end of this round and succeeded.
+  
 

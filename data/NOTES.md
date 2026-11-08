@@ -11591,3 +11591,109 @@
   '{"by":"headless"}'` was run directly from the repo root and returned
   `recorded: data/lesson_generated day=121
   lesson=0121-np-partition-argpartition.html`.
+- 2026-11-08 (headless 06:00 run): zero prior context. Idempotency check
+  first — confirmed no `lessons/0122-*.html` on disk, no `n: 122` entry in
+  `nav.js`, and no `2026-11-08` journal entry already present before writing
+  anything (highest prior lesson was 121, dated 2026-11-07). Read
+  `MISSION.md` (unmodified), `RESOURCES.md` (unmodified), this file's own
+  conventions block plus the tail, `nav.js`'s tail for registration format,
+  and Lessons 120-121's lesson/practice files as structural templates.
+  `learning-records/` still has only the single 2026-07 baseline; the
+  orchestrator's own fresh DB query (last 40 rows) found no
+  `lesson_completed`/quiz/kata signal for any course since 2026-10-15 — no
+  weak-spot to chase, continued steady sequential pacing; direct `psql`
+  reads were not re-attempted this round since the orchestrator had already
+  queried fresh. Lesson 121 closed with no standing candidate pre-committed
+  (its own "fresh scan each round" convention), so this round did its own
+  gap-scan: grepped every lesson, every practice file, and the glossary
+  (case-insensitive) for a long list of untaught NumPy candidates
+  (`np.isin`, `np.in1d`, `np.nan_to_num`, `np.take`, `np.roll`, `np.ptp`,
+  `np.nonzero`/`flatnonzero`, `np.corrcoef`, `np.vectorize`, `np.trace`,
+  `np.diagonal`, `np.sign`) — all came up genuinely untaught, but
+  `np.isin()` was the clear pick: it is the raw-array primitive underneath
+  Lesson 29's `Series.isin()`, the exact "name the NumPy function underneath
+  an already-taught idiom" lineage this course has run since Lessons 93,
+  100, 102, 109-112, 114, and 117-121, and a first probe immediately turned
+  up two sharp, confirmed divergences from its pandas counterpart — a
+  stronger single-lesson hook than the other candidates offered on a first
+  look (none written up as standing candidates; this course's "fresh scan
+  each round" convention treats every prior round's non-pick as having no
+  special status). Confirmed pandas 3.1.1 and numpy 2.5.4, unchanged from
+  Lesson 121's own bump. No `/tmp` access in this sandbox, consistent with
+  every prior round's note — every claim below was probed directly first
+  via temporary scripts in `.scratch-data-122/` at the repo root, deleted
+  after use, never tracked by git. Confirmed directly: `np.isin(arr,
+  candidates)` is element-for-element identical to `Series.isin(candidates)`
+  on the happy path, on both this course's customer-column fixture and a
+  rebuild of Lesson 29's `isin()`-based anti-join trick on raw arrays.
+  Confirmed directly, divergence 1: `np.isin(arr, "An")` with a bare string
+  does NOT raise — it is accepted as one scalar candidate and matched
+  exactly (no character-by-character iteration either) — while current
+  `Series.isin("An")` raises `TypeError: only list-like objects are allowed`
+  on the identical input, the real guard Lesson 29 itself confirmed. Fetched
+  the official NumPy API reference page for `numpy.isin()` via WebFetch
+  specifically to check this: it does not address the bare-string case at
+  all, only a separate note about *sets* being converted to a one-element
+  object array. Confirmed directly, divergence 2 (sharper): a NaN in the
+  input array does NOT match a NaN candidate for `np.isin()` — plain float
+  equality under the hood, `NaN != NaN` by IEEE rules, so the row stays
+  `False` — while `Series.isin([np.nan])` DOES treat NaN as matching NaN,
+  confirmed across both a single-NaN and a repeated-NaN probe, so the exact
+  same row comes back `True` from one function and `False` from the other
+  on identical input, no exception or warning either way. Fetched the
+  official NumPy API reference page for `numpy.isin()` via WebFetch
+  specifically to check NaN handling: confirmed it says nothing about NaN at
+  all, continuing the same undocumented-gap pattern Lessons 118/119
+  established. Confirmed directly, two things that do carry over cleanly:
+  `invert=True` reproduces `~np.isin(...)` exactly, and `np.isin()` is the
+  current, documented replacement for the older `np.in1d()`. Added exactly
+  one new glossary row, "np.isin()", directly after Lesson 121's
+  "np.partition() / np.argpartition()" entry — confirmed via a
+  case-insensitive scan of every first-column term that no prior row
+  already covered this name. Verification performed mechanically via
+  scratch scripts in `.scratch-data-122/` (deleted after, never tracked by
+  git): (1) a quiz-word-count script confirmed exactly 11/11/11, 13/13/13,
+  and 12/12/12 option words across the three questions after a few rounds
+  of wording tweaks (the first draft came out 13/9/11, 10/12/10, 11/10/12
+  before converging), one `data-ok` per question throughout; (2) an HTML
+  tag-balance check came back fully balanced on every pass once corrected
+  for the `<pre>`-vs-`<p>` regex-boundary false positive in the check script
+  itself (html 1/1, head 1/1, body 1/1, div 6/6, p 16/18 — matching Lessons
+  120/121's own precedent of one unopened `<p>` inside each of two
+  `.callout` divs, pre 5/5, code 65/65, h1 1/1, h2 8/8, strong 5/5, em 1/1,
+  button 9/9, script 3/3, dfn 1/1, span 25/25, a 2/2, title 1/1); (3) a
+  raw-unescaped-`&` regex scan found exactly the two expected `&` characters
+  inside the lesson's own `cd ~/learning/data && uv run ...` shell command,
+  zero elsewhere; (4) exactly 1 `<dfn>`-carrying tag, with both
+  `data-en`/`data-vn`, matching the 1 new glossary row added. A separate
+  tr/td-balance check on `glossary.html` after its one-row addition —
+  balanced (tr 195/195, td 582/582), plus a duplicate-term scan across all
+  194 first-column entries — zero duplicates, confirmed the new row's exact
+  term string, "np.isin()", appears exactly once as a first-column term.
+  `node --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still
+  parse as valid JavaScript, with exactly one `n: 122` entry and one
+  `0122-np-isin` file reference in `nav.js`. The shipped (unsolved)
+  `practice/122_np_isin.py` was run directly from its real `practice/`
+  location (via `uv run --with pandas python3`) and printed exactly 3 ✗ with
+  no raw traceback. Built a solved copy in `.scratch-data-122/practice/`
+  (deleted after, never tracked by git), filling in all blanks per the
+  helper-function pattern recent lessons established; it printed all 3 ✓ and
+  "All green" on the first run, no further fixes needed. Re-ran the shipped
+  file directly from `practice/` again afterward and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. This round's own fresh scan leaves several
+  standing candidates for tomorrow, none pre-committed per this course's
+  "fresh scan each round" convention: `np.nan_to_num()`, `np.take()`,
+  `np.roll()`, `np.nonzero()`/`np.flatnonzero()`, and `np.corrcoef()`, all
+  confirmed genuinely untaught during this round's own grep. `git status
+  --short` after all edits confirmed only the intended `data/` files were
+  touched (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0122-np-isin.html`, new `data/practice/122_np_isin.py`, and
+  this file) plus any unrelated concurrent changes in other course
+  directories from other runs, not touched by this one. The scratch
+  directory `.scratch-data-122/` was deleted after verification, at the
+  repo root but never tracked by git, matching prior rounds' own precedent
+  for this environment. `bin/record-progress data lesson_generated --day
+  122 --lesson 0122-np-isin.html --detail '{"by":"headless"}'` was run
+  directly from the repo root and returned `recorded: data/lesson_generated
+  day=122 lesson=0122-np-isin.html`.

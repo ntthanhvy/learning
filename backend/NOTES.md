@@ -10501,3 +10501,105 @@
   Core angle; Polly/.NET resilience libraries, still deliberately out of
   scope; and the backfill-missing-Lesson-117-NOTES-entry gap, still not
   independently investigated.
+- 2026-11-08 generation (Lesson 126, headless run): idempotency check first —
+  confirmed no `lessons/0126-*.html` on disk and no `n: 126`/today's date
+  entry in `nav.js` before writing anything (highest prior lesson was 125,
+  dated 2026-11-07), and no 2026-11-08 entry already in this file.
+  Orchestrator-provided context: a fresh query of `course_progress` (last 40
+  rows) showed no `lesson_completed`/quiz/kata signal for any course since
+  backend's own Lesson 102 quiz on 2026-10-15 (all correct) — no weak spot to
+  chase, steady sequential pacing continued; direct `psql` is blocked by this
+  sandbox's static checker, confirmed again this round, no need to re-derive.
+  Read `MISSION.md`, `RESOURCES.md`, this file's tail (Lessons 120-125), all
+  three `learning-records/` files, `nav.js`'s and `glossary.html`'s tails,
+  and Lesson 125 (the most recent C#-port lesson, as structural template) in
+  full before writing anything. Topic choice: Lesson 125's own round had
+  flagged Lesson 51's ETags/conditional requests as a strong, not-yet-checked
+  candidate — "HTTP-native rather than language-native, worth checking for
+  ASP.NET Core first-party ETag middleware specifically." Read Lesson 51 (the
+  Go original) in full first and confirmed via grep that no lesson title or
+  file already covers ETags/If-Match/If-None-Match/304/conditional requests
+  in a C#/ASP.NET Core context (only Lesson 51 itself, Lesson 50, Lesson 96,
+  and Lesson 58 matched the grep, all pre-existing and unrelated to a C#
+  port). Confirmed the first-party angle via four `WebFetch` calls before
+  writing anything: `.../microsoft.aspnetcore.http.headers.requestheaders`
+  confirmed the `RequestHeaders` class's `IfMatch`/`IfNoneMatch` properties,
+  each typed `IList<EntityTagHeaderValue>` (confirmed from the property's own
+  page showing the exact C#/F#/VB signatures); `.../responseheaders`
+  confirmed the companion `ResponseHeaders` class's single-valued `ETag`
+  property; `.../microsoft.net.http.headers.entitytagheadervalue` confirmed
+  the `EntityTagHeaderValue` class's `Tag`/`IsWeak` properties and its
+  `Compare(EntityTagHeaderValue, bool)` method, whose own doc text cites RFC
+  7232 §2.3.2 for its matching rules and explicitly distinguishes `Equals`
+  (plain object equality, not RFC-matching) from `Compare` (the RFC-correct
+  check) — a distinction worth keeping in mind though not surfaced in the
+  lesson itself to stay within scope. All four `learn.microsoft.com` fetches
+  returned cleanly in full, consistent with this run's standing finding that
+  this domain fetches reliably. `dotnet --version` was not attempted this
+  round (consistent with every round since Lesson 103's finding that it hits
+  an interactive-approval gate with no user present); the three C# snippets
+  (the `GetTypedHeaders()` calls on request and response, the
+  `EntityTagHeaderValue` construction and `Compare` usage, and the two
+  minimal-API handlers porting Lesson 51's `getOrderHandler`/
+  `patchOrderHandler`) were checked by hand against all three fetched docs
+  pages' exact property/method signatures and confirmed syntactically
+  consistent — brace count 6/6, paren count 23/23 across the largest block
+  (the two handlers), correct `IList<EntityTagHeaderValue>` typing, lambda
+  syntax in `.Any(candidate => ...)`, no undeclared identifiers — though this
+  falls short of an actual compile, flagged here as such, same caveat as
+  every C#-port round. Five new terms, each checked against the glossary
+  first via case-insensitive grep across the whole file — zero collisions
+  confirmed before writing (Lesson 51's own `ETag`/`If-Match`/`If-None-Match`/
+  `412 Precondition Failed` rows already existed and were deliberately not
+  re-added, since those are the HTTP-level terms Lesson 51 already covers in
+  full — only the C#-specific wrapper types are new this round):
+  `GetTypedHeaders()`, `RequestHeaders`, `ResponseHeaders`,
+  `EntityTagHeaderValue`, `weak ETag`. Added all five rows immediately after
+  Lesson 125's `CustomizeProblemDetails` row, same Term/Tiếng Việt
+  (dev-style)/English column order, confirmed by inspecting the file's
+  actual last row directly rather than assumed. Verification performed via
+  throwaway `node -e` scripts (nothing written to a file): (1) a
+  quiz-word-count check per `<div class="q">` block — first draft landed
+  uneven on three of four questions (Q1 8/10/8/7, Q3 9/8/9/7, Q4 11/10/8/9),
+  fixed through several rewrite-and-recount passes per option, converged to
+  exactly 9/9/9/9 across all four questions, both `.split(/\s+/)` and
+  `.split(" ")` counting methods agreeing exactly, exactly one `data-ok` and
+  four options per question confirmed the same way; (2) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/
+  th/td — clean (div 6/6, p 16/16, code 53/53, button 16/16, script 3/3, dfn
+  5/5, pre 3/3, h2 6/6, h1 1/1, em 0/0, strong 2/2, a 4/4, table 1/1, tr 6/6,
+  th 8/8, td 10/10), all five `dfn` tags confirmed via regex to carry both
+  `data-en=` and `data-vn=`; (3) a brace/paren balance check on all three
+  `<pre><code>` blocks after stripping syntax-highlighting spans and
+  unescaping HTML entities — all balanced (0/0 braces, 3/3 parens; 0/0
+  braces, 3/3 parens; 6/6 braces, 23/23 parens); (4) a raw-unescaped-`&` scan
+  across the lesson — two hits, both inside a `<pre><code>` C# `&&` operator,
+  confirmed as matching Lesson 51's own precedent (grepped Lesson 51's source
+  directly — its own `want != "" && want != etag(current)` line leaves `&&`
+  unescaped the same way), not a new issue; (5) a table/tr/td/p/div/html/
+  head/body/title/script balance check on `glossary.html` after its
+  five-row addition — balanced (tr 402/402, td 1203/1203), plus a
+  duplicate-term scan across all 401 first-column entries — zero duplicates;
+  (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js` — all clean,
+  before and after the `nav.js` edit; (7) a basic HTML well-formedness check
+  (one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags in
+  gloss/quiz/nav order) — clean; (8) a grep for stray markdown-style
+  backticks and `*emphasis*` left outside `<code>`/`<span>` tags — none
+  found. Registered Lesson 126 in `nav.js` (date 2026-11-08, today's actual
+  generation date) right after `n: 125`, confirmed exactly one matching
+  `n: 126` entry and exactly one matching `0126-*.html` file on disk
+  afterward. No new `RESOURCES.md` line added this round — all three fetched
+  pages are `learn.microsoft.com`, the same domain already covered by this
+  file's standing entries' pattern; all three cited inline in the lesson's
+  own "Go deeper" section instead, consistent with every prior C#-port
+  round. No new `learning-records/` file this round — the topic came from a
+  prior round's own flagged candidate list, not a new surprise about the
+  learner. Candidates spotted but not picked this round, still worth
+  checking fresh next time: Lesson 35's upsert/ON CONFLICT (Postgres-native,
+  likely no clean C# BCL/EF-Core-first-party angle, not yet checked in
+  depth); Go's `select`-statement arbitration rules, still deferred many
+  rounds running on fetched-page-truncation grounds; Lesson 49's dead-letter
+  queues, still deferred pending a first-party ASP.NET Core angle; Polly/.NET
+  resilience libraries, still deliberately out of scope per MISSION.md's
+  "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap,
+  still not investigated.

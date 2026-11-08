@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 122 · np.isin(): the array primitive under Series.isin(), and two traps it doesn't share</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 122 · ~20 min · 8 Nov 2026</p>
+<h1>np.isin(): the array primitive under Series.isin(), and two traps it doesn't share</h1>
+<p class="byline">Lesson 121 closed with no standing candidate, so this round did a fresh curriculum/glossary scan. The clearest gap: <code>np.isin()</code>, the raw-array function underneath Lesson 29's <code>Series.isin()</code> — the exact "name the NumPy function underneath an already-taught idiom" lineage this course has run since Lessons 93, 100, 102, 109-112, 114, and 117-121. A first probe found it diverges from <code>Series.isin()</code> in two sharp, confirmed ways: a bare string no longer raises, and NaN no longer matches NaN.</p>
+
+<h2>1 · The gap: isin() has a NumPy layer underneath it, same shape as clip() and argsort()</h2>
+<p>Lesson 29 taught <code>Series.isin(candidates)</code> as the pandas spelling of SQL's <code>WHERE col IN (...)</code>. Underneath it sits <dfn data-en="a NumPy function returning a True/False mask, True wherever an element of the first array appears anywhere in the second array (test_elements) -- the raw-array primitive Series.isin() is built on" data-vn="giữ nguyên 'np.isin()' — trả về mask True/False, True ở vị trí nào mà phần tử của mảng thứ nhất xuất hiện trong mảng thứ hai (test_elements); là lớp mảng thô (raw array) nằm dưới Series.isin()">np.isin(arr, test_elements)</dfn>, the same raw-array layer relationship Lesson 102's <code>np.clip()</code> has to <code>Series.clip()</code> and Lesson 93's <code>np.argmax()</code> has to <code>idxmax()</code>. Confirmed directly (numpy 2.5.4), element-for-element identical to <code>Series.isin()</code> on the happy path:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+customer = np.array([<span class="str">"An"</span>, <span class="str">"Chi"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>])
+candidates = [<span class="str">"An"</span>, <span class="str">"Chi"</span>]
+
+np.isin(customer, candidates)
+<span class="cm"># array([ True,  True, False,  True])</span>
+pd.Series(customer).isin(candidates).to_numpy()
+<span class="cm"># array([ True,  True, False,  True])  -- IDENTICAL</span></code></pre>
+<p>Same Lesson 29 Section 3 anti-join trick works directly on raw arrays too, no Series needed: <code>customers[~np.isin(customers, orders_customers)]</code> finds every customer with no matching order, confirmed directly against this course's fixture. So far, a pure rename with an array in, an array out.</p>
+
+<h2>2 · The first divergence: a bare string does NOT raise</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4, pandas 3.1.1):</strong> Lesson 29 confirmed current pandas <strong>raises</strong> <code>TypeError</code> when <code>Series.isin()</code> gets a bare string instead of a list — a real guard pandas added. <code>np.isin()</code> has no such guard: a bare string is accepted as one scalar candidate, matched exactly, with no character-by-character iteration either (the old iterate-the-characters folklore Lesson 29 already debunked for <code>Series.isin()</code> doesn't apply here, confirmed directly):</p>
+<pre><code>small = np.array([<span class="str">"An"</span>, <span class="str">"Chi"</span>])
+
+np.isin(small, <span class="str">"An"</span>)
+<span class="cm"># array([ True, False])  -- no error; "An" treated as ONE scalar candidate, matched whole</span>
+
+pd.Series(small).isin(<span class="str">"An"</span>)
+<span class="cm"># TypeError: only list-like objects are allowed to be passed to isin(), you passed a `str`</span></code></pre>
+<p>The official NumPy docs page for <code>isin()</code> doesn't spell this out explicitly either (confirmed via WebFetch) — it only notes that a <em>set</em> gets converted to a one-element object array, a related but separate gotcha, not the bare-string case. Two functions sharing almost the same name, opposite behavior on the exact same bad input: one raises loudly, the other silently does something plausible-looking. Always wrap candidates in <code>[...]</code> for both, regardless of which one happens to guard against it today.</p>
+</div>
+
+<h2>3 · The sharper divergence: NaN does NOT match NaN</h2>
+<div class="callout"><strong>Confirmed directly, and confirmed absent from the official docs (fetched via WebFetch — no mention of NaN handling at all):</strong> <code>Series.isin()</code> treats a missing value as matching another missing value for membership purposes — a real, deliberate pandas convenience. <code>np.isin()</code> does not: it falls back to plain float equality, and under IEEE rules <code>NaN != NaN</code>, so no row ever matches a NaN candidate at all:</p>
+<pre><code>xn = np.array([<span class="kw">1.0</span>, np.nan, <span class="kw">3.0</span>, np.nan])
+nan_candidates = [np.nan, <span class="kw">3.0</span>]
+
+np.isin(xn, nan_candidates)
+<span class="cm"># array([False, False,  True, False])  -- only the real 3.0 matched; BOTH NaN rows stayed False</span>
+
+pd.Series(xn).isin(nan_candidates)
+<span class="cm"># array([False,  True,  True,  True])  -- BOTH NaN rows matched True, plus the real 3.0</span></code></pre>
+<p>Confirmed directly across both single- and multi-NaN inputs: this is not a one-off fluke of this particular array — <code>Series.isin([np.nan])</code> alone matches every NaN row in the Series, while <code>np.isin(arr, [np.nan])</code> alone matches nothing, ever. This is this course's familiar "no crash, quietly wrong" shape (Lessons 19-29, 36): swapping one of these functions for the other on data with missing values silently changes which rows count as a match, with no exception and no warning either way.</p>
+</div>
+
+<h2>4 · What stays the same: invert=, any shape, and the np.in1d() rename</h2>
+<p>Confirmed directly, three things that do carry over cleanly: <code>invert=True</code> is the <code>np.isin()</code>-native way to spell <code>~np.isin(...)</code> (same result, one less negation); <code>np.isin()</code> works on any array shape, not just 1-D — a 2-D array gets an element-wise mask of the same shape, since there is no pandas "column" concept to stay inside; and <code>np.isin()</code> is the current, documented replacement for the older <code>np.in1d()</code>, which the official docs now point away from in favor of <code>isin()</code>.</p>
+<pre><code>np.isin(customer, candidates, invert=<span class="kw">True</span>) == ~np.isin(customer, candidates)
+<span class="cm"># array([ True,  True,  True,  True]) -- identical either way, just phrased differently</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.isin()</code>'s basic mask contract and its match to <code>Series.isin()</code> on the happy path, the confirmed bare-string divergence (no <code>TypeError</code> guard), the confirmed NaN-matching divergence (no NaN-to-NaN match, unlike <code>Series.isin()</code>), and the <code>invert=</code> parameter. It does not cover <code>np.isin()</code>'s <code>kind=</code> parameter (an internal algorithm-selection hint between a sort-based and a hash-based implementation — out of scope per <code>MISSION.md</code>'s "deep NumPy / C-level internals" exclusion) nor its behavior on a DataFrame's multi-column <code>isin()</code> form (pandas-only, no <code>np.isin()</code> equivalent).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/122_np_isin.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/122_np_isin.py</code></pre>
+<p>Exercise 1 confirms the Section 1 happy-path match between <code>np.isin()</code> and <code>Series.isin()</code>. Exercise 2 confirms the Section 2 bare-string divergence: <code>np.isin()</code> accepts it, <code>Series.isin()</code> raises <code>TypeError</code>. Exercise 3 confirms the Section 3 NaN divergence: <code>Series.isin()</code> matches NaN-to-NaN, <code>np.isin()</code> never does.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: Series.isin('An') raises TypeError on current pandas (Lesson 29's own confirmed guard). np.isin(arr, 'An') has no such guard -- it accepts the bare string as one scalar candidate and matches it exactly, with no error and no character-by-character iteration either.">
+    <p class="stem">What happens when <code>np.isin(arr, "An")</code> gets a bare string instead of a list?</p>
+    <button class="opt" data-ok>it treats "An" as one candidate string, matches it, raises nothing</button>
+    <button class="opt">it raises a TypeError right away, the identical guard Series.isin() carries</button>
+    <button class="opt">it silently matches each individual character against every single row value</button>
+  </div>
+  <div class="q" data-why="Confirmed directly across repeated probes: Series.isin([np.nan]) matches a NaN row to a NaN candidate (pandas treats missing values as matching for membership). np.isin(arr, [np.nan]) never matches any NaN row -- plain float equality under the hood, and NaN != NaN by IEEE rules, so the comparison is always False.">
+    <p class="stem">Given an array with a NaN value and <code>[np.nan]</code> as the candidates, how do <code>Series.isin()</code> and <code>np.isin()</code> compare?</p>
+    <button class="opt" data-ok>Series.isin() matches that NaN row True; np.isin() never ever matches it at all</button>
+    <button class="opt">both functions agree and match that NaN row True, with no disagreement ever</button>
+    <button class="opt">both functions raise a ValueError right away, since NaN can't be a candidate</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.isin(arr, candidates, invert=True) returns the exact same mask as ~np.isin(arr, candidates) -- just phrased as a parameter instead of a separate negation step, the np.isin()-native spelling of NOT IN.">
+    <p class="stem">What does passing <code>invert=True</code> to <code>np.isin()</code> do?</p>
+    <button class="opt" data-ok>returns the exact same result as negating the mask with ~ afterward</button>
+    <button class="opt">reverses the whole order of the candidates list before matching ever begins</button>
+    <button class="opt">swaps which of the two given input arrays gets treated as candidates</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.isin.html"><code>numpy.isin()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the <code>invert=</code> parameter and the set-conversion gotcha directly; it does not mention NaN handling at all, nor the bare-string case, both confirmed gaps this lesson filled by direct probe against <code>Series.isin()</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.isin()</code> is new today, added right after Lesson 121's <code>np.partition() / np.argpartition()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed per this course's "fresh scan each round" convention — the next session picks after a fresh scan of what's still untaught.<br><br>
+💬 Anything unclear — the bare-string divergence, the NaN-matching divergence, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

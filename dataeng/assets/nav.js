@@ -67,6 +67,7 @@
     { n: 52, date: "2026-11-06", title: "dbt node selection: --select, --exclude & the +/@ graph operators", file: "lessons/0052-dbt-node-selection.html" },
     { n: 53, date: "2026-11-07", title: "dbt selectors.yml: naming a selection expression once", file: "lessons/0053-dbt-selectors-yml.html" },
     { n: 54, date: "2026-11-08", title: "Airflow max_active_runs: the knob a backfill actually needs", file: "lessons/0054-airflow-max-active-runs.html" },
+    { n: 55, date: "2026-11-09", title: "Kafka partition assignment: why Day 34's rebalance paused every consumer", file: "lessons/0055-kafka-partition-assignment-strategy.html" },
   ];
 
   const REFS = [

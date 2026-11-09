@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 123 · np.nan_to_num(): replacing NaN AND infinity in one call, with a default that fillna() doesn't share</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 123 · ~20 min · 9 Nov 2026</p>
+<h1>np.nan_to_num(): replacing NaN AND infinity in one call, with a default that fillna() doesn't share</h1>
+<p class="byline">Lesson 122 closed with several standing candidates from its own fresh scan: <code>np.nan_to_num()</code>, <code>np.take()</code>, <code>np.roll()</code>, <code>np.nonzero()</code>/<code>flatnonzero()</code>, and <code>np.corrcoef()</code>. Today picks <code>np.nan_to_num()</code> — it looks like a plain NumPy cousin of <code>fillna()</code>, but it also silently handles <code>inf</code>/<code>-inf</code>, values <code>fillna()</code> never touches at all, and its default replacement for them is nowhere near zero.</p>
+
+<h2>1 · The gap: fillna() only ever sees NaN — infinity is invisible to it</h2>
+<p>Every missing-value lesson so far (<code>fillna()</code>, <code>ffill()</code>/<code>bfill()</code>, <code>interpolate()</code>) has handled exactly one bad value: NaN. But division and other float math can also produce <code>inf</code> or <code>-inf</code> — a real, non-missing float value that is still unusable in most downstream math (sums, means, and comparisons all break around it). <dfn data-en="a NumPy function that replaces NaN, positive infinity, and negative infinity in a float array with finite, chosen values, all in one call -- the array-level cleanup step for all three 'unusable float' cases at once, not just missing values" data-vn="giữ nguyên 'np.nan_to_num()' — thay NaN, +infinity, và -infinity trong một mảng float bằng các giá trị hữu hạn (finite) do mình chọn, tất cả trong MỘT lần gọi — xử lý luôn cả 3 loại 'giá trị float không dùng được', không chỉ riêng giá trị thiếu">np.nan_to_num(arr)</dfn> replaces all three in one pass. Confirmed directly (numpy 2.5.4, pandas 3.1.1) that <code>Series.fillna()</code> genuinely does nothing to infinity — it is not a missing value to pandas, so there is nothing for <code>fillna()</code> to find:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">1.0</span>, np.nan, np.inf, -np.inf, <span class="kw">5.0</span>])
+
+pd.Series(arr).fillna(<span class="kw">0</span>).to_numpy()
+<span class="cm"># array([  1.,   0.,  inf, -inf,   5.])  -- only the NaN became 0; BOTH infinities are untouched</span></code></pre>
+<p>To clean infinities in pandas at all, Lesson 65's <code>Series.replace()</code> has to be reached for separately, by name, on top of <code>fillna()</code> — <code>np.nan_to_num()</code> does both jobs unprompted, in the same call, whether or not that is what was wanted.</p>
+
+<h2>2 · The trap: the default infinity replacement is not 0 — it's the dtype's max finite value</h2>
+<div class="callout"><strong>Confirmed directly against the <a href="https://numpy.org/doc/stable/reference/generated/numpy.nan_to_num.html">official NumPy docs</a>, which do spell this one out:</strong> <code>np.nan_to_num(arr)</code> defaults NaN to <code>0.0</code>, same instinct as <code>fillna(0)</code> — but <code>+inf</code> becomes the <strong>largest finite number the array's dtype can represent</strong> (<code>~1.7977e+308</code> for float64), and <code>-inf</code> becomes the most negative one. Not zero, not NaN, not a flag value — a huge, "looks like real data" number, documented but very easy to miss:</p>
+<pre><code>np.nan_to_num(arr)
+<span class="cm"># array([ 1.00000000e+000,  0.00000000e+000,  1.79769313e+308,
+#        -1.79769313e+308,  5.00000000e+000])
+# NaN -> 0.0, as expected -- but inf -> 1.7976931348623157e+308 (float64's own max), not 0 or NaN</span>
+
+np.nan_to_num(arr, nan=-<span class="kw">1</span>, posinf=<span class="kw">999</span>, neginf=-<span class="kw">999</span>)
+<span class="cm"># array([   1.,   -1.,  999., -999.,    5.])  -- nan=, posinf=, neginf= override all three independently</span></code></pre>
+<p>Confirmed directly: a single unguarded <code>np.nan_to_num(some_ratio_column)</code> on a column that happens to contain a divide-by-zero <code>inf</code> silently plants a ~1.8e308 value into later sums, means, and plots — no exception, no warning, and a number large enough to make every downstream aggregate meaningless, while looking superficially like "it worked." Lesson 60's str.contains NaN trap and Lesson 88's normalize=True trap share this course's running shape: no crash, quietly wrong. Pass <code>nan=</code>/<code>posinf=</code>/<code>neginf=</code> explicitly whenever infinities are a real possibility in the data, rather than trusting the default.</p>
+</div>
+
+<h2>3 · What else differs: dtype preserved, copy= default, and object arrays are a silent no-op</h2>
+<p>Confirmed directly, three more edges worth knowing. The output dtype matches the input's exactly — a float32 array stays float32, so its own "largest finite value" ceiling is float32's, not float64's. <code>copy=True</code> is the default (a new array back); <code>copy=False</code> mutates and returns the same array object, confirmed via an identity check. And on an <code>object</code>-dtype array (for example one holding a Python <code>None</code> or mixed types rather than a native float array), <code>np.nan_to_num()</code> confirmed directly does <strong>nothing at all</strong> — no error, no replacement, the NaN passes straight through untouched, since the function's whole fast-path assumes a native float array to operate on:</p>
+<pre><code>arr_obj = np.array([<span class="kw">1.0</span>, np.nan], dtype=object)
+np.nan_to_num(arr_obj)
+<span class="cm"># array([1.0, nan], dtype=object)  -- the NaN is STILL there; no error, no warning, silent no-op</span></code></pre>
+<p>A DataFrame column pulled out via <code>.to_numpy()</code> on an <code>object</code> dtype column (common after a mixed-type read) hits this exact no-op — confirm the dtype is a real float array first, or the "cleanup" step quietly cleans nothing.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.nan_to_num()</code>'s three-value replacement contract (<code>nan=</code>, <code>posinf=</code>, <code>neginf=</code>), its confirmed default of the dtype's max/min finite float for infinities (documented, not a gap this time), the confirmed <code>fillna()</code>-never-touches-infinity contrast, and the confirmed object-dtype silent no-op. It does not cover complex-dtype arrays (NaN/inf handled separately per real/imaginary component, a documented but rare case for this course's tabular data) nor <code>np.isnan()</code>/<code>np.isinf()</code> as standalone detection functions, which are out of scope until a lesson needs them directly.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/123_np_nan_to_num.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/123_np_nan_to_num.py</code></pre>
+<p>Exercise 1 confirms the Section 1 gap: <code>fillna(0)</code> replaces NaN but leaves both infinities completely untouched. Exercise 2 confirms the Section 2 trap: the default <code>np.nan_to_num()</code> call sends <code>inf</code> to the dtype's huge max finite value, not to 0, while <code>nan=</code>/<code>posinf=</code>/<code>neginf=</code> override it exactly. Exercise 3 confirms the Section 3 object-dtype no-op: the NaN inside an object-dtype array survives a <code>np.nan_to_num()</code> call completely unchanged.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: Series.fillna(0) only replaces NaN. Infinity is not a missing value to pandas at all, so fillna() leaves both +inf and -inf completely untouched -- no error, just no effect on those two values.">
+    <p class="stem">What does <code>pd.Series([1.0, np.inf, np.nan]).fillna(0)</code> do to the <code>inf</code> value?</p>
+    <button class="opt" data-ok>nothing at all, inf stays inf -- only the NaN becomes 0</button>
+    <button class="opt">it also replaces inf with 0, exactly as it does for NaN</button>
+    <button class="opt">it raises a ValueError right away, since inf can't appear with NaN</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official docs: the default posinf replacement is NOT zero -- it is the largest finite value the array's own dtype can represent (~1.7977e+308 for float64), and the symmetric most-negative value for -inf. A real, documented default, easy to assume is zero by analogy with the NaN default.">
+    <p class="stem">By default, what does <code>np.nan_to_num(arr)</code> replace a <code>+inf</code> value with?</p>
+    <button class="opt" data-ok>the largest finite value that dtype itself can represent</button>
+    <button class="opt">zero, the exact same default value used for NaN</button>
+    <button class="opt">NaN, so a later isna() check still catches it</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: on an object-dtype array, np.nan_to_num() is a silent no-op -- no error, no replacement, the NaN passes straight through. The function's fast path assumes a native float array; object dtype doesn't qualify, and nothing warns that the call did nothing.">
+    <p class="stem">What happens when <code>np.nan_to_num()</code> is called on a NaN inside an <code>object</code>-dtype array?</p>
+    <button class="opt" data-ok>nothing changes, the NaN survives untouched -- no error, no warning</button>
+    <button class="opt">it raises a TypeError right away, fully refusing that dtype entirely</button>
+    <button class="opt">it converts the whole array to float64 first, then replaces it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.nan_to_num.html"><code>numpy.nan_to_num()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the dtype-max default for infinity directly, the <code>nan=</code>/<code>posinf=</code>/<code>neginf=</code> override parameters, and the complex-dtype behavior; it does not call out the object-dtype no-op explicitly, confirmed by direct probe in this lesson instead.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.nan_to_num()</code> is new today, added right after Lesson 122's <code>np.isin()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed per this course's "fresh scan each round" convention — the next session picks after a fresh scan of what's still untaught.<br><br>
+💬 Anything unclear — the infinity-default trap, the object-dtype no-op, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

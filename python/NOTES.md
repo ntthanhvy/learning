@@ -12628,5 +12628,66 @@ fail *gracefully* so the learner sees which task failed.
   progress python lesson_generated --day 102 --lesson
   0102-array-typed-sequences.html --detail '{"by":"headless"}'` was run
   from the repo root at the end of this round and succeeded.
+- 2026-11-09 generation (Lesson 103, review day 19): per Day 102's own
+  cadence note, Day 102 closed the current fresh-topic cycle, so Day 103
+  is the nineteenth review/retrieval day, covering Days 100-102, following
+  Day 99's own review-day shape — idempotency check first confirmed no
+  `lessons/0103-*.html` on disk, no `n: 103` entry in `nav.js`, and no
+  2026-11-09 entry already in this file, before writing anything. Read
+  `MISSION.md` (no-pandas/no-NumPy exclusion re-confirmed before writing a
+  line), `NOTES.md`'s tail through Day 102's own closing note, `nav.js`'s
+  tail for the exact titles of Lessons 100-102, and all three lessons
+  (100, 101, 102) plus their practice files in full to build genuine
+  retrieval questions over already-taught material rather than new
+  content — Day 99 was used as the structural template for review-day
+  shape (three fold-out-answer questions in original teaching order, a
+  "why these three" throughline section, no new jargon, no new primary
+  source). A fresh-gap grep across every lesson title/body, every
+  practice file, `glossary.html`, and `RESOURCES.md` confirmed
+  `types.SimpleNamespace`, `locale`, and `socket` are still genuinely
+  zero-hit, carried forward unchanged from Day 102's own notes — none
+  strong enough to override the settled cadence math, which lands exactly
+  on three fresh lessons since Day 99. No new jargon introduced — every
+  term revisited already has a glossary entry under Day 100, 101, or 102,
+  so `reference/glossary.html` was not touched this round (matching Day
+  99's own precedent of a no-new-terms review day). Verification performed
+  mechanically: (1) a per-question quiz option word-count check — first
+  draft mismatched on two of three questions (12/12/11, 13/12/12),
+  iterated option-by-option until all three landed on equal per-question
+  counts: 11/11/11, 12/12/12, 12/12/12; (2) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new
+  lesson — balanced (div 9/9, p 16/16, code 84/84, button 9/9, script
+  3/3, dfn 0/0, pre 1/1, h2 5/5, h1 1/1, em 1/1, strong 7/7, a 6/6), dfn
+  count of 0 confirming no new terms were introduced; (3) an
+  `html.parser.HTMLParser` full-document parse of the new lesson — no
+  parse errors; (4) a case-insensitive `pandas|numpy|dataframe|pd\.|np\.`
+  grep on the new lesson — 6 hits total, all confirmed by direct line
+  lookup to sit inside the single required "Where pandas/NumPy go from
+  here" boundary callout (recalling Day 102's own ndarray contrast by
+  name only, not re-demonstrated), and zero hits in the practice file; (5)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all three clean; (6) a duplicate `n:` scan across
+  `nav.js`'s `LESSONS` array — 103 entries, zero duplicates. The shipped
+  (unsolved) `practice/103_review_retrieval_day_19.py` was executed
+  directly from its real `practice/` location and printed exactly 3 ✗
+  with no raw traceback. A solved copy built in a scratch directory
+  (`.scratch-python-103/`, created inside the repo, deleted after; copied
+  from the shipped file, then each TODO body filled in directly — never
+  editing the shipped file itself) printed all 3 ✓ and "All green"; the
+  shipped file was re-run afterward from its real location and reproduced
+  the identical all-✗ result, confirming no leakage back into the
+  baseline. No new `RESOURCES.md` line was needed — all three cited
+  sources (`timeit`, `importlib`, `array`) are already listed under Days
+  100-102. Registered Lesson 103 in `nav.js` with today's date
+  (2026-11-09) right after the `n: 102` entry. `python/learning-records/`
+  was not touched this round — still no quiz/kata/lesson_completed signal
+  beyond the stale baseline, so following the settled review-day cadence
+  was the right call. Cadence note for the next round: Day 103 closes
+  this review cycle — Day 104 should resume fresh topics, with
+  `types.SimpleNamespace`, `locale`, and `socket` as the standing
+  fresh-gap candidates to re-check first. `bin/record-progress python
+  lesson_generated --day 103 --lesson 0103-review-retrieval-day-19.html
+  --detail '{"by":"launchd"}'` was run from the repo root at the end of
+  this round and succeeded.
   
 

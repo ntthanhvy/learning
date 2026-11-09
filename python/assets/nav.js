@@ -212,6 +212,8 @@
       file: "lessons/0101-importlib-dynamic-imports.html" },
     { n: 102, date: "2026-11-08", title: "array: typed sequences without a list's per-item overhead",
       file: "lessons/0102-array-typed-sequences.html" },
+    { n: 103, date: "2026-11-09", title: "Review day 19: retrieval across Days 100-102",
+      file: "lessons/0103-review-retrieval-day-19.html" },
   ];
 
   const REFS = [

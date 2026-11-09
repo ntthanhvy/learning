@@ -252,6 +252,8 @@
       file: "lessons/0121-np-partition-argpartition.html" },
     { n: 122, date: "2026-11-08", title: "np.isin(): the array primitive under Series.isin(), and two traps it doesn't share",
       file: "lessons/0122-np-isin.html" },
+    { n: 123, date: "2026-11-09", title: "np.nan_to_num(): replacing NaN AND infinity in one call, with a default that fillna() doesn't share",
+      file: "lessons/0123-np-nan-to-num.html" },
   ];
 
   const REFS = [

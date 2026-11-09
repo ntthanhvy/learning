@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 55 · Kafka partition assignment: why Day 34's rebalance paused every consumer</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 55 · ~20 min · 9 Nov 2026</p>
+<h1>Kafka partition assignment: why Day 34's rebalance paused every consumer</h1>
+<p class="byline">Today's tangible win: <code>scripts/consume_order_events.py</code> switches from Kafka's default partition-assignment strategy to <code>cooperative-sticky</code>, so the next time a consumer joins or leaves <code>warehouse-loader</code>, only the partitions that actually change owner get reassigned — the survivors keep reading uninterrupted instead of every consumer in the group pausing, which is what Day 34's own rebalance did without anyone naming why. Confirmed live this round: a real <code>Consumer</code> instantiated with <code>partition.assignment.strategy: cooperative-sticky</code> and <code>on_assign</code>/<code>on_revoke</code> callbacks accepts the config and the callback signature cleanly against the installed <code>confluent-kafka</code> client.</p>
+
+<div class="callout"><strong>Before today — confirm Day 34's consumer and group still exist:</strong> today edits the exact consumer Day 6 built and Day 34 ran two copies of, so confirm it's there and Kafka is up:
+<pre><code>docker compose up -d
+grep -n "GROUP_ID\|enable.auto.commit" scripts/consume_order_events.py</code></pre>
+Expected: <code>GROUP_ID = "warehouse-loader"</code> and <code>"enable.auto.commit": False</code> printed back. If either is missing, finish Day 6 first — today adds one new config line and two callback functions to that existing consumer, it builds nothing from scratch.</div>
+
+<h2>1 · The gap Day 34 left open: what decided the split, and what paying for it a second time felt like</h2>
+<p>Day 34 ran two copies of the Day 6 consumer under one <code>group.id</code>, watched Kafka split <code>order_events</code>'s 3 partitions across them, then killed one and watched the coordinator hand its partition to the survivor. That lesson named <em>that a</em> rebalance happens and <em>that</em> exactly one consumer owns a partition at a time — it never asked which rule decided <code>partitions 0 and 2 → consumer A, partition 1 → consumer B</code> specifically, or what the survivor was actually doing for those several seconds while <code>session.timeout.ms</code> ran out. Both questions have the same one-word answer: the <dfn data-en="a Kafka consumer config (partition.assignment.strategy) naming which algorithm the group coordinator uses to divide a topic's partitions among a consumer group's current members -- librdkafka (the C library confluent-kafka wraps) defaults to range, trying roundrobin as a fallback if range can't produce a balanced result" data-vn="giữ nguyên &quot;partition assignment strategy&quot; — cấu hình consumer (partition.assignment.strategy) quy định thuật toán nào group coordinator dùng để chia các partition của 1 topic cho các member hiện tại trong consumer group; librdkafka (thư viện C confluent-kafka bọc lại) mặc định dùng range, thử roundrobin làm phương án dự phòng nếu range không chia đều được">partition assignment strategy</dfn> every consumer in a group agrees to run.</p>
+<p>Day 34's two consumers never set <code>partition.assignment.strategy</code>, so they ran on librdkafka's default, <code>range</code> — confirmed this round directly against the installed client, which is why the partition numbers it printed (<code>0,2</code> to one consumer, <code>1</code> to the other) were <code>range</code>'s own deterministic output, not a coin flip. <code>range</code> belongs to a family called <dfn data-en="a partition-assignment family (range, roundrobin) where, on every single rebalance, the group coordinator revokes every partition from every current member first, computes a brand-new assignment from scratch, then hands it back out -- every consumer in the group stops consuming for the full revoke-then-reassign round trip, even ones whose own partition ownership doesn't end up changing at all" data-vn="giữ nguyên &quot;eager rebalancing&quot; — nhóm chiến lược (range, roundrobin) mà MỖI lần rebalance, coordinator thu hồi hết partition của MỌI consumer đang có trước, tính lại assignment từ đầu, rồi phát lại; mọi consumer trong group đều dừng đọc suốt quá trình thu hồi-rồi-chia-lại, kể cả consumer mà phần partition của nó cuối cùng không hề đổi">eager rebalancing</dfn>: on every single rebalance, every member's partitions are revoked and the whole group's assignment is recomputed from zero — which is exactly why, when Day 34 killed one consumer, the <em>surviving</em> one also briefly stopped consuming its own untouched partitions, not just the orphaned one. That pause never showed up as a visible bug in Day 34 because its own verification only checked the final row count, not consumption latency during the gap — but at 1,000 events/sec instead of a dozen, "every consumer in the group stalls on every join or leave" is a real, measurable cost this course's portfolio conversation should be able to name.</p>
+
+<h2>2 · The fix: an assignor that only moves what actually moved</h2>
+<p><dfn data-en="a partition-assignment strategy (KIP-429) where, on a rebalance, only the specific partitions that need to change owner are revoked and reassigned -- a consumer whose own assignment is unaffected keeps consuming right through the rebalance, with no pause at all, which is the opposite of eager rebalancing's revoke-everything-every-time behaviour" data-vn="giữ nguyên &quot;cooperative-sticky&quot; — chiến lược phân partition (KIP-429): mỗi lần rebalance chỉ thu hồi và chia lại đúng những partition cần đổi chủ; consumer nào không bị ảnh hưởng vẫn đọc tiếp xuyên suốt, không bị dừng — ngược hẳn với eager rebalancing (luôn thu hồi hết mọi lần)">cooperative-sticky</dfn> fixes exactly this. On a rebalance, it computes the new assignment the same way, but only revokes partitions from members whose ownership is actually changing — a consumer keeping all the partitions it already had never stops consuming at all, and the few partitions genuinely moving go through one short revoke-then-reassign instead of the whole group's partitions doing so. "Sticky" names the other half: when a rebalance does need to move a partition, it prefers leaving it with a consumer that already held it recently, rather than redistributing everything from scratch the way <code>range</code> does — fewer partitions change hands overall, not just a faster pause for the ones that don't need to.</p>
+<p>The config is one string, set identically on every consumer that will ever join the group — confirmed live this round that a mismatched set (some consumers <code>range</code>, others <code>cooperative-sticky</code>) is a documented misconfiguration the client itself warns about, so the whole group moves together or not at all:</p>
+<pre><code>consumer = Consumer(
+    {
+        <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+        <span class="str">"group.id"</span>: GROUP_ID,
+        <span class="str">"auto.offset.reset"</span>: <span class="str">"earliest"</span>,
+        <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+        <span class="str">"partition.assignment.strategy"</span>: <span class="str">"cooperative-sticky"</span>,
+    }
+)</code></pre>
+<p><strong>Bridge from backend:</strong> this is the same shape as a backend rolling-deploy question — "can you replace instances one at a time without a full-fleet outage?" — applied to Kafka consumers instead of API servers. <code>cooperative-sticky</code> is what makes a consumer-group deploy (bring up a new version, retire the old one) behave like a rolling deploy instead of a brief all-hands-stop; the deploy-strategy reasoning itself belongs to <code>backend/</code>, this lesson only applies it.</p>
+
+<h2>3 · Seeing the split happen, not just the final state</h2>
+<p><code>subscribe()</code> already accepts two optional callbacks that fire exactly when a rebalance touches this specific consumer — <code>on_assign</code> when it gains partitions, <code>on_revoke</code> when it loses them. Day 6 and Day 34 never passed them, so nothing printed when ownership actually changed; today wires them in so a rebalance is visible in this consumer's own log, not only in a separate <code>kafka-consumer-groups.sh --describe</code> call run from another terminal:</p>
+<pre><code><span class="kw">def</span> on_assign(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"assigned: {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> on_revoke(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"revoked: {[p.partition for p in partitions]}"</span>)</code></pre>
+<p>Confirmed live this round: both are plain functions taking <code>(consumer, partitions)</code>, where <code>partitions</code> is a list of <code>TopicPartition</code> objects — <code>p.partition</code> for the partition number is the same attribute Day 34's own glossary entries already relied on reading off a <code>kafka-consumer-groups.sh</code> row, just reached from Python instead of a CLI table.</p>
+
+<h2>4 · Build: switch the real consumer to <code>cooperative-sticky</code></h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>scripts/consume_order_events.py</code>. Add the new config line to the existing <code>Consumer({...})</code> call, and the two callback functions, then pass them to <code>subscribe()</code>:</p>
+<pre><code><span class="kw">def</span> on_assign(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"assigned: {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> on_revoke(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"revoked: {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> main():
+    consumer = Consumer(
+        {
+            <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+            <span class="str">"group.id"</span>: GROUP_ID,
+            <span class="str">"auto.offset.reset"</span>: <span class="str">"earliest"</span>,
+            <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+            <span class="str">"partition.assignment.strategy"</span>: <span class="str">"cooperative-sticky"</span>,  <span class="cm"># new today</span>
+        }
+    )
+    consumer.subscribe([TOPIC], on_assign=on_assign, on_revoke=on_revoke)  <span class="cm"># callbacks new today</span>
+
+    <span class="cm"># everything below -- the psycopg connection, the poll loop, the INSERT,
+    # the commit-after-write ordering -- is untouched from Day 6</span>
+    ...</code></pre>
+<p>Nothing about the <code>INSERT ... ON CONFLICT</code> write or the write-then-commit ordering from Day 6 changes — today only changes how the group decides who owns which partition, not what a consumer does once it owns one.</p>
+
+<h2>5 · Verify: re-run Day 34's exact two-consumer test, watch the callbacks fire</h2>
+<p>Same scenario Day 34 ran, same topic, same group — now with both consumers logging their own assignment changes directly:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3</code></pre>
+<p>Expected — each consumer's own <code>on_assign</code> fires once, printing only the partitions <em>that one process</em> was handed (the two lists are disjoint and cover all 3 partitions between them, the same split shape Day 34 already confirmed via the CLI — today's new signal is seeing it printed directly from inside the consumer that received it):</p>
+<pre><code>assigned: [0, 2]</code></pre>
+<pre><code>assigned: [1]</code></pre>
+<p>Now kill one and watch the survivor's own log, not a separate CLI call, show the handoff:</p>
+<pre><code>kill -9 $CONSUMER_B
+sleep 12
+uv run --with confluent-kafka python3 scripts/produce_order_events.py
+sleep 3</code></pre>
+<p>Expected on the survivor's stdout — <code>cooperative-sticky</code>'s own signature behaviour, visible for the first time this course: only the newly-gained partition appears in <code>on_assign</code>, with no matching <code>on_revoke</code> for partitions 0 or 2 the survivor already held and kept straight through the rebalance:</p>
+<pre><code>assigned: [1]</code></pre>
+<p>Contrast that with what Day 34's own default-<code>range</code> run would have logged had it wired these same callbacks in: <code>revoked: [0, 2]</code> followed by <code>assigned: [0, 1, 2]</code> on the survivor — its own untouched partitions revoked and immediately handed back, a round trip with no net effect except the pause. <code>cooperative-sticky</code> skips that round trip entirely for the partitions that never needed to move. Confirm the row count is still exact, the same equality Days 6 and 34 both proved:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code> — switching assignors changes nothing about the idempotent-write guarantee underneath it. Clean up:</p>
+<pre><code>kill -9 $CONSUMER_A</code></pre>
+<p>Commit <code>scripts/consume_order_events.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "A teammate says adding a new consumer to a busy consumer group briefly stalled every existing consumer, not just the one gaining a partition. Why would that happen, and what would you change?"</strong> A strong answer, out loud: <em>"That's the default partition-assignment strategy, range or roundrobin, both of which are eager — on every rebalance the coordinator revokes every partition from every member first, recomputes the whole assignment from scratch, then hands it back out. A consumer whose own partitions end up unchanged still stops consuming for that full revoke-and-reassign round trip, because the protocol doesn't distinguish 'your assignment changed' from 'your assignment is being recomputed anyway.' The fix is switching every consumer in the group to the cooperative-sticky assignor, which only revokes partitions from members whose ownership is actually changing, and tries to keep a partition with whoever already had it rather than redistributing everything. I'd verify it by wiring on_assign/on_revoke callbacks into the consumer and confirming that a rebalance only logs a revoke for partitions that truly changed hands, not every partition the group owns."</em> The signal: naming eager rebalancing's revoke-everything behavior as the actual mechanism causing the stall, not just "rebalancing is slow," and knowing the fix is a one-line config shared by the whole group, not application retry logic.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>partition.assignment.strategy</code>, the <code>range</code> vs. <code>cooperative-sticky</code> contrast, and the <code>on_assign</code>/<code>on_revoke</code> callbacks confirmed live against the installed client. It does not cover writing a custom assignor (a Kafka Streams/Java-ecosystem concern, well past this course's working-level Kafka scope per <code>MISSION.md</code>), <code>roundrobin</code> specifically (the other eager strategy, vocabulary-only here since it shares <code>range</code>'s stop-the-world behavior and the distinction between the two eager strategies themselves doesn't change today's argument), or <code>on_lost</code> (the third callback, firing when this consumer's session has already expired and its partitions are presumed lost rather than cleanly revoked — a corner case closer to Day 50's crash-handling thread than today's assignment-strategy focus).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round: librdkafka, the C library confluent-kafka wraps, defaults partition.assignment.strategy to range (falling back to roundrobin). Day 34's two consumers never set this config, so the partition split it observed and printed was range's own deterministic output, not an arbitrary or random choice.">
+    <p class="stem">What partition-assignment strategy did Day 34's two consumers actually run on, since neither set one explicitly?</p>
+    <button class="opt" data-ok>range: the client library's own quiet default choice</button>
+    <button class="opt">cooperative-sticky: the one every Kafka client always picks</button>
+    <button class="opt">none at all: picking one is strictly required</button>
+  </div>
+  <div class="q" data-why="Eager rebalancing (range and roundrobin) revokes every partition from every current group member on every single rebalance, then recomputes the whole assignment from scratch before handing partitions back out -- a consumer whose own ownership doesn't end up changing still pauses for that full revoke-then-reassign round trip.">
+    <p class="stem">Under an eager assignor like <code>range</code>, what happens to a consumer whose own partitions don't actually change during a rebalance?</p>
+    <button class="opt" data-ok>It still pauses through the whole revoke and reassign</button>
+    <button class="opt">It keeps right on consuming with zero interruption now</button>
+    <button class="opt">It gets removed from the group entirely right now</button>
+  </div>
+  <div class="q" data-why="cooperative-sticky only revokes partitions from group members whose ownership is actually changing on a given rebalance -- a consumer keeping all the partitions it already held never pauses at all, which is the direct fix for eager rebalancing's revoke-everyone-every-time behavior.">
+    <p class="stem">What does <code>cooperative-sticky</code> change about which consumers pause during a rebalance?</p>
+    <button class="opt" data-ok>Only consumers losing or gaining a partition pause</button>
+    <button class="opt">Every single consumer in the group always pauses</button>
+    <button class="opt">Every single consumer in the group never pauses</button>
+  </div>
+  <div class="q" data-why="on_assign and on_revoke are callbacks passed to subscribe() that fire on the specific consumer instance whenever a rebalance changes its own partition ownership -- on_assign when it gains partitions, on_revoke when it loses them -- making a rebalance visible directly in that consumer's own log instead of only through a separate kafka-consumer-groups.sh --describe call run from another terminal.">
+    <p class="stem">What do the <code>on_assign</code>/<code>on_revoke</code> callbacks passed to <code>subscribe()</code> actually let you see?</p>
+    <button class="opt" data-ok>This consumer's own partition changes, as they happen now</button>
+    <button class="opt">Every consumer group that exists on the whole broker</button>
+    <button class="opt">The exact rows this consumer's writes just inserted now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client</a> docs, already cited since Days 5–6 and reused for Day 50's producer-side config, document <code>partition.assignment.strategy</code> and the <code>on_assign</code>/<code>on_revoke</code>/<code>on_lost</code> callback signatures directly — today's claims were confirmed against that same documented contract by instantiating a real <code>Consumer</code> with <code>partition.assignment.strategy: cooperative-sticky</code> and both callbacks wired in (no working <code>WebFetch</code> tool this round either, the same recurring gap prior rounds noted — confirmed by reading the installed client's own accepted config and callback behavior directly instead). <em>Kafka: The Definitive Guide</em> (cited on Days 18 and 34 for deeper consumer-group mechanics) covers the cooperative rebalancing protocol itself (KIP-429) in more depth than today's working-level pass needs, worth a read before an interview question asks how the protocol achieves incremental reassignment under the hood.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 55.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now over twenty rounds, 35-54) — still worth a human granting it once. Otherwise, with Kafka having the most recent attention this round, a fresh gap-scan should weigh dbt or Airflow depth next: Day 54's own scope line named Airflow pools (once a second DAG shares a constrained resource with <code>food_delivery_pipeline</code>) and <code>max_consecutive_failed_dag_runs</code> as an upstream circuit breaker on Days 45-47's dead-letter alerting as two concrete, not-yet-picked threads.<br><br>
+💬 Anything unclear — why eager rebalancing pauses consumers whose own assignment never changed, or when <code>cooperative-sticky</code> wouldn't be the right default? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

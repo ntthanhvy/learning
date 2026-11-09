@@ -10603,3 +10603,91 @@
   resilience libraries, still deliberately out of scope per MISSION.md's
   "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap,
   still not investigated.
+- 2026-11-09 generation (Lesson 127, headless run): idempotency check first —
+  confirmed no `lessons/0127-*.html` on disk and no `n: 127`/today's date
+  entry in `nav.js` before writing anything (highest prior lesson was 126,
+  dated 2026-11-08), and no 2026-11-09 entry already in this file. Read
+  `MISSION.md`, `RESOURCES.md`, this file's tail (Lessons 125-126), `nav.js`'s
+  and `glossary.html`'s tails, and Lesson 126 (the most recent C#-port lesson,
+  as structural template) in full before writing anything. Topic choice:
+  checked Lesson 126's own flagged candidates first — Lesson 35's upsert/ON
+  CONFLICT was checked via a research pass and confirmed to have no clean
+  first-party EF Core angle (`ExecuteUpdate`/`ExecuteDelete`, added EF Core 7,
+  explicitly supports only update/delete per its own docs' Limitations
+  section, not insert; the change tracker's `Add`/`Update` split still
+  requires the caller to already know which case applies; a long-standing
+  open GitHub feature request for native upsert, #4526, remains unresolved),
+  consistent with Lesson 126's own skepticism about that candidate — not
+  picked. Lesson 49's dead-letter queues also still has no first-party
+  ASP.NET Core angle (no built-in queue primitive in the framework itself) —
+  not picked either. Instead picked a fresh gap found by re-reading Lesson 9
+  (caching): it named `Cache-Control` as HTTP's cheapest cache layer but
+  never gave it the C#-port treatment Lesson 126 gave `ETag` from Lesson 51.
+  Confirmed via grep that no lesson title or file already covers
+  `CacheControlHeaderValue`/`GetTypedHeaders().CacheControl` before writing.
+  Confirmed the first-party angle via a research pass against
+  `learn.microsoft.com`: `ResponseHeaders.CacheControl` (and the matching
+  `RequestHeaders.CacheControl`) returns a `CacheControlHeaderValue`
+  (namespace `Microsoft.Net.Http.Headers`, the same namespace as Lesson 126's
+  `EntityTagHeaderValue`) with `NoStore`/`NoCache`/`Public`/`Private`/
+  `MustRevalidate`/`MaxAge`(`TimeSpan?`)/`SharedMaxAge` properties, and that
+  ASP.NET Core's Response Caching Middleware and newer Output Caching
+  Middleware are a separate, higher-level concern built on top of this same
+  typed-header class — scoped out of this lesson accordingly, same "scope
+  line" convention as Lesson 126. One new term, checked against the glossary
+  first via case-insensitive grep — zero collisions: `CacheControlHeaderValue`
+  (its own properties — `NoStore`, `NoCache`, `Public`, `Private`, `MaxAge`,
+  etc. — were treated as part of that one class's description rather than
+  separate glossary rows, consistent with how Lesson 126 didn't give every
+  `EntityTagHeaderValue` property its own row either). Added the row
+  immediately after Lesson 126's `weak ETag` row, same Term/Tiếng Việt
+  (dev-style)/English column order, confirmed by inspecting the file's actual
+  last row directly rather than assumed. Verification performed via throwaway
+  `node -e` scripts (nothing written to a file): (1) a quiz-word-count check
+  per `<div class="q">` block — first draft landed uneven on all four
+  questions (Q1 8/11/9/10, Q2 8/8/9/9, Q3 10/9/9/10, Q4 8/9/9/10), fixed
+  through several rewrite-and-recount passes per option, converged to exactly
+  9/9/9/9, 9/9/9/9, 10/10/10/10, and 9/9/9/9 across the four questions, exactly
+  one `data-ok` and four options per question confirmed the same way; (2) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a/table/tr/th/td — clean (div 7/7, p 16/16, code 66/66, button
+  16/16, script 3/3, dfn 1/1, pre 3/3, h2 6/6, h1 1/1, em 1/1, strong 3/3, a
+  3/3, table 1/1, tr 6/6, th 8/8, td 10/10), the one `dfn` tag confirmed via
+  regex to carry both `data-en=` and `data-vn=`; (3) a brace/paren balance
+  check on all three `<pre><code>` blocks after stripping syntax-highlighting
+  spans and unescaping HTML entities — all balanced (1/1 braces, 2/2 parens;
+  1/1 braces, 1/1 parens; 1/1 braces, 2/2 parens); (4) a raw-unescaped-`&`
+  scan across the lesson — zero hits; (5) a table/tr/td/p/div balance check on
+  `glossary.html` after its one-row addition — balanced (tr 403/403, td
+  1206/1206), plus a duplicate-term scan across all 402 first-column entries —
+  zero duplicates; (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js`
+  — all clean, before and after the `nav.js` edit; (7) a basic HTML
+  well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`, three
+  script tags in gloss/quiz/nav order) — clean. Registered Lesson 127 in
+  `nav.js` (date 2026-11-09, today's actual generation date) right after
+  `n: 126`, confirmed exactly one matching `n: 127` entry and exactly one
+  matching `0127-*.html` file on disk afterward. No new `RESOURCES.md` line
+  added this round — both fetched pages are `learn.microsoft.com`, the same
+  domain already covered by this file's standing entries' pattern; both cited
+  inline in the lesson's own "Go deeper" section instead, consistent with
+  every prior C#-port round. No new `learning-records/` file this round — the
+  topic came from re-reading an earlier lesson's own named gap, not a new
+  surprise about the learner. `bin/record-progress backend lesson_generated
+  --day 127 --lesson 0127-cache-control-aspnetcore-cachecontrolheadervalue.html
+  --detail '{"by":"launchd"}'` ran directly and succeeded, no approval
+  blocker. Day number used 127, matching this file's own standing
+  day-equals-lesson-number convention (confirmed again by grepping this
+  file's own prior `--day N` values against their paired lesson numbers, e.g.
+  `--day 125` for Lesson 125, `--day 126` for Lesson 126 — no deviation found
+  anywhere in this log). Candidates spotted but not picked this round, still
+  worth checking fresh next time: ASP.NET Core's Response/Output Caching
+  Middleware itself (deliberately scoped out of this lesson as a separate,
+  higher-level concern — a natural follow-up once this header-level lesson
+  has landed); Lesson 35's upsert/ON CONFLICT, now confirmed to have no clean
+  first-party EF Core angle rather than merely unchecked; Go's
+  `select`-statement arbitration rules, still deferred many rounds running on
+  fetched-page-truncation grounds; Lesson 49's dead-letter queues, now
+  confirmed to have no first-party ASP.NET Core angle rather than merely
+  unchecked; Polly/.NET resilience libraries, still deliberately out of scope
+  per MISSION.md's "concepts first" rule; and the backfill-missing-
+  Lesson-117-NOTES-entry gap, still not investigated.

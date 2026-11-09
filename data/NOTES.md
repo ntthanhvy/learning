@@ -11697,3 +11697,79 @@
   122 --lesson 0122-np-isin.html --detail '{"by":"headless"}'` was run
   directly from the repo root and returned `recorded: data/lesson_generated
   day=122 lesson=0122-np-isin.html`.
+- 2026-11-09 generation (Lesson 123, `launchd` run): picked up Lesson 122's
+  own standing candidate list (`np.nan_to_num()`, `np.take()`, `np.roll()`,
+  `np.nonzero()`/`flatnonzero()`, `np.corrcoef()`) rather than a fresh scan,
+  since none of those five had been written up yet — re-confirmed via grep
+  across every lesson/practice file/glossary that all five were still
+  genuinely untaught. Picked `np.nan_to_num()`: it looks like a plain NumPy
+  cousin of `fillna()`/`ffill()`/`interpolate()` but also silently handles
+  `+inf`/`-inf`, values pandas' own `fillna()` never touches at all (not a
+  missing value to pandas). Confirmed directly (numpy 2.5.4, pandas 3.1.1)
+  via scratch scripts in `.scratch-data-123/` at the repo root (deleted
+  after, never tracked by git): `Series.fillna(0)` leaves both infinities
+  completely untouched; `np.nan_to_num(arr)` defaults NaN to 0.0 (matching
+  the `fillna(0)` instinct) but defaults `+inf`/`-inf` to the dtype's own
+  largest/most-negative finite value (`~1.7977e+308` for float64), not
+  zero — confirmed this is documented on the official NumPy reference page
+  (fetched via WebFetch), not an undocumented gap this time, but still an
+  easy-to-miss trap by analogy with the NaN default. Also confirmed: output
+  dtype is preserved (float32 stays float32, with its own ceiling);
+  `copy=False` mutates in place (identity-checked); and on an object-dtype
+  array the function is a silent no-op — the NaN passes straight through
+  untouched, no error or warning, since its fast path assumes a native
+  float array. Added exactly one new glossary row, "np.nan_to_num()",
+  directly after Lesson 122's "np.isin()" entry — confirmed via a
+  case-insensitive scan of every first-column term that no prior row
+  already covered this name. Verification performed mechanically via
+  scratch scripts in `.scratch-data-123/` (deleted after, never tracked by
+  git): (1) a quiz-word-count script confirmed exactly 12/12/12, 9/9/9, and
+  11/11/11 option words across the three questions after a couple of
+  wording tweaks, one `data-ok` per question throughout; (2) an HTML
+  tag-balance check came back fully balanced on every pass (html 1/1, head
+  1/1, body 1/1, div 5/5, p 16/17 — matching Lessons 120–122's own
+  precedent of one unopened `<p>` inside the lesson's single `.callout`
+  div, pre 4/4, code 73/73, h1 1/1, h2 7/7, strong 5/5, button 9/9, script
+  3/3, dfn 1/1, span 15/15, a 3/3, title 1/1); (3) a raw-unescaped-`&` regex
+  scan found exactly the two expected `&` characters inside the lesson's
+  own `cd ~/learning/data && uv run ...` shell command, zero elsewhere;
+  (4) exactly 1 `<dfn>`-carrying tag, with both `data-en`/`data-vn`,
+  matching the 1 new glossary row added. A separate tr/td-balance check on
+  `glossary.html` after its one-row addition — balanced (tr 196/196, td
+  585/585), plus a duplicate-term scan across all 194 first-column entries
+  — zero duplicates, confirmed the new row's exact term string,
+  "np.nan_to_num()", appears exactly once as a first-column term. `node
+  --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse as
+  valid JavaScript, with exactly one `n: 123` entry and one
+  `0123-np-nan-to-num` file reference in `nav.js`. The shipped (unsolved)
+  `practice/123_np_nan_to_num.py` was run directly from its real
+  `practice/` location (via `uv run --with pandas python3`) and printed
+  exactly 3 ✗ with no raw traceback. Built a solved copy in
+  `.scratch-data-123/practice/` (deleted after, never tracked by git); the
+  first run surfaced a real bug matching Lesson 121's own precedent, not
+  just an unfilled blank — several of the intermediate booleans
+  (`ex1_nan_became_zero`, `np.isposinf(...)`, `np.isfinite(...)`, etc.) were
+  `numpy.bool_` rather than plain Python `bool`, which fails the final
+  checks' `is True` identity comparisons even once correctly solved. Fixed
+  by wrapping each in `bool(...)` in both the shipped file and the scratch
+  solved copy; re-ran both afterward — the solved copy then printed all 3 ✓
+  and "All green", and the shipped file, re-run again directly from
+  `practice/`, still reproduced the identical all-✗ result, confirming the
+  solved copy's edits never leaked back into the shipped baseline. This
+  round did not perform its own fresh curriculum scan beyond re-confirming
+  Lesson 122's five standing candidates (one used today); the remaining
+  four — `np.take()`, `np.roll()`, `np.nonzero()`/`np.flatnonzero()`, and
+  `np.corrcoef()` — remain standing candidates for tomorrow, not
+  pre-committed per this course's "fresh scan each round" convention.
+  `git status --short` after all edits confirmed only the intended `data/`
+  files were touched (`data/assets/nav.js`, `data/reference/glossary.html`,
+  new `data/lessons/0123-np-nan-to-num.html`, new
+  `data/practice/123_np_nan_to_num.py`, and this file) plus unrelated
+  concurrent changes in other course directories from other runs, not
+  touched by this one. The scratch directory `.scratch-data-123/` was
+  deleted after verification, at the repo root but never tracked by git,
+  matching prior rounds' own precedent for this environment. `bin/record-
+  progress data lesson_generated --day 123 --lesson 0123-np-nan-to-num.html
+  --detail '{"by":"launchd"}'` was run directly from the repo root and
+  returned `recorded: data/lesson_generated day=123
+  lesson=0123-np-nan-to-num.html`.

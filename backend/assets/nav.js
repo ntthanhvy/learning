@@ -260,6 +260,8 @@
       file: "lessons/0125-problem-details-aspnetcore-iproblemdetailsservice.html" },
     { n: 126, date: "2026-11-08", title: "ETags, now in C# too",
       file: "lessons/0126-etags-aspnetcore-requestheaders-responseheaders.html" },
+    { n: 127, date: "2026-11-09", title: "Cache-Control, now in C# too",
+      file: "lessons/0127-cache-control-aspnetcore-cachecontrolheadervalue.html" },
   ];
 
   const REFS = [

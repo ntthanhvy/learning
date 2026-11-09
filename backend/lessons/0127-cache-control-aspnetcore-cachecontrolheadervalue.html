@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 127 · Cache-Control, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 127 · ~20 min</p>
+<h1>Cache-Control, now in C# too</h1>
+<p class="byline">Lesson 9 named <code>Cache-Control</code> as the cheapest possible cache — a header that tells the browser and any proxy in between to reuse a response for N seconds, with no application code involved at all. Lesson 126 then showed ASP.NET Core's typed access to a different response header, <code>ETag</code>, via <code>GetTypedHeaders()</code>. Today ties the two together: the same typed-header mechanism applies to <code>Cache-Control</code> too, through a sibling class next to <code>EntityTagHeaderValue</code>.</p>
+
+<h2>1 · The same header, parsed instead of hand-built</h2>
+<p>A handler could always write <code>Cache-Control</code> as a raw string, the same way Lesson 126's Go handlers wrote <code>ETag</code> by hand: <code>Response.Headers["Cache-Control"] = "public, max-age=600"</code>. That works, but it is exactly the string-formatting trap Lesson 126 called out — get the comma placement wrong, forget a directive, or typo <code>max-age</code>, and nothing catches it until a browser or proxy misreads the header. ASP.NET Core's typed-header path fixes this the same way it fixed <code>ETag</code>: <code>GetTypedHeaders()</code> returns a <code>CacheControl</code> property typed as <dfn data-en="a class (Microsoft.Net.Http.Headers.CacheControlHeaderValue) representing a parsed Cache-Control header -- its properties (NoStore, NoCache, Public, Private, MustRevalidate, MaxAge, SharedMaxAge, and others) map one-to-one onto the header's own directives, and setting it writes a correctly comma-joined, correctly formatted Cache-Control response header instead of a hand-built string" data-vn="CacheControlHeaderValue (giữ nguyên) — class (Microsoft.Net.Http.Headers.CacheControlHeaderValue) đại diện 1 header Cache-Control đã parse -- property của nó (NoStore, NoCache, Public, Private, MustRevalidate, MaxAge, SharedMaxAge, và vài cái khác) tương ứng 1-1 với directive của header gốc, set vào là ghi ra header Cache-Control đúng format có nối dấu phẩy, không cần tự dựng string">CacheControlHeaderValue</dfn>, the direct sibling of Lesson 126's <code>EntityTagHeaderValue</code>:</p>
+<pre><code><span class="kw">var</span> responseHeaders = HttpContext.Response.GetTypedHeaders();
+responseHeaders.CacheControl = <span class="kw">new</span> CacheControlHeaderValue
+{
+    Public = <span class="kw">true</span>,
+    MaxAge = TimeSpan.FromMinutes(<span class="kw">10</span>)
+};
+<span class="cm">// writes: Cache-Control: public, max-age=600</span></code></pre>
+<p>Each property maps onto one directive from Lesson 9's vocabulary: <code>Public</code>/<code>Private</code> are the two directives deciding whether a shared proxy may cache the response at all, and <code>MaxAge</code> is a real <code>TimeSpan?</code> — not an integer of seconds the caller has to remember to convert — that gets rendered as the header's own <code>max-age=600</code> seconds format automatically.</p>
+
+<h2>2 · NoStore and NoCache: the two directives that mean "don't", differently</h2>
+<p>Lesson 9 framed caching as a trade of staleness for speed, which only makes sense for data that is safe to reuse at all. Two <code>CacheControlHeaderValue</code> properties exist for the opposite case — telling a cache not to help:</p>
+<pre><code><span class="kw">var</span> headers = HttpContext.Response.GetTypedHeaders();
+headers.CacheControl = <span class="kw">new</span> CacheControlHeaderValue { NoStore = <span class="kw">true</span> };
+<span class="cm">// writes: Cache-Control: no-store -- never persist this response, anywhere</span></code></pre>
+<p><code>NoStore</code> is the strict one: no cache, browser or proxy, may keep a copy of this response at all — the right choice for a response holding a password reset token or a one-time payment confirmation, where even a deleted-later copy sitting briefly on disk is a risk Lesson 9's trade-off should never be allowed to make. <code>NoCache</code> is easy to misread as the same thing, but it is not — despite the name, a cache <em>may</em> store the response under <code>NoCache</code>, it just must revalidate with the origin server before reusing the stored copy for a later request. That revalidation step is exactly what Lesson 126's <code>ETag</code>/<code>If-None-Match</code> pair exists to make cheap: instead of re-sending the whole body, revalidation can come back as a 304 with no body at all.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a frontend dev who has only ever set <code>cache: "no-store"</code> on a <code>fetch()</code> call to stop the browser's own HTTP cache from reusing a response is already using this exact mechanism — the browser-side <code>fetch</code> option and the server-side <code>CacheControlHeaderValue.NoStore</code> property are two ends of the same header. The backend half of that conversation is deciding, per endpoint, which directive the server should be the one asserting — not leaving it entirely to whatever the caller happened to request.</div>
+
+<h2>3 · Reading the header back on the request side</h2>
+<p>Lesson 126's pattern was symmetric — <code>RequestHeaders</code> on the way in, <code>ResponseHeaders</code> on the way out. <code>Cache-Control</code> can appear on a request too (a client asserting <code>no-cache</code> to force revalidation, or <code>only-if-cached</code> to refuse a network round trip), and the same typed property reads it back:</p>
+<pre><code><span class="kw">var</span> requestHeaders = HttpContext.Request.GetTypedHeaders();
+CacheControlHeaderValue? requested = requestHeaders.CacheControl;
+<span class="kw">if</span> (requested?.NoCache == <span class="kw">true</span>)
+{
+    <span class="cm">// client is demanding revalidation -- skip any short-circuit and
+    // run the same freshness check Lesson 126's handler already does</span>
+}</code></pre>
+<p>Nothing about the underlying HTTP semantics changed between Lesson 9 and here — <code>Cache-Control</code> is still the same header, the same directives, the same freshness-vs-staleness trade-off. What changed is only the access pattern, and it is the identical change Lesson 126 already made for <code>ETag</code>: a typed C# object instead of a raw string, on both the request and the response side.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 9: raw header</th><th>Lesson 127: ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>Writing the header</th><td>a hand-built string, e.g. <code>"public, max-age=600"</code></td><td><code>Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue {...}</code></td></tr>
+<tr><th>Reading the header</th><td>split and parse the raw string by hand</td><td><code>Request.GetTypedHeaders().CacheControl</code> — a parsed <code>CacheControlHeaderValue?</code></td></tr>
+<tr><th>"Don't cache this at all"</th><td>remember to write <code>no-store</code> correctly</td><td><code>NoStore = true</code></td></tr>
+<tr><th>"Cache it, but revalidate first"</th><td>remember to write <code>no-cache</code> correctly</td><td><code>NoCache = true</code></td></tr>
+<tr><th>Expressing a duration</th><td>convert seconds to a string by hand</td><td><code>MaxAge</code> is a real <code>TimeSpan?</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>GetTypedHeaders().CacheControl</code> and <code>CacheControlHeaderValue</code> as the C# mechanism for Lesson 9's <code>Cache-Control</code> header. It does not cover ASP.NET Core's Response Caching Middleware (<code>Microsoft.AspNetCore.ResponseCaching</code>, <code>AddResponseCaching()</code>/<code>UseResponseCaching()</code>) or the newer Output Caching Middleware (<code>Microsoft.AspNetCore.OutputCaching</code>, .NET 7+) — both are a separate, higher-level concern: a server-side cache that actually stores and serves response bodies, built on top of these same header values rather than being the header mechanism itself. Both are real and worth a future lesson, out of scope for a first pass at the header-level building block.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="CacheControlHeaderValue's properties (NoStore, NoCache, Public, Private, MaxAge, and others) map one-to-one onto the Cache-Control header's own directives, and setting them writes a correctly formatted header instead of a hand-built string -- the same typed-header idea Lesson 126 already applied to ETag.">
+    <p class="stem">What does setting Response.GetTypedHeaders().CacheControl actually do?</p>
+    <button class="opt" data-ok>writes out a correctly formatted Cache-Control response header now</button>
+    <button class="opt">opens a brand new outbound connection to a server</button>
+    <button class="opt">deletes every previously cached response body stored so far</button>
+    <button class="opt">forces the current request to run twice before responding</button>
+  </div>
+  <div class="q" data-why="NoStore means no cache may keep a copy of the response at all, anywhere. NoCache is different despite the name -- a cache may still store the response, but it must revalidate with the origin before reusing that stored copy for a later request.">
+    <p class="stem">How does NoCache actually differ from NoStore?</p>
+    <button class="opt" data-ok>NoCache still allows storage, but it demands revalidation first</button>
+    <button class="opt">NoCache forbids all storage, while NoStore allows revalidation here</button>
+    <button class="opt">NoCache and NoStore always produce the identical header result</button>
+    <button class="opt">NoCache only applies to requests, never to any response</button>
+  </div>
+  <div class="q" data-why="MaxAge is typed as a real TimeSpan?, not an integer of seconds the caller has to remember to convert -- the class renders it into the header's own max-age=<seconds> format automatically.">
+    <p class="stem">What type is CacheControlHeaderValue.MaxAge in C#?</p>
+    <button class="opt" data-ok>a nullable TimeSpan, rather than a plain integer of seconds</button>
+    <button class="opt">a plain string, already formatted as the literal max-age=600 text</button>
+    <button class="opt">a plain integer, counting only the whole seconds remaining now</button>
+    <button class="opt">a boolean flag, with no actual duration value stored anywhere</button>
+  </div>
+  <div class="q" data-why="Response Caching Middleware and Output Caching Middleware are a separate, higher-level concern -- an actual server-side cache that stores and serves response bodies, built on top of header values like CacheControl rather than being the header mechanism itself. This lesson only covers the header-level building block.">
+    <p class="stem">Why does this lesson skip ASP.NET Core's Response/Output Caching Middleware?</p>
+    <button class="opt" data-ok>those middlewares are a separate, much higher-level caching concern</button>
+    <button class="opt">those middlewares were fully removed from the current release</button>
+    <button class="opt">those middlewares require an entirely different header name now</button>
+    <button class="opt">those middlewares only ever run inside a client browser</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.net.http.headers.cachecontrolheadervalue">Microsoft Learn: CacheControlHeaderValue Class</a> confirms the <code>NoStore</code>/<code>NoCache</code>/<code>Public</code>/<code>Private</code>/<code>MustRevalidate</code>/<code>MaxAge</code>/<code>SharedMaxAge</code> properties this lesson uses, with <code>MaxAge</code>'s exact <code>TimeSpan?</code> signature. <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/middleware">Microsoft Learn: Response Caching Middleware</a> shows the <code>Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue {...}</code> usage pattern directly and documents the separate middleware this lesson's scope line excludes. Lesson 9's own MDN <code>Cache-Control</code> citation still covers the HTTP-level directives and freshness semantics in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 9's Cache-Control and Lesson 126's typed-header pattern. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "NoCache cho phép lưu nhưng phải revalidate -- revalidate đó dùng ETag/If-None-Match như Lesson 126 luôn, hay là cơ chế khác?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

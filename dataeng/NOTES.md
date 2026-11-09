@@ -6353,3 +6353,103 @@ along the Phase 2 spine, adapted to the learning records.
   Days 45-47's dead-letter alerting. Otherwise, a fresh gap-scan across Kafka
   is the more likely next pick, since Airflow and dbt have both had recent
   attention now.
+- 2026-11-09 (headless run, Day 55 generated): fifty-fifth lesson,
+  `0055-kafka-partition-assignment-strategy.html`. Idempotency check first —
+  confirmed no `lessons/0055-*.html` on disk (highest prior was 54, dated
+  2026-11-08), no `n: 55` row in `assets/nav.js`, and no 2026-11-09 entry in
+  this file before writing anything. Read `MISSION.md`, `NOTES.md`'s tail
+  through Day 54's close, `PLAN.md`, `RESOURCES.md`, `assets/nav.js`'s full
+  `LESSONS` array, `reference/glossary.html`'s tail, Day 54 in full as the
+  structural template, plus Days 34 and 50 (Kafka) for what Kafka ground was
+  already taught, before picking anything.
+  **Topic choice:** Day 54's own closing note explicitly recommended a fresh
+  Kafka gap-scan next, since Kafka's manual-commit/delivery-semantics ground
+  (Days 5, 6, 16, 34, 41) was already well covered and dbt/Airflow had both
+  had recent attention. Listed every Kafka-related lesson title (5, 6, 16,
+  17, 18, 23, 34, 37, 41, 50) and grepped the whole course for
+  `Assignor|partition.assignment.strategy|cooperative.sticky` — zero hits
+  except one passing mention in Day 34's own "Go deeper" section, which
+  explicitly deferred it ("worth a read... today's working-level pass
+  doesn't need it") rather than teaching it. That is a genuine, named gap,
+  and a direct extension of Day 34 rather than a cold pick: Day 34 showed a
+  rebalance happening and asserted "every consumer pauses briefly," without
+  ever naming which assignor decided the split or why every consumer paused
+  even though only one partition actually changed hands. Picked this over
+  exactly-once/transactional producers (Day 16 already covers the idempotent
+  producer and explicitly scopes exactly-once to "vocabulary beyond one
+  hop") and schema evolution depth (Day 17 already covers Avro/Protobuf/
+  Schema Registry at the right depth for this course).
+  **Content:** `scripts/consume_order_events.py` gets one new consumer
+  config line (`partition.assignment.strategy: cooperative-sticky`) and two
+  new callback functions (`on_assign`/`on_revoke`) wired into `subscribe()`.
+  Core claim: the default assignor (`range`, confirmed live as librdkafka's
+  own default) is "eager" — every rebalance revokes every member's
+  partitions and recomputes from scratch, so even a consumer whose own
+  assignment doesn't change still pauses through the round trip, which is
+  what Day 34's own two-consumer test actually ran on without naming it.
+  `cooperative-sticky` only revokes partitions that are actually changing
+  owner. Walked through re-running Day 34's exact scenario with the new
+  callbacks logging the difference directly. No pandas, no Python-language
+  teaching, no API/idempotency re-derivation beyond one explicit one-line
+  "Bridge from backend" sentence (rolling-deploy framing) — confirmed via a
+  `pandas|numpy` grep (zero hits) and a prose read before shipping.
+  **Verification:** no live broker available this sandbox round either (the
+  standing gap noted since Day 17), so verified against the real installed
+  `confluent-kafka` client instead, the same "read the real install" method
+  recent Airflow rounds used for `DagBag`. Created a scratch dir at
+  `.scratch-dataeng-55/` (repo root). `uv run --with confluent-kafka
+  python3 check_assignor.py` confirmed `partition.assignment.strategy`
+  accepts `cooperative-sticky` and rejects a bogus string with a real
+  `KafkaException` naming it unsupported. A second script confirmed
+  `subscribe()` accepts `on_assign`/`on_revoke`/`on_lost` keyword callbacks
+  without error. Then wrote the exact `consume_order_events.py` edit
+  (today's new config line and both callbacks, Day 6's write/commit logic
+  otherwise untouched) and ran `uv run --with confluent-kafka --with
+  "psycopg[binary]" python3 -c "..."` to instantiate a real `Consumer` with
+  the full combined config plus both callbacks — accepted cleanly (the only
+  error was the expected, harmless connection-refused against a
+  non-existent local broker). Finally ran `uv run python3 -m py_compile` on
+  the complete edited script body: clean. Installed `confluent-kafka`
+  resolved to 2.16.1, not this course's pinned 2.15.1 — noted, not treated
+  as a blocker, same as prior rounds' version drift. Deleted
+  `.scratch-dataeng-55/` after; confirmed via a directory listing that
+  nothing named `scratch-dataeng-55` remained.
+  Quiz word counts verified with a Node script counting
+  `split(/\s+/).length` per option. First draft was uneven on all four
+  questions — rebalanced through several word-for-word edit passes to a
+  final 8/8/8, 9/9/9, 8/8/8, 9/9/9 across the four questions. HTML structure
+  verified via paired open/close tag counts on every tag that appears (`div`
+  7/7, `p` 27/27, `code` 88/88, `button` 12/12, `script` 3/3, `dfn` 3/3 — all
+  three carrying `data-en=`/`data-vn=` — `pre` 11/11, `h2` 8/8, `h1` 1/1,
+  `em` 6/6, `strong` 5/5, `a` 2/2) and a bare-`&` regex scan (zero hits).
+  Grepped the whole glossary for `partition assignment strategy|eager
+  rebalancing|cooperative-sticky` before writing any `<dfn>` — zero hits, so
+  all three are genuinely new terms, not redefinitions; `consumer group`,
+  `group coordinator` and `rebalance` (today's prose reuses all three) were
+  confirmed already defined under Day 5/34 and deliberately not
+  re-`<dfn>`'d, just referenced in prose. `reference/glossary.html`
+  re-checked after appending Day 55's section: `h2` 54/54, `table` 54/54,
+  `tr` 200/200, `td` 438/438, `th` 162/162, zero bare `&`. `node --check`
+  clean on `nav.js` both before and after today's edit.
+  Added three new glossary terms — `partition assignment strategy`, `eager
+  rebalancing`, `cooperative-sticky` — under a new Day 55 section. Added no
+  new `RESOURCES.md` line: today's primary source is the same
+  confluent-kafka Python client docs already cited for Days 5, 6 and 50,
+  just a different documented config/callback on that same page.
+  Registered Lesson 55 in `assets/nav.js` right after the `n: 54` entry,
+  dated 2026-11-09.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a fresh gap-scan following Day 54's own closing-note instruction, not
+  a new durable fact about the learner distinct from the single 2026-09-14
+  baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now over
+  twenty rounds, 35-54), still worth a human granting it once — including a
+  live, multi-broker-free confirmation of today's own claim (a real
+  rebalance under `cooperative-sticky` only logging a revoke for partitions
+  that actually moved), which this round could only confirm via config
+  acceptance, not a live rebalance. Otherwise, with Kafka now having the
+  most recent attention, the next round should weigh Day 54's own named
+  Airflow threads (pools, once a second DAG exists; `max_consecutive_failed_
+  dag_runs` as a circuit breaker on Days 45-47's dead-letter alerting)
+  against further dbt depth, rather than assuming either by default.

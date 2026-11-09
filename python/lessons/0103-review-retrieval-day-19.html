@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 103 · Review day 19: retrieval across Days 100-102</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 103 · ~20 min · 9 Nov 2026</p>
+<h1>Review day 19: retrieval across Days 100-102</h1>
+<p class="byline">Day 99 (review day 18) covered Days 96, 97, and 98. Since then, three fresh days ran in a row — Day 100 (<code>timeit</code>), Day 101 (<code>importlib</code>), Day 102 (<code>array</code>) — and Day 102's own closing notes flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78, Day 83 reviewed Days 80-82, Day 87 reviewed Days 84-86, Day 91 reviewed Days 88-90, Day 95 reviewed Days 92-94, Day 99 reviewed Days 96-98). This is that review — a nineteenth retrieval day, covering exactly Days 100, 101, and 102.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 102 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught (<code>types.SimpleNamespace</code>, <code>locale</code>, and <code>socket</code> — all still genuinely zero-hit, carried forward from Day 102's own notes, since <code>timeit</code>, <code>importlib</code>, and <code>array</code> are now fully taught). None is a strong enough standing candidate to override the cadence math, which already lands exactly on three fresh lessons since Day 99 — so today pays down retrieval on Days 100-102 instead, and the next fresh day starts its topic search from scratch (though it can re-check this list quickly first).</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 100 &mdash; <code>timeit</code>.</strong> Why is <code>timeit.timeit("sorted(data)", setup="data = list(range(1000, 0, -1))", number=1000)</code> written with the list-building code in <code>setup=</code> instead of folded directly into the timed <code>stmt</code>, and what does the call actually return — a total or a per-call average?</p>
+<div class="callout">Fold-out answer: <code>setup=</code> runs exactly once per call to <code>timeit()</code>, before any timed repetition begins, and its result (the <code>data</code> list) stays available to <code>stmt</code> without being counted toward the timed total — confirmed live, only <code>sorted(data)</code> itself showed up in the measured total, not the list construction repeated a thousand times over. The call returns the <strong>total</strong> elapsed seconds for all <code>number</code> runs added together, not a per-call average — dividing the returned float by <code>number</code> is on the caller, not something <code>timeit()</code> does automatically.</div>
+
+<p><strong>Day 101 &mdash; <code>importlib</code>.</strong> What can <code>importlib.import_module(name)</code> do that a plain <code>import json</code> statement cannot, and what does <code>importlib.util.find_spec("nonexistent_name")</code> return instead of raising, when no such module exists?</p>
+<div class="callout">Fold-out answer: <code>import_module(name)</code> accepts the module's name as an ordinary runtime string — <code>name</code> could come from a config file, a CLI argument, or a dict lookup, decided while the program is running, something a plain <code>import json</code> statement can never do since its name is fixed, written literally in the source before the program ever runs. <code>find_spec()</code> on a missing name returns plain <code>None</code>, with no exception raised at all — confirmed live — letting code check importability before committing to an <code>import_module()</code> call that would otherwise raise <code>ModuleNotFoundError</code>.</div>
+
+<p><strong>Day 102 &mdash; <code>array</code>.</strong> Why did a measured 100,000-element <code>list</code> of plain ints use roughly 4.4x the total memory of the equivalent <code>array.array('l', ...)</code> holding the same values, and what happens the instant a mismatched-type value is appended to a typed array?</p>
+<div class="callout">Fold-out answer: a <code>list</code> never stores its values directly — it stores a pointer to each one, and every <code>int</code> is its own separate Python object with its own header overhead on top of the list's own pointer array. An <code>array</code> stores the raw fixed-width value directly, packed back to back, with no per-element object at all — confirmed live, 3,600,056 bytes for the list against 816,640 bytes for the array, on the same 100,000 non-cached ints. Appending a value that doesn't match the array's declared typecode (<code>3.5</code> into an <code>'i'</code>-typed array) raises <code>TypeError</code> immediately, checked on every write — a plain <code>list</code> would have accepted the same float silently, mixed right in with the existing ints.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 100-102's benchmarking discipline, runtime-string imports, and packed-storage trade-off, none of which needs a <code>DataFrame</code> or <code>ndarray</code> to demonstrate. Day 102's own boundary callout (NumPy's <code>ndarray</code> generalizing <code>array.array</code>'s packed-storage idea to N dimensions plus vectorized math) is recalled by name only, not re-demonstrated.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for settling a performance claim with a measurement instead of a guess, a tool for deciding at runtime — not in the source — exactly which module or function to load, and a tool for trading a <code>list</code>'s flexibility for an <code>array</code>'s packed, type-checked storage. Three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three replace an assumption with something checked directly — <code>timeit</code> replacing "comprehensions are probably faster" with a measured total, <code>importlib</code> replacing a fixed <code>if</code>/<code>elif</code> chain of names with a lookup resolved at runtime, <code>array</code> replacing "every element is probably the right type" with a <code>TypeError</code> enforced on every single write. Recognizing which of those three "verify, don't assume" shapes a given problem actually needs &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. The standing fresh-gap candidates remain on record from Day 102's own notes &mdash; <code>types.SimpleNamespace</code>, <code>locale</code>, and <code>socket</code> &mdash; still genuinely zero-hit as of today's own scan, worth a quick re-check next round rather than a scan from scratch, though a fresh scan costs little and stays the safer default given how fast this list turns over.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/103_review_retrieval_day_19.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/103_review_retrieval_day_19.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 100, 101, and 102. Exercises: using <code>timeit.timeit()</code> with <code>setup=</code> so the timed total excludes data construction and reading the minimum out of a <code>timeit.repeat()</code> list, loading a module by a runtime string name with <code>importlib.import_module()</code> and checking importability first with <code>find_spec()</code>, and building a typed <code>array</code> while catching the <code>TypeError</code> a mismatched value raises.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="setup= runs exactly once per call to timeit(), before any timed repetition begins, and its result stays available to stmt without being counted toward the timed total -- confirmed live, only sorted(data) itself showed up in the measured total, not the thousand-times-repeated list construction. timeit.timeit() itself returns the total elapsed seconds for all number runs combined, never a per-call average.">
+    <p class="stem">Why pass the list-building code via <code>setup=</code> instead of folding it into <code>stmt</code>, and what does <code>timeit.timeit()</code> return overall?</p>
+    <button class="opt" data-ok>setup runs once, excluded from timing; timeit returns the summed total</button>
+    <button class="opt">setup always runs once per repeat; timeit returns one average float</button>
+    <button class="opt">setup is optional styling only; timeit returns the single fastest run</button>
+  </div>
+  <div class="q" data-why="importlib.import_module(name) takes the module name as a plain runtime string -- confirmed live, a variable holding 'json' passed to import_module() returns the real json module, something a plain import json statement can never do since its name is fixed in the source before the program runs. find_spec() on a missing name returns plain None, confirmed live, with no exception raised at all.">
+    <p class="stem">What can <code>importlib.import_module(name)</code> do that a plain <code>import</code> statement cannot, and what does <code>find_spec()</code> return for a missing name?</p>
+    <button class="opt" data-ok>accept the name as a runtime string; find_spec just returns None quietly</button>
+    <button class="opt">skip the normal module search path entirely; find_spec raises an error loudly</button>
+    <button class="opt">import without using any memory at all; find_spec returns an empty spec</button>
+  </div>
+  <div class="q" data-why="Measured directly: a list of 100,000 non-cached ints totals about 3,600,056 bytes once each separate int object is counted, against 816,640 bytes for an equivalent array.array('l', ...) storing the same values packed directly -- the list pays for one full Python int object per element on top of its own pointer array. Appending a mismatched-type value like 3.5 to an int-typed array raises TypeError immediately, confirmed live, checked on every single write.">
+    <p class="stem">Why did the measured <code>list</code> use roughly 4.4x the memory of the equivalent <code>array</code>, and what happens appending a mismatched type to the array?</p>
+    <button class="opt" data-ok>list pays for one separate object per element; array raises TypeError instead</button>
+    <button class="opt">list always reserves far more spare storage capacity; array silently truncates it</button>
+    <button class="opt">array automatically compresses its own stored bytes; list raises TypeError right away</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/timeit.html"><code>timeit</code></a> for Day 100, <a href="https://docs.python.org/3/library/importlib.html"><code>importlib</code></a> for Day 101, and <a href="https://docs.python.org/3/library/array.html"><code>array</code></a> for Day 102), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day100">100</a>, <a href="../reference/glossary.html#day101">101</a>, <a href="../reference/glossary.html#day102">102</a>).<br>
+Standing fresh-gap candidates remain on record &mdash; <code>types.SimpleNamespace</code>, <code>locale</code>, <code>socket</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

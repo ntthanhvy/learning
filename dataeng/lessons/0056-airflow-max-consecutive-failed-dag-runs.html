@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 56 · Airflow max_consecutive_failed_dag_runs: pausing the DAG, not just failing one run</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 56 · ~20 min · 10 Nov 2026</p>
+<h1>Airflow <code>max_consecutive_failed_dag_runs</code>: pausing the DAG, not just failing one run</h1>
+<p class="byline">Today's tangible win: the real <code>food_delivery_pipeline</code> DAG gets <code>max_consecutive_failed_dag_runs=3</code>, so three straight failed runs auto-pause the DAG instead of letting the scheduler keep creating new runs against a problem nobody has looked at yet. Confirmed this round straight from the installed Airflow 3.3.1 source: the scheduler orders a DAG's most recent runs newest-first, checks whether exactly that many in a row are all <code>FAILED</code>, and if so sets <code>DagModel.is_paused = True</code> directly — the same flag the UI's pause toggle flips, reached by a different path.</p>
+
+<div class="callout"><strong>Before today — confirm Day 54's DAG still parses:</strong> today adds one keyword argument to the existing <code>with DAG(...) as dag:</code> block in <code>dags/food_delivery_pipeline.py</code>; it adds no new task.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If anything else prints, fix that first — today assumes <code>load_raw</code>, <code>dbt_build</code> and <code>check_dead_letters</code> are already wired in that order with <code>max_active_runs=1</code> and <code>dagrun_timeout=timedelta(minutes=30)</code>, exactly as Day 54 left them.</div>
+
+<h2>1 · The gap: Days 45-47 alert on one bad run, nobody stops the next sixteen</h2>
+<p>Days 45-47 built a real monitoring path: <code>check_dead_letters</code> runs after every <code>dbt_build</code> regardless of outcome (Day 45's <code>trigger_rule="all_done"</code>), queries Day 41's dead-letter table, and raises when new poison events since the last check pass a threshold (Days 46-47). That is a correct, working alert — on <em>one run</em>. Nothing in this DAG stops to ask a different question: what if <code>dbt_build</code> itself has now failed on five, ten, twenty straight daily runs in a row? Day 54's own closing note named the gap directly rather than leaving it implicit: an upstream <dfn data-en="a mechanism that stops a repeatedly-failing process from keep being retried forever once a failure pattern is detected, instead of acting on any one failure alone -- here, an Airflow DAG-level setting that watches a run of consecutive failures across separate DAG runs and auto-pauses the whole DAG once that run of failures crosses a fixed count" data-vn="giữ nguyên &quot;circuit breaker&quot; — cơ chế chặn 1 quá trình cứ lặp lại thất bại bị thử lại mãi, dựa trên cả 1 chuỗi thất bại thay vì chỉ 1 lần fail riêng lẻ; ở đây là cấu hình mức DAG trong Airflow, theo dõi số lần chạy thất bại LIÊN TIẾP qua nhiều lần chạy khác nhau và tự pause cả DAG khi chuỗi đó vượt 1 số cố định">circuit breaker</dfn> on top of the dead-letter alerting, not a replacement for it.</p>
+<p>The default Airflow behavior is to keep going. Nothing about a failed run stops the scheduler from creating the next day's run on schedule, and the next, and the next — each one a fresh attempt against whatever is actually broken (a bad credential, a schema drift, a source that stopped sending data), none of which a per-run dead-letter count was ever built to catch. For a single-operator portfolio pipeline with no on-call rotation, sixteen silently-failing daily runs in a row before anyone notices is a believably bad outcome, not a hypothetical one.</p>
+
+<h2>2 · Confirmed from the installed package: the scheduler pauses the DAG itself, by name</h2>
+<p>Reading <code>airflow.models.dagrun.DagRun._check_last_n_dagruns_failed</code> directly (installed locally via <code>uv run --with "apache-airflow==3.3.1"</code>, no live scheduler needed — the same read-the-real-install approach Days 20-22, 25, 35, 45, 46 and 54 already used) shows exactly what the check does:</p>
+<pre><code><span class="kw">def</span> _check_last_n_dagruns_failed(self, dag_id, max_consecutive_failed_dag_runs, session):
+    dag_runs = session.scalars(
+        select(DagRun)
+        .where(DagRun.dag_id == dag_id)
+        .order_by(DagRun.run_after.desc(), DagRun.id.desc())
+        .limit(max_consecutive_failed_dag_runs)
+    ).all()
+    to_be_paused = <span class="kw">len</span>(dag_runs) &gt;= max_consecutive_failed_dag_runs <span class="kw">and</span> <span class="kw">all</span>(
+        dag_run.state == DagRunState.FAILED <span class="kw">for</span> dag_run <span class="kw">in</span> dag_runs
+    )
+    <span class="kw">if</span> to_be_paused:
+        <span class="cm"># ... sets DagModel.is_paused = True for this dag_id</span></code></pre>
+<p>Two details worth more than the headline. First, the ordering is <code>run_after</code> descending — the <em>N most recent runs by when they actually ran</em>, not N consecutive logical dates. A backfill that reorders which dates execute when doesn't confuse this check: it only ever looks at real recent history. Second, this is called from <code>DagModel</code>'s own logic only <code>if dag.max_consecutive_failed_dag_runs &gt; 0</code> — confirmed live this round that the default on a freshly constructed <code>DAG</code> is <code>0</code>, meaning the feature is off unless a DAG author opts in explicitly. Airflow's own docstring for the parameter calls it <strong>experimental</strong>: <code>"(experimental) maximum number of consecutive failed DAG runs, beyond this the scheduler will disable the DAG"</code> — worth saying out loud in an interview exactly as flagged, not glossed over as a stable guarantee.</p>
+<div class="callout">"Disable the DAG" means the scheduler writes <code>is_paused=True</code> on that DAG's row in Airflow's own metadata database — the identical flag the UI's pause toggle sets by hand. A paused DAG stops being scheduled for new runs; it does not cancel a run already in progress, and nothing about this unpauses it automatically. A human has to look at why three runs failed, fix it, and flip the toggle back — which is the entire point: stop burning attempts against a problem nobody has seen yet, rather than failing forever unattended.</div>
+
+<h2>3 · Why "3 in a row" is a different claim than Days 46-47's threshold</h2>
+<p>It's easy to conflate this with Day 46's <code>DEAD_LETTER_ALERT_THRESHOLD</code>, since both are a number a count gets compared against. They answer different questions about different things. Day 46's threshold asks <em>"is the dead-letter table growing too fast within one otherwise-successful run?"</em> — a data-quality judgment made by a task, while the DAG run itself can still succeed. Today's setting asks <em>"has this entire DAG failed over and over, run after run?"</em> — an operational judgment made by the scheduler, about the DAG's own run history, independent of what any single task's body decided. A DAG could trip today's circuit breaker with the dead-letter check never once firing — a <code>load_raw</code> step hitting a dead database connection three days running fails the whole run before <code>check_dead_letters</code> (an <code>all_done</code> task) even gets to query anything meaningful.</p>
+<p>The two mechanisms are complementary layers, not competitors: Days 46-47 catch a specific, named data-quality failure mode inside a run that otherwise completes; today catches the DAG becoming structurally unable to complete at all, for any reason, across runs.</p>
+
+<h2>4 · Build: one new keyword argument on the real DAG</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 7 wrote and Days 35/45/46/47/51/54 each added one thing to. Today only touches the <code>DAG(...)</code> call's own keyword arguments:</p>
+<pre><code><span class="cm"># the existing `with DAG(...) as dag:` block gains one keyword argument;</span>
+<span class="cm"># every task, every dependency edge, and Day 54's two settings are untouched</span>
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"food_delivery_pipeline"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    schedule=<span class="str">"@daily"</span>,
+    catchup=<span class="kw">True</span>,
+    max_active_runs=<span class="kw">1</span>,
+    dagrun_timeout=timedelta(minutes=<span class="kw">30</span>),
+    max_consecutive_failed_dag_runs=<span class="kw">3</span>,  <span class="cm"># new today -- 3 straight failed runs auto-pauses this DAG</span>
+) <span class="kw">as</span> dag:
+    ...</code></pre>
+<p>Why <code>3</code>, not <code>1</code> or <code>16</code>: <code>1</code> would pause the DAG on the very first ordinary failure — including a transient one Day 35's own <code>retries=2</code> would otherwise recover from on its own, since retries happen <em>within</em> one run and don't count as a separate failed run here. <code>16</code> (Airflow's <code>max_active_runs</code> default, an unrelated setting) would let more than two weeks of daily failures pass unnoticed before anything auto-pauses. Three is small enough to catch a real, sustained problem quickly and large enough that retries and one unlucky day don't trip it.</p>
+
+<h2>5 · Verify: the pause decision itself, then the real DAG module</h2>
+<p>The pause decision's correctness doesn't depend on a live scheduler or metadata database — it's a small, pure function of run states. Verified it that way first, mirroring the real logic read in Section 2, with the case that actually distinguishes "last N" from "any N":</p>
+<pre><code><span class="kw">def</span> would_pause(last_n_states_newest_first, n):
+    <span class="cm"># Mirrors airflow.models.dagrun.DagRun._check_last_n_dagruns_failed:</span>
+    <span class="cm"># take the most recent n runs (newest first); pause only if there are</span>
+    <span class="cm"># at least n of them and every single one is FAILED.</span>
+    <span class="kw">if</span> <span class="kw">len</span>(last_n_states_newest_first) &lt; n:
+        <span class="kw">return</span> <span class="kw">False</span>
+    <span class="kw">return</span> <span class="kw">all</span>(s == <span class="str">"failed"</span> <span class="kw">for</span> s <span class="kw">in</span> last_n_states_newest_first[:n])
+
+<span class="cm"># (states, n) -> expected</span>
+would_pause([<span class="str">"failed"</span>, <span class="str">"failed"</span>, <span class="str">"failed"</span>], <span class="kw">3</span>)                        <span class="cm"># True  -- exactly 3, all failed</span>
+would_pause([<span class="str">"failed"</span>, <span class="str">"success"</span>, <span class="str">"failed"</span>], <span class="kw">3</span>)                       <span class="cm"># False -- one success breaks the streak</span>
+would_pause([<span class="str">"failed"</span>, <span class="str">"failed"</span>], <span class="kw">3</span>)                                  <span class="cm"># False -- not enough runs yet</span>
+would_pause([<span class="str">"success"</span>, <span class="str">"failed"</span>, <span class="str">"failed"</span>, <span class="str">"failed"</span>], <span class="kw">3</span>)                <span class="cm"># False -- newest run succeeded</span>
+would_pause([<span class="str">"failed"</span>, <span class="str">"failed"</span>, <span class="str">"failed"</span>, <span class="str">"success"</span>], <span class="kw">3</span>)                <span class="cm"># True  -- 3 failures sit at the newest end</span></code></pre>
+<p>Run live this round, all five cases matched the comment exactly — the fourth and fifth cases are the pair that actually prove "most recent N," not "any N in the history": three failures sitting <em>behind</em> a successful newest run do not pause the DAG, but the identical three failures sitting <em>at</em> the newest end do, even with an older success further back.</p>
+<p>Then, the same DAG-module-import check Days 45, 46, 47 and 54 each used, since this sandbox hits the same <code>airflow db migrate</code>/<code>airflow dags test</code> interactive-approval gate logged every round since Day 35 (now twenty-two rounds, 35-56, still with no human present to grant it):</p>
+<pre><code><span class="kw">cd</span> dags &amp;&amp; uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> python3 -c <span class="str">"
+import food_delivery_pipeline as m
+print('dag_id:', m.dag.dag_id)
+print('catchup:', m.dag.catchup)
+print('max_active_runs:', m.dag.max_active_runs)
+print('dagrun_timeout:', m.dag.dagrun_timeout)
+print('max_consecutive_failed_dag_runs:', m.dag.max_consecutive_failed_dag_runs)
+"</span></code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>dag_id: food_delivery_pipeline
+catchup: True
+max_active_runs: 1
+dagrun_timeout: 0:30:00
+max_consecutive_failed_dag_runs: 3</code></pre>
+<p>That confirms the new setting round-trips through a real parse alongside every setting Day 54 already added, unchanged. It does not confirm a live pause — that needs a real metadata database recording three actually-failed runs, which this sandbox's standing gap (named every round since Day 35) still blocks. With a real Airflow metadata database up, confirm the full cycle directly: plant Day 3's bad row so <code>dbt_build</code> fails on purpose, run the DAG for three consecutive dates, then check the DAG's own paused state.</p>
+<pre><code><span class="cm"># plant a bad row so dbt_build fails, then run three dates in a row</span>
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags test food_delivery_pipeline 2026-11-10
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags test food_delivery_pipeline 2026-11-11
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags test food_delivery_pipeline 2026-11-12
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags details food_delivery_pipeline | grep is_paused
+</code></pre>
+<p>Expected: all three runs fail on the planted bad row (the same test failure Days 3, 7 and 45 all already reproduce on purpose), and after the third, <code>is_paused</code> reads <code>True</code> — the scheduler, not a human, flipped it. Fix the planted row (Day 3's one-time <code>UPDATE</code>) and manually unpause (<code>airflow dags unpause food_delivery_pipeline</code>) before the next day's schedule, since nothing un-pauses this automatically.</p>
+<div class="callout"><strong>What this round could and couldn't run live:</strong> this sandbox has no learner Postgres/Airflow metadata stack, so the three-run pause cycle above is given as the correct next check, not claimed as captured output from a live scheduler this round — the same honest-disclosure convention Days 17, 38, 41, 43, 44, 46 and 47 each used. What <em>was</em> confirmed live: the DAG module import (real output, shown exactly above), the setting's real default (<code>0</code>, confirmed by instantiating a bare <code>DAG</code> and reading <code>.max_consecutive_failed_dag_runs</code> back), and the pause-decision logic itself against all five mocked-history cases in Section 5. The edited DAG file was separately checked with <code>py_compile</code>, clean.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>max_consecutive_failed_dag_runs</code> as a DAG-level setting that auto-pauses a DAG after N straight failed runs, confirmed live via the installed package's own pause-check logic and a <code>DagBag</code>-style module parse. It does not cover sending a notification when the pause fires — Day 35's <code>on_failure_callback</code> remains the right hook, still named rather than built, for the same reason Days 46-47 left Slack/email/PagerDuty out of scope (no paid services, per <code>MISSION.md</code>). It also does not cover <code>core.max_consecutive_failed_dag_runs_per_dag</code>, the Airflow-wide config default this DAG-level setting overrides when left unset — confirmed to exist in <code>airflow/dag_processing/collection.py</code>'s resolution logic this round, the identical override pattern Day 54's <code>max_active_runs</code> already uses against <code>core.max_active_runs_per_dag</code>, but not itself needed while this DAG sets its own value explicitly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round by instantiating a bare DAG with no explicit value: max_consecutive_failed_dag_runs defaults to 0, and the scheduler's own check only runs at all 'if dag.max_consecutive_failed_dag_runs > 0' -- so the feature is fully off unless a DAG author opts in by setting a positive number explicitly.">
+    <p class="stem">Confirmed this round: what does <code>max_consecutive_failed_dag_runs</code> default to on a DAG that never sets it?</p>
+    <button class="opt" data-ok><code>0</code>, so the auto-pause check stays off</button>
+    <button class="opt"><code>16</code>, the exact same default as <code>max_active_runs</code></button>
+    <button class="opt">None; every single DAG must set one</button>
+  </div>
+  <div class="q" data-why="Day 46's threshold is a data-quality judgment inside one run: it compares new dead-lettered rows against a fixed number while the DAG run itself can still succeed. Today's setting is an operational judgment about the DAG's own run history across separate runs -- the scheduler checking whether the whole run failed, repeatedly, for any reason, independent of what check_dead_letters's own body ever decided.">
+    <p class="stem">How does today's setting differ from Day 46's <code>DEAD_LETTER_ALERT_THRESHOLD</code>?</p>
+    <button class="opt" data-ok>one checks run history; other checks a run's own data</button>
+    <button class="opt">they are simply two separate names for one identical check</button>
+    <button class="opt">today's setting only ever looks at <code>check_dead_letters</code> running right alone</button>
+  </div>
+  <div class="q" data-why="Read directly from airflow.models.dagrun.DagRun._check_last_n_dagruns_failed this round: the query orders a DAG's own runs by run_after descending and takes the most recent N -- a backfill that executes dates out of their logical order doesn't confuse this check, since it only ever looks at actual recent execution history, not logical-date sequence.">
+    <p class="stem">Confirmed from the installed source: how does the scheduler pick which runs count toward the consecutive-failure streak?</p>
+    <button class="opt" data-ok>the N most recent runs, ordered by when they ran</button>
+    <button class="opt">the N runs with the lowest logical dates on record</button>
+    <button class="opt">every run that has ever failed, across this DAG's history</button>
+  </div>
+  <div class="q" data-why="Confirmed by reading _check_last_n_dagruns_failed's own effect this round: a tripped check sets DagModel.is_paused = True directly on that dag_id's row in Airflow's metadata database -- the identical flag the UI's manual pause toggle sets by hand. It does not cancel any run already in progress, and nothing about it reverses automatically; a human has to investigate and explicitly unpause.">
+    <p class="stem">What does Airflow actually do the moment this check decides to act?</p>
+    <button class="opt" data-ok>sets <code>is_paused=True</code> directly on that one DAG's own metadata row</button>
+    <button class="opt">deletes every one of that DAG's past failed run records</button>
+    <button class="opt">cancels whatever task instance happens to be running right now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html">DAG Runs</a> docs (already Day 54's primary source) are the right page to check for this parameter's current, documented behavior before quoting it in an interview — its own docstring in the installed package explicitly calls it <code>(experimental)</code>, confirmed by reading <code>airflow.sdk.definitions.dag</code> directly this round rather than a live fetch (no working <code>WebFetch</code> tool this round, the same gap Days 17, 23, 26, 31, 34, 35, 45 and 54 each hit). Today's specific claims — the real default, the <code>run_after</code>-descending ordering, and the direct <code>is_paused</code> write — were confirmed by reading <code>airflow.models.dagrun.DagRun._check_last_n_dagruns_failed</code> and <code>airflow.dag_processing.collection.py</code> in the installed <code>apache-airflow==3.3.1</code> package's own source, not from the docs page's prose.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 56.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now twenty-two rounds, 35-56) — still worth a human granting it once, including for today's own thread specifically: confirming a real three-run failure streak actually flips <code>is_paused</code> to <code>True</code> against a live scheduler, not just a source-level read of the check's logic. With both of Day 54's named next steps now resolved (today closed <code>max_consecutive_failed_dag_runs</code>; Airflow pools remain correctly deferred, since this portfolio still has only one DAG), a future round most likely needs a fresh gap-scan across <code>PLAN.md</code>'s spine — dbt, Kafka or a genuinely new Airflow thread — rather than another named-TODO close.<br><br>
+💬 Anything unclear — why 3 was chosen over 1 or 16, or how this interacts with a manual <code>airflow dags unpause</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

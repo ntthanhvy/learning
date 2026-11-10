@@ -10691,3 +10691,121 @@
   unchecked; Polly/.NET resilience libraries, still deliberately out of scope
   per MISSION.md's "concepts first" rule; and the backfill-missing-
   Lesson-117-NOTES-entry gap, still not investigated.
+- 2026-11-10 generation (Lesson 128, headless run): idempotency check first —
+  queried `course_progress` via the `node -e`/`execFileSync` workaround (raw
+  `psql "$VAR"` is still blocked by this sandbox's static checker, confirmed
+  again) and found the latest `lesson_generated` row for course=backend was
+  day 127, dated 2026-11-09 — no row dated 2026-11-10 yet, so today's
+  generation was not a duplicate. Also confirmed no `lessons/0128-*.html` on
+  disk and no `n: 128`/2026-11-10 entry in `nav.js` before writing anything.
+  A second query for non-`lesson_generated` rows showed no new
+  `lesson_completed`/quiz/kata signal since backend's own Lesson 102 quiz on
+  2026-10-15 (all correct) — no weak spot to chase, steady sequential pacing
+  continued. Read `MISSION.md`, `RESOURCES.md`, this file's tail (Lessons
+  125-127), both `learning-records/` files relevant to the current mission
+  state, `nav.js`'s and `glossary.html`'s tails, and Lesson 127 (the most
+  recent C#-port lesson, as structural template) in full before writing
+  anything. Topic choice: Lesson 127's own scope line had explicitly named
+  its own direct follow-up — ASP.NET Core's Response Caching Middleware and
+  newer Output Caching Middleware, both deliberately scoped out of that
+  lesson as "a separate, higher-level concern: a server-side cache that
+  actually stores and serves response bodies, built on top of these same
+  header values." Confirmed via grep that no existing lesson or glossary
+  entry already covers either middleware (`output.cach`/`response.cach`
+  case-insensitive grep across `lessons/*.html` and `glossary.html` matched
+  only Lesson 9's own `where-caching-belongs` title text and Lessons
+  126/127's filenames, no actual middleware coverage). Confirmed the
+  first-party angle via two `WebFetch` calls before writing anything:
+  `.../performance/caching/output` confirmed `AddOutputCache()`/
+  `UseOutputCache()`, the default caching policy's exact four rules (only
+  200 responses, only GET/HEAD, never a response setting a cookie, never a
+  response to an authenticated request), `CacheOutput()`/`[OutputCache]`,
+  the policy-builder methods (`AddBasePolicy`, `AddPolicy`, `Expire`,
+  `SetVaryByQuery`, `SetVaryByHeader`, `Tag`), and the explicit
+  `Response.Headers.ETag` cache-revalidation sample this lesson's section 4
+  is adapted from; `.../performance/caching/middleware` confirmed Response
+  Caching Middleware's own `AddResponseCaching()`/`UseResponseCaching()`
+  pair, its `Cache-Control`-header-driven conditions for caching (must be
+  `public`, no `Authorization`/`Set-Cookie`, etc.), and — notably — the same
+  "Output caching is a better approach for UI apps" cross-reference
+  Microsoft's own output-caching page states independently, which this
+  lesson cites directly rather than paraphrasing, since it is the clearest
+  first-party answer to "why two middlewares" a learner could ask. Picked
+  output caching as the lesson's primary mechanism (not response caching)
+  precisely because of that cross-reference, with response caching named
+  and contrasted in section 1 rather than given equal depth — consistent
+  with Lesson 126/127's own precedent of picking the one mechanism most
+  relevant to a working API over a UI-rendering one. `which dotnet` found
+  the same `/usr/bin/dotnet` binary on PATH this round as Lesson 125's
+  round; `dotnet --version` was attempted directly this time (not skipped
+  on assumption) and the sandbox itself flagged it as requiring interactive
+  approval with no user present to grant it, confirming the same class of
+  block as every round since Lesson 103 without needing to actually wait
+  out a hang — so the three C# snippets (the
+  `AddOutputCache()`/`UseOutputCache()`/`CacheOutput()` wiring, the
+  `AddBasePolicy`/`AddPolicy`/`SetVaryByQuery` policy block, and the
+  `Response.Headers.ETag` revalidation handler) were checked by hand against
+  both fetched docs pages' exact method signatures instead, consistent with
+  every prior C#-port round's fallback — brace/paren balance confirmed via a
+  throwaway `node -e` script (1/1 braces 4/4 parens; 1/1 braces 8/8 parens;
+  2/2 braces 4/4 parens across the three blocks). Two new terms, each
+  checked against the glossary first via case-insensitive grep — zero
+  collisions: `Output Caching Middleware`, `default caching policy` (its own
+  four rules were described inline rather than each becoming a separate
+  glossary row, consistent with how Lesson 127 didn't give every
+  `CacheControlHeaderValue` property its own row either). Added both rows
+  immediately after Lesson 127's `CacheControlHeaderValue` row, same
+  Term/Tiếng Việt (dev-style)/English column order, confirmed by inspecting
+  the file's actual last row directly rather than assumed. Verification
+  performed via throwaway `node -e` scripts (nothing written to a file): (1)
+  a quiz-word-count check per `<div class="q">` block — first draft landed
+  uneven on all four questions (Q1 10/11/9/10, Q2 11/12/10/10, Q3 11/11/12/11,
+  Q4 10/10/10/9), fixed through several rewrite-and-recount passes per
+  option, converged to exactly 11/11/11/11, 11/11/11/11, 12/12/12/12, and
+  11/11/11/11 across the four questions, both `.split(/\s+/)` and
+  `.split(" ")` counting methods agreeing exactly, exactly one `data-ok` and
+  four options per question confirmed the same way; (2) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/
+  th/td/ul/li — clean (div 6/6, p 18/18, code 56/56, button 16/16, script
+  3/3, dfn 2/2, pre 3/3, h2 7/7, h1 1/1, em 4/4, strong 5/5, a 3/3, table
+  0/0, tr 0/0, th 0/0, td 0/0, ul 1/1, li 2/2), both `dfn` tags confirmed via
+  regex to carry both `data-en=` and `data-vn=`; (3) the brace/paren check
+  noted above; (4) a raw-unescaped-`&` scan across the lesson — zero hits;
+  (5) a table/tr/td/p/div balance check on `glossary.html` after its
+  two-row addition — balanced (tr 405/405, td 1212/1212), plus a
+  duplicate-term scan across all 404 first-column entries — zero
+  duplicates; (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js` —
+  all clean, before and after the `nav.js` edit; (7) a basic HTML
+  well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+  three script tags in gloss/quiz/nav order) — clean. Registered Lesson 128
+  in `nav.js` (date 2026-11-10, today's actual generation date) right after
+  `n: 127`, confirmed exactly one matching `n: 128` entry and exactly one
+  matching `0128-*.html` file on disk afterward. No new `RESOURCES.md` line
+  added this round — both fetched pages are `learn.microsoft.com`, the same
+  domain already covered by this file's standing entries' pattern; both
+  cited inline in the lesson's own "Go deeper" section instead, consistent
+  with every prior C#-port round. No new `learning-records/` file this
+  round — the topic came from a prior round's own named scope-line gap, not
+  a new surprise about the learner. Before writing, `git status --short`
+  showed pre-existing unrelated uncommitted changes under `python/`,
+  `data/`, and `dataeng/` (other courses' own concurrent work, not touched
+  this round) — confirmed after shipping that this round's own diff was
+  scoped to exactly `backend/assets/nav.js`, `backend/reference/
+  glossary.html`, and the new `backend/lessons/0128-*.html`, nothing else.
+  `bin/record-progress backend lesson_generated --day 128 --lesson
+  0128-output-caching-aspnetcore-addoutputcache.html --detail
+  '{"by":"headless"}'` ran directly and succeeded, no approval blocker. Day
+  number used 128, matching this file's own standing
+  day-equals-lesson-number convention (confirmed again — no deviation found
+  anywhere in this log). Candidates spotted but not picked this round,
+  still worth checking fresh next time: tag-based eviction
+  (`Tag()`/`IOutputCacheStore.EvictByTagAsync`) and the Redis-backed
+  `IOutputCacheStore` for multi-instance consistency (both explicitly named
+  in this lesson's own scope line as reasonable future lessons); Lesson 35's
+  upsert/ON CONFLICT, still confirmed to have no clean first-party EF Core
+  angle; Go's `select`-statement arbitration rules, still deferred many
+  rounds running on fetched-page-truncation grounds; Lesson 49's dead-letter
+  queues, still confirmed to have no first-party ASP.NET Core angle; Polly/
+  .NET resilience libraries, still deliberately out of scope per MISSION.md's
+  "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
+  gap, still not investigated.

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 124 · np.nonzero() and np.flatnonzero(): finding WHERE, and a tuple that is always truthy</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 124 · ~20 min · 10 Nov 2026</p>
+<h1>np.nonzero() and np.flatnonzero(): finding WHERE, and a tuple that is always truthy</h1>
+<p class="byline">Lesson 123 closed with four standing candidates from Lesson 122's own fresh scan: <code>np.take()</code>, <code>np.roll()</code>, <code>np.nonzero()</code>/<code>flatnonzero()</code>, and <code>np.corrcoef()</code>. Today picks <code>np.nonzero()</code> and its simpler cousin <code>np.flatnonzero()</code> — both answer "which positions are non-zero," the raw-array layer under every boolean-mask trick this course has used since Lesson 22's <code>query()</code>, but <code>np.nonzero()</code>'s own return shape hides a genuine, confirmed correctness bug: the result is truthy in an <code>if</code> check even when nothing matched at all.</p>
+
+<h2>1 · The gap: boolean masks answer "which rows," but as a mask, not as positions</h2>
+<p>Every filter this course has written so far — <code>df[mask]</code>, <code>Series.isin()</code>, <code>query()</code> — returns rows still shaped like the original table, found through a True/False mask. Sometimes what's actually wanted is the raw integer <em>positions</em> where a condition held, not a same-shaped mask or a filtered table. That is exactly what <dfn data-en="a NumPy function returning the integer positions where an array's values are not equal to zero -- for a 1-D array, a one-element tuple holding the index array; for an N-D array, an N-element tuple, one index array per dimension" data-vn="giữ nguyên 'np.nonzero()' — trả về vị trí (index) các phần tử KHÁC 0 trong mảng; với mảng 1 chiều, trả về 1 tuple có đúng 1 phần tử (mảng chỉ số); với mảng N chiều, trả về tuple N phần tử, mỗi chiều một mảng chỉ số riêng">np.nonzero(arr)</dfn> gives: not a mask, not filtered values, but the index positions themselves. Confirmed directly (numpy 2.5.4, pandas 3.1.1):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">0</span>, <span class="kw">5</span>, <span class="kw">0</span>, -<span class="kw">3</span>, <span class="kw">0</span>, <span class="kw">8</span>])
+
+np.nonzero(arr)
+<span class="cm"># (array([1, 3, 5]),)  -- a ONE-ELEMENT TUPLE holding the index array, not the array itself</span>
+
+arr[np.nonzero(arr)]
+<span class="cm"># array([ 5, -3,  8])  -- using the tuple result to index straight back into the original array</span>
+
+ser = pd.Series(arr)
+ser.index[(ser != <span class="kw">0</span>).to_numpy()]
+<span class="cm"># Index([1, 3, 5])  -- the pandas-world equivalent: mask first, then ask the Index for positions</span></code></pre>
+<p>Same question Lesson 22's <code>query()</code> and Lesson 29's <code>isin()</code> answer with a mask, answered here as plain integer positions instead — the raw-array primitive this course's "name the NumPy function underneath an already-taught idiom" lineage has traced since Lessons 93, 100, 102, 109-112, 114, and 117-123.</p>
+
+<h2>2 · The trap: the tuple is always truthy, even when nothing matched</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4) — not mentioned anywhere on the official docs page:</strong> <code>np.nonzero(arr)</code> always returns a tuple with exactly one element per dimension — for a 1-D array, always a <strong>1-element tuple</strong>, whether or not any value actually matched. Python's truthiness of a tuple checks the tuple's own length, not what's inside it, so <code>bool(np.nonzero(arr))</code> is <code>True</code> for <em>every</em> 1-D array, including one with zero matches at all:</p>
+<pre><code>all_zero = np.array([<span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">0</span>])
+
+result = np.nonzero(all_zero)
+<span class="cm"># (array([], dtype=int64),)  -- a 1-element tuple holding an EMPTY array; nothing matched</span>
+
+<span class="kw">bool</span>(result)
+<span class="cm"># True  -- the tuple itself has length 1, so it is truthy, regardless of the empty array inside it</span>
+
+<span class="kw">if</span> np.nonzero(all_zero):
+    <span class="kw">print</span>(<span class="str">"found a match"</span>)  <span class="cm"># this line DOES run -- on an all-zero array, with zero real matches</span></code></pre>
+<p>A direct <code>if np.nonzero(arr):</code> guard, written by analogy with "an empty list/array is falsy," silently always takes the truthy branch — it is testing the wrong thing (a tuple's length, always 1 for a 1-D array) instead of the actual count of matches. This course's familiar "no crash, quietly wrong" shape (Lessons 19-29, 36, 60, 88, 122, 123): no exception, no warning, just the always-wrong branch. The real "how many matched" question has its own named function, <code>np.count_nonzero(arr)</code>, confirmed directly to return the plain integer count (<code>0</code> for the all-zero case above) — reach for that, or <code>arr.any()</code>, never a bare truth test on <code>np.nonzero()</code>'s own return value.</p>
+</div>
+
+<h2>3 · The simpler cousin: np.flatnonzero(), and NaN counts as "non-zero" too</h2>
+<p>Confirmed directly, <dfn data-en="a NumPy function returning a single flat array of integer positions where a (flattened) array's values are not equal to zero -- the simpler, always-1-D cousin of np.nonzero(), which returns a tuple instead" data-vn="giữ nguyên 'np.flatnonzero()' — trả về 1 mảng chỉ số (không phải tuple) các vị trí KHÁC 0, tính trên mảng đã làm phẳng (flatten); là phiên bản đơn giản hơn của np.nonzero(), luôn trả về 1 mảng thẳng, không phải tuple">np.flatnonzero(arr)</dfn> sidesteps the whole tuple trap: it returns one flat array directly, not a tuple, so <code>len()</code>, slicing, and truthiness on an empty result all behave as expected (though an empty array's own truthiness still raises <code>ValueError</code> rather than reading as <code>False</code> — confirmed directly, so <code>.size</code> or <code>len()</code> is still the right check, not a bare <code>if</code>):</p>
+<pre><code>np.flatnonzero(arr)
+<span class="cm"># array([1, 3, 5])  -- same three positions as np.nonzero(arr)[0], but as a plain array, no tuple wrapper</span>
+
+np.flatnonzero(all_zero)
+<span class="cm"># array([], dtype=int64)  -- empty array directly, no tuple wrapping it</span>
+
+<span class="kw">len</span>(np.flatnonzero(all_zero))
+<span class="cm"># 0  -- the correct count, straight from len(), no count_nonzero() needed for a 1-D array</span></code></pre>
+<p>On a 2-D array the two diverge on purpose: <code>np.nonzero(arr2d)</code> returns a 2-element tuple (row positions, column positions) ready to index back into the original shape, while <code>np.flatnonzero(arr2d)</code> returns positions into the <strong>flattened</strong> 1-D version instead — confirmed directly, <code>np.nonzero</code> is the one to reach for whenever the original shape still matters. One more confirmed trap both functions share equally: NaN has a non-zero bit pattern, so a NaN value counts as "non-zero" and is included in the result — "non-zero" means literally "not equal to the number 0," not "not missing," confirmed directly and confirmed absent from the official docs page as well:</p>
+<pre><code>arr_nan = np.array([<span class="kw">0.0</span>, np.nan, <span class="kw">1.0</span>, <span class="kw">0.0</span>])
+
+np.flatnonzero(arr_nan)
+<span class="cm"># array([1, 2])  -- the NaN at position 1 IS included, right alongside the real 1.0 at position 2</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.nonzero()</code>'s confirmed tuple-of-arrays return shape and its confirmed always-truthy-tuple trap, <code>np.flatnonzero()</code> as its flat-array cousin and their confirmed 2-D divergence, <code>np.count_nonzero()</code> as the correct "how many" function, and the confirmed NaN-counts-as-non-zero behavior both share. It does not cover <code>ndarray.nonzero()</code> as an equivalent instance method (confirmed identical to the function form, mentioned only in passing) nor <code>np.argwhere()</code>, a closely related function returning positions as row-per-match coordinates instead of a per-dimension tuple — out of scope until a lesson needs that exact shape.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/124_np_nonzero_flatnonzero.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/124_np_nonzero_flatnonzero.py</code></pre>
+<p>Exercise 1 confirms the Section 1 gap: <code>np.nonzero(arr)</code> returns a 1-element tuple holding the index positions, usable directly to index back into the original array. Exercise 2 confirms the Section 2 trap: <code>bool(np.nonzero(all_zero_arr))</code> is <code>True</code> even though nothing matched, while <code>np.count_nonzero()</code> correctly reports <code>0</code>. Exercise 3 confirms the Section 3 behavior: <code>np.flatnonzero()</code> returns a plain array (not a tuple), and a NaN value is counted as non-zero by both functions.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.nonzero(arr) on a 1-D array always returns a 1-element tuple, holding the array of matching index positions -- not the positions themselves, not a mask, and not a plain array.">
+    <p class="stem">What does <code>np.nonzero(arr)</code> return for a 1-D array?</p>
+    <button class="opt" data-ok>a one-element tuple holding the array of matching positions, always</button>
+    <button class="opt">a plain array holding the matching index positions by itself</button>
+    <button class="opt">a True/False mask the exact same length as the array</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.nonzero() always returns a tuple with one element per dimension, so for a 1-D array it is ALWAYS a 1-element tuple, whether or not any value matched. Python checks the tuple's own length for truthiness, not the empty array inside it, so bool() reads True even on an all-zero input -- a confirmed, undocumented correctness trap.">
+    <p class="stem">What does <code>bool(np.nonzero(all_zero_array))</code> evaluate to, given an array where nothing at all matched?</p>
+    <button class="opt" data-ok>True -- the one-element tuple is truthy no matter what's inside</button>
+    <button class="opt">False -- an empty match correctly makes the whole thing falsy</button>
+    <button class="opt">it raises a ValueError immediately, refusing to pick either truth value</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.nonzero() tests for 'not equal to the number zero,' not 'not missing.' NaN has a non-zero bit pattern, so it is treated as a match and included in the result, right alongside real non-zero values -- confirmed absent from the official docs too.">
+    <p class="stem">In <code>np.flatnonzero(np.array([0.0, np.nan, 1.0]))</code>, is the NaN's position included in the result?</p>
+    <button class="opt" data-ok>yes -- NaN counts as non-zero too, so its position is included</button>
+    <button class="opt">no -- NaN is treated as missing and is always skipped entirely</button>
+    <button class="opt">it raises a ValueError right away, refusing an array holding any NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.nonzero.html"><code>numpy.nonzero()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the tuple-of-arrays return shape and points to <code>flatnonzero</code>/<code>count_nonzero</code> directly in its "See also" section; it does not mention the always-truthy-tuple trap nor NaN's non-zero bit pattern at all, both confirmed gaps this lesson filled by direct probe.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.nonzero()</code> and <code>np.flatnonzero()</code> are new today, added right after Lesson 123's <code>np.nan_to_num()</code> entry.<br>
+<strong>Next lesson:</strong> two standing candidates remain from Lesson 122's own scan, not pre-committed per this course's "fresh scan each round" convention: <code>np.take()</code> and <code>np.roll()</code> (plus <code>np.corrcoef()</code>, also still untaught).<br><br>
+💬 Anything unclear — the always-truthy tuple trap, the NaN-counts-as-non-zero behavior, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

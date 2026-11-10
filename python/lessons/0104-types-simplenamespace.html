@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 104 · types.SimpleNamespace: attribute access without a class</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 104 · ~20 min · 10 Nov 2026</p>
+<h1><code>types.SimpleNamespace</code>: attribute access without a class</h1>
+<p class="byline">A plain <code>dict</code> loaded from JSON reads awkwardly — <code>record["name"]</code>, <code>record["address"]["city"]</code> — every field wrapped in brackets and quotes. Day 7's <code>dataclass</code> fixes that with real <code>record.name</code> dot access, but it demands a class declared up front, with every field named and typed before any data exists. Sometimes there is no fixed shape worth declaring — a one-off script unpacking whatever a config file happens to contain, or a quick object to pass a handful of named values around. The <dfn data-en="a class in the standard-library types module that takes any keyword arguments and stores each one as a plain instance attribute -- types.SimpleNamespace(name='Ana', age=30) gives dot access (ns.name, ns.age) with no class definition needed first; it has no fixed fields, no type checking, and no required constructor shape, unlike a dataclass" data-vn="giữ nguyên &quot;SimpleNamespace&quot; — class trong module chuẩn types, nhận bất kỳ keyword argument nào và lưu từng cái thành attribute của instance; types.SimpleNamespace(name='Ana', age=30) cho truy cập kiểu ns.name, ns.age mà KHÔNG cần định nghĩa class trước; không có field cố định, không kiểm tra kiểu, không có shape bắt buộc cho constructor, khác với dataclass">types.SimpleNamespace</dfn> class is exactly that: dot access on arbitrary data, with no class declaration at all.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>types.SimpleNamespace</code> is still genuinely zero-hit as a dedicated topic — the handful of existing hits are passing mentions inside other lessons' own "Why today" gap-list callouts, not actual teaching (same true of the other two standing candidates, <code>locale</code> and <code>socket</code>). Per Day 103's cadence note, Day 103 closed the nineteenth review cycle, so Day 104 resumes fresh topics. Picked <code>types.SimpleNamespace</code> over <code>locale</code> (narrower, mostly a formatting corner) and <code>socket</code> (real networking is deeper than a 20-minute lesson and edges toward Phase 2b's FastAPI/deployment territory, already touched by Days 22-25): it is squarely language/stdlib, builds directly on Day 7's <code>dataclass</code> and Day 1's object-model vocabulary, and needs nothing from the still-untaught FastAPI track. Zero pandas/NumPy surface — this is a plain-object idiom, not a data-library API.</div>
+
+<h2>1 · Building one: any keywords become attributes</h2>
+<p><code>types.SimpleNamespace(**kwargs)</code> takes any set of keyword arguments and stores each one as a plain attribute, immediately readable with dot syntax:</p>
+<pre><code><span class="kw">import</span> types
+
+ns = types.SimpleNamespace(name=<span class="str">"Ana"</span>, age=30)
+<span class="kw">print</span>(ns.name, ns.age)      <span class="cm"># Ana 30 -- confirmed live</span>
+<span class="kw">print</span>(ns)                   <span class="cm"># namespace(name='Ana', age=30) -- confirmed live</span></code></pre>
+<p>There is no class to define first and no fixed set of expected names — any keyword at all becomes an attribute. New ones can be added, changed, or removed after construction too, exactly like any other plain object's instance <dfn data-en="the dict every plain instance carries by default, mapping each instance attribute's name to its value -- the same backing store types.SimpleNamespace exposes directly through vars() or .__dict__" data-vn="giữ nguyên &quot;instance __dict__&quot; — dict riêng mỗi instance có sẵn, chứa tên và giá trị attribute; types.SimpleNamespace lộ trực tiếp dict này qua vars() hoặc .__dict__">instance <code>__dict__</code></dfn> (Day 1's object model, not a new rule):</p>
+<pre><code>ns.city = <span class="str">"Hanoi"</span>          <span class="cm"># add a new attribute after construction</span>
+<span class="kw">print</span>(ns)                        <span class="cm"># namespace(name='Ana', age=30, city='Hanoi') -- confirmed live</span>
+<span class="kw">print</span>(vars(ns))                  <span class="cm"># {'name': 'Ana', 'age': 30, 'city': 'Hanoi'} -- confirmed live</span>
+
+<span class="kw">del</span> ns.city
+<span class="kw">print</span>(ns)                        <span class="cm"># namespace(name='Ana', age=30) -- confirmed live, city removed</span></code></pre>
+<p><code>vars(ns)</code> (or <code>ns.__dict__</code> directly) exposes the exact backing dict — <code>types.SimpleNamespace</code> genuinely is "a dict with dot access," confirmed live, not just an analogy.</p>
+
+<h2>2 · Reaching into it wrong: a plain <code>AttributeError</code></h2>
+<p>Asking for an attribute that was never set raises the same error any ordinary object raises for a missing attribute — not <code>KeyError</code>, since there is no bracket lookup involved at all:</p>
+<pre><code><span class="kw">try</span>:
+    ns.missing
+<span class="kw">except</span> <span class="kw">AttributeError</span> <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># 'types.SimpleNamespace' object has no attribute 'missing' -- confirmed live</span></code></pre>
+<p>That is the trade against a plain <code>dict</code>: a typo'd key like <code>record["nmae"]</code> is also a <code>KeyError</code>, same category of failure, but a <code>dict</code> offers <code>.get(key, default)</code> for a graceful fallback (Day 3) — <code>SimpleNamespace</code> has no equivalent; a missing attribute is always an outright error, never a quiet default.</p>
+
+<h2>3 · The real use: JSON without declaring a class first</h2>
+<p><code>json.loads()</code> accepts an <code>object_hook</code> — a function called on every JSON object as it's parsed. Passing <code>types.SimpleNamespace</code> itself turns every nested JSON object into dot-accessible attributes, recursively, with zero class declarations anywhere:</p>
+<pre><code><span class="kw">import</span> json, types
+
+raw = <span class="str">'{"name": "Ana", "address": {"city": "Hanoi"}}'</span>
+person = json.loads(raw, object_hook=<span class="kw">lambda</span> d: types.SimpleNamespace(**d))
+
+<span class="kw">print</span>(person.name)            <span class="cm"># Ana -- confirmed live</span>
+<span class="kw">print</span>(person.address.city)    <span class="cm"># Hanoi -- confirmed live, the nested object too</span></code></pre>
+<p>This is the whole reason the class exists: a <code>dataclass</code> needs <code>name</code>, <code>age</code>, and every other field named and typed before any JSON arrives — exactly right when the shape is known and worth enforcing (an API's request body, Day 7's records). <code>SimpleNamespace</code> is right when the shape is whatever today's data happens to contain, and declaring it up front would be pure overhead for a one-off script.</p>
+
+<h2>4 · Where it stops: no enforcement at all</h2>
+<p>Confirmed directly, side by side: a <code>@dataclass</code> built with no special options still allows a brand-new attribute after construction, same as <code>SimpleNamespace</code> — that freedom is not what tells them apart. What <em>does</em> tell them apart is required fields. A <code>dataclass</code>'s <code>__init__</code> demands every declared field or raises <code>TypeError</code> immediately:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Person:
+    name: str
+    age: int
+
+<span class="kw">try</span>:
+    Person(name=<span class="str">"Ana"</span>)     <span class="cm"># age is missing</span>
+<span class="kw">except</span> <span class="kw">TypeError</span> <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># missing 1 required positional argument: 'age' -- confirmed live</span>
+
+ns_empty = types.SimpleNamespace()   <span class="cm"># confirmed live -- no error, no fields required at all</span></code></pre>
+<p>A <code>SimpleNamespace()</code> with zero keywords is perfectly valid. There is no required shape, no type checking on any value, and no way to list "what fields does this have" without just inspecting one live instance's <code>__dict__</code> — the price of skipping the declaration entirely.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nowhere directly — <code>types.SimpleNamespace</code> is a single plain object, not a collection, and has no row/column structure of any kind. The nearest pandas analog, a <code>Series</code> exposing its values by attribute-style access in some cases, is a different mechanism entirely (backed by an index, not a fixed set of keyword names) and is <code>data/</code>'s territory, not demonstrated here.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/104_types_simplenamespace.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/104_types_simplenamespace.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a <code>SimpleNamespace</code> from keyword arguments, catching the <code>AttributeError</code> a missing attribute raises, parsing JSON straight into nested <code>SimpleNamespace</code> objects via <code>object_hook</code>, and converting one back into a plain <code>dict</code> with <code>vars()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="types.SimpleNamespace(**kwargs) stores every keyword argument as a plain instance attribute, confirmed live -- ns = types.SimpleNamespace(name='Ana', age=30) then ns.name and ns.age both work with ordinary dot access, no class definition needed anywhere first.">
+    <p class="stem">What does <code>types.SimpleNamespace(name="Ana", age=30)</code> actually produce?</p>
+    <button class="opt" data-ok>an object exposing name and age as plain dot-accessible attributes already</button>
+    <button class="opt">an object exposing name and age as regular bracket-indexed dict keys</button>
+    <button class="opt">a fully validated dataclass instance requiring those two named fields exactly</button>
+  </div>
+  <div class="q" data-why="Asking a SimpleNamespace for an attribute that was never set raises a plain AttributeError, confirmed live -- 'types.SimpleNamespace' object has no attribute 'missing'. This is not KeyError, since there is no bracket lookup involved; unlike dict.get(), SimpleNamespace has no built-in graceful-fallback equivalent at all.">
+    <p class="stem">What happens when code reads <code>ns.missing</code> on a <code>SimpleNamespace</code> with no such attribute set?</p>
+    <button class="opt" data-ok>a plain AttributeError is raised right away, not any sort of KeyError</button>
+    <button class="opt">a quiet None value comes back instead, same as dict.get() would return</button>
+    <button class="opt">the whole namespace object silently gets that exact new attribute added there</button>
+  </div>
+  <div class="q" data-why="Confirmed directly side by side: a plain @dataclass still allows a brand-new attribute after construction, same freedom SimpleNamespace has -- that is not the real difference. What differs is required fields: a dataclass's __init__ demands every declared field and raises TypeError immediately if one is missing, confirmed live, while types.SimpleNamespace() with zero keywords at all is perfectly valid.">
+    <p class="stem">What actually distinguishes a plain <code>@dataclass</code> from <code>types.SimpleNamespace</code>, confirmed directly?</p>
+    <button class="opt" data-ok>a dataclass demands every declared field up front; SimpleNamespace demands none</button>
+    <button class="opt">only a dataclass instance ever permits adding any brand-new attribute later</button>
+    <button class="opt">only SimpleNamespace instances ever support plain everyday dot-style attribute access here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/types.html#types.SimpleNamespace"><code>types.SimpleNamespace</code></a> docs — the short, complete reference for the class's constructor, <code>repr()</code>, and equality behavior, plus the surrounding <code>types</code> module page for the other dynamic-type helpers it didn't need today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day104">glossary</a> under Day 104.<br>
+💬 Anything unclear — why <code>SimpleNamespace</code> equality compares attributes but refuses to equal an equivalent plain <code>dict</code>, or when a <code>NamedTuple</code>/Day 53's <code>namedtuple</code> would serve better than either? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

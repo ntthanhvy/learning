@@ -262,6 +262,8 @@
       file: "lessons/0126-etags-aspnetcore-requestheaders-responseheaders.html" },
     { n: 127, date: "2026-11-09", title: "Cache-Control, now in C# too",
       file: "lessons/0127-cache-control-aspnetcore-cachecontrolheadervalue.html" },
+    { n: 128, date: "2026-11-10", title: "Output caching, now in C# too",
+      file: "lessons/0128-output-caching-aspnetcore-addoutputcache.html" },
   ];
 
   const REFS = [

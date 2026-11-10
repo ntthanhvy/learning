@@ -254,6 +254,8 @@
       file: "lessons/0122-np-isin.html" },
     { n: 123, date: "2026-11-09", title: "np.nan_to_num(): replacing NaN AND infinity in one call, with a default that fillna() doesn't share",
       file: "lessons/0123-np-nan-to-num.html" },
+    { n: 124, date: "2026-11-10", title: "np.nonzero() and np.flatnonzero(): finding WHERE, and a tuple that is always truthy",
+      file: "lessons/0124-np-nonzero-flatnonzero.html" },
   ];
 
   const REFS = [

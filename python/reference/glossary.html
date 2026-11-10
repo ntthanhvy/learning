@@ -732,6 +732,13 @@
   <tr><td>tobytes() / frombytes()</td><td>giữ nguyên "tobytes()"/"frombytes()" — tobytes() trả về bytes thô đã pack sẵn của array; frombytes() (gọi trên array rỗng cùng typecode) nạp lại từ bytes đó, round-trip chính xác; dùng để ghi/đọc buffer thẳng ra file nhị phân hay socket mà không cần tự định nghĩa format string như struct</td><td><code>arr.tobytes()</code> returns the array's already-packed raw bytes. <code>arr2.frombytes(data)</code>, called on an empty array of the matching typecode, rebuilds one from those bytes — confirmed live to round-trip exactly. Useful for writing a buffer straight to a binary file or socket without hand-writing a <code>struct</code> (Day 96) format string field by field.</td></tr>
 </table>
 
+<h2 id="day104">Day 104 — types.SimpleNamespace: attribute access without a class</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>types.SimpleNamespace</td><td>giữ nguyên "SimpleNamespace" — class trong module chuẩn types, nhận bất kỳ keyword argument nào và lưu từng cái thành attribute của instance; cho truy cập kiểu ns.name mà KHÔNG cần định nghĩa class trước; không có field cố định, không kiểm tra kiểu, không có shape bắt buộc cho constructor, khác với dataclass</td><td>A class in the standard-library <code>types</code> module that takes any keyword arguments and stores each one as a plain instance attribute — confirmed live, <code>types.SimpleNamespace(name='Ana', age=30)</code> gives dot access (<code>ns.name</code>, <code>ns.age</code>) with no class definition needed first. It has no fixed fields, no type checking, and no required constructor shape, unlike a <code>dataclass</code>.</td></tr>
+  <tr><td>instance __dict__ (SimpleNamespace)</td><td>giữ nguyên "instance __dict__" — SimpleNamespace lộ trực tiếp dict riêng của instance qua vars(ns) hoặc ns.__dict__; đây chính là nơi chứa mọi attribute đã gán</td><td><code>vars(ns)</code> (or <code>ns.__dict__</code> directly) on a <code>types.SimpleNamespace</code> exposes the exact backing dict of its attributes — confirmed live, genuinely "a dict with dot access," not just an analogy.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

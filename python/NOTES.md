@@ -12689,5 +12689,109 @@ fail *gracefully* so the learner sees which task failed.
   lesson_generated --day 103 --lesson 0103-review-retrieval-day-19.html
   --detail '{"by":"launchd"}'` was run from the repo root at the end of
   this round and succeeded.
-  
-
+- 2026-11-10 generation (Lesson 104, headless run): per Day 103's own
+  cadence note, Day 103 closed the nineteenth review cycle, so Day 104
+  resumes fresh topics — idempotency check first confirmed no
+  `lessons/0104-*.html` on disk, no `n: 104` entry in `nav.js`, and no
+  2026-11-10 entry already in this file, plus a DB query (`course_progress`
+  for `course='python'`, last 15 rows) showing the latest recorded row was
+  still day 103 from 2026-11-09, before writing anything. Read `MISSION.md`
+  (no-pandas/no-NumPy exclusion re-confirmed before writing a line),
+  `PLAN.md`'s Phase 2 spine, this file's tail through Day 103's own closing
+  note, `assets/nav.js`'s tail, `RESOURCES.md`, the sole file in
+  `learning-records/` (the Day 1 baseline — reading/writing asymmetry, SQL
+  as the bridge, nothing new assumed free), and Lessons 101-102 plus their
+  practice files as structural templates. A fresh case-insensitive grep
+  across every lesson title/body, every practice file, `glossary.html`, and
+  `RESOURCES.md` confirmed Day 103's three standing fresh-gap candidates —
+  `types.SimpleNamespace`, `locale`, `socket` — were all still genuinely
+  zero-hit as dedicated topics, every existing hit a passing mention inside
+  another lesson's own gap-list callout. Picked `types.SimpleNamespace`
+  over `locale` (narrower, mostly a formatting corner) and `socket` (real
+  networking is deeper than a 20-minute lesson and edges toward Phase 2b's
+  FastAPI/deployment territory Days 22-25 already touch at a conceptual
+  level): it is squarely language/stdlib, builds directly on Day 7's
+  `dataclass` and Day 1's object-model vocabulary, and needs nothing from
+  the still-untaught FastAPI track. Probed every behavioral claim live in a
+  scratch dir (`.scratch-python-104/`, created inside the repo per this
+  file's established convention since `/tmp` scratch paths are unavailable
+  in this sandbox, deleted after; `uv run python3 probe*.py`) rather than
+  trusting memory: confirmed `types.SimpleNamespace(**kwargs)` stores every
+  keyword as a plain attribute with dot access and a `namespace(...)` repr;
+  confirmed `vars(ns)`/`ns.__dict__` expose the exact backing dict; confirmed
+  reading a missing attribute raises a plain `AttributeError`, not
+  `KeyError`; confirmed `json.loads(text, object_hook=lambda d:
+  types.SimpleNamespace(**d))` turns nested JSON objects into nested
+  `SimpleNamespace` objects recursively, including a nested `address.city`
+  access; confirmed `del ns.attr` removes an attribute and a second `del` on
+  the same name raises `AttributeError`. One wrong assumption caught and
+  corrected before writing a line: an early plan was to contrast
+  `SimpleNamespace` against `dataclass` by claiming a plain `@dataclass`
+  blocks new attributes after construction — probing live showed a plain
+  `@dataclass` (no `slots=True`) actually allows a new attribute exactly
+  like `SimpleNamespace` does, and only `@dataclass(slots=True)` blocks it
+  with `AttributeError`; the lesson's section 4 was written around the
+  *actually* confirmed distinction instead — required fields at
+  construction time (`dataclass` raises `TypeError` on a missing field,
+  confirmed live; `SimpleNamespace()` with zero keywords is valid) — so no
+  false claim shipped. Checked the glossary for term collisions before
+  writing — grepped `SimpleNamespace` and `instance __dict__`
+  case-insensitively across the full `glossary.html`, zero existing rows
+  for the new terms (the existing `instance __dict__` row from Day 1 is a
+  distinct, more general entry; today's new row is scoped specifically to
+  how `SimpleNamespace` exposes that same mechanism). **New jargon: 2
+  inline `<dfn>`** (`types.SimpleNamespace`, `instance __dict__` as it
+  applies here) **folded into 2 glossary rows**, added as a new
+  `<h2 id="day104">` section directly after Day 102's (Day 103 added none,
+  being a review day). Verification performed mechanically, from a
+  dedicated script in `.scratch-python-104/` (deleted after): (1) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a on the new lesson — balanced (div 6/6, p 19/19, code 71/71,
+  button 9/9, script 3/3, dfn 2/2, pre 6/6, h2 7/7, h1 1/1, em 1/1,
+  strong 3/3, a 2/2); (2) a raw-unescaped-`&` regex scan on the new lesson
+  — zero hits; (3) a per-question quiz option word-count check via
+  regex-strip-tags extraction — first draft mismatched on all three
+  questions, iterated option-by-option across several passes until all
+  three landed on equal per-question counts: 11/11/11, 12/12/12, 11/11/11;
+  (4) an `html.parser.HTMLParser` full-document parse of the new lesson and
+  of `glossary.html` — no parse errors on either; (5) a table/tr/th/td/h2/
+  p/div balance check on `glossary.html` after its new section, plus a
+  duplicate-`id="dayNN"` scan — balanced (table 87/87, tr 380/380,
+  th 261/261, td 879/879, h2 87/87) with zero duplicates among 87 ids,
+  `day104` present exactly once; a case-insensitive duplicate-term scan
+  across the glossary's term column reproduced the one pre-existing
+  collision already on record (`dependency`), confirmed neither new term
+  collides with it or any other existing row; (6) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all three
+  clean; (7) a duplicate `n:` scan across `nav.js`'s `LESSONS` array — 104
+  entries, zero duplicates, max `n` is 104; (8) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 5 hits total,
+  all confirmed by direct line lookup to sit inside the required "Why
+  today" scope mention and the required "Where pandas/NumPy go from here"
+  boundary callout (naming a pandas `Series`'s attribute-style access as a
+  different, index-backed mechanism, not demonstrated), and zero hits in
+  the practice file — no worked pandas/NumPy example anywhere. The shipped
+  (unsolved) `practice/104_types_simplenamespace.py` was executed directly
+  from its real `practice/` location and printed exactly 4 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-104/` (copied from the
+  shipped file, then each TODO body filled in directly — never editing the
+  shipped file itself, deleted after) printed all 4 ✓ and "All green" on
+  two consecutive runs; the shipped file was re-run afterward from its real
+  location and reproduced the identical all-✗ result, confirming no
+  leakage back into the baseline. Added one new `RESOURCES.md` line for
+  `types.SimpleNamespace`, placed directly after Day 102's `array` line and
+  before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 104 in `nav.js` with today's date
+  (2026-11-10) right after the `n: 103` entry. `python/learning-records/`
+  was not touched this round — the sole file there is still the Day 1
+  baseline record with no newer quiz/kata/lesson_completed signal, so a
+  routine fresh-topic pick following the course's own settled cadence was
+  the right call, same fallback this file's own convention has used in
+  recent rounds. Cadence note for the next round: Day 104 is fresh day 1 of
+  a new three-fresh-then-review cycle — Day 105 should be fresh day 2.
+  Standing fresh-gap candidates still open going into Day 105: `locale` and
+  `socket` — `types.SimpleNamespace` should be dropped from this list going
+  forward, now fully taught. `bin/record-progress python lesson_generated
+  --day 104 --lesson 0104-types-simplenamespace.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this round
+  and succeeded.

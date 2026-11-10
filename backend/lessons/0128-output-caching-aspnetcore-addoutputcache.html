@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 128 · Output caching, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 128 · ~20 min</p>
+<h1>Output caching, now in C# too</h1>
+<p class="byline">Lesson 127's own scope line named two things it deliberately skipped: ASP.NET Core's Response Caching Middleware and its newer Output Caching Middleware, calling both "a separate, higher-level concern — a server-side cache that actually stores and serves response bodies, built on top of these same header values rather than being the header mechanism itself." Today picks up that thread: not the <code>Cache-Control</code> header itself anymore, but a middleware that decides, stores, and serves whole responses.</p>
+
+<h2>1 · Two middlewares, two different questions</h2>
+<p>ASP.NET Core actually ships two separate answers to "cache this response server-side," and they ask different questions:</p>
+<ul>
+<li><strong>Response Caching Middleware</strong> (<code>AddResponseCaching()</code>/<code>UseResponseCaching()</code>) asks: <em>"does this response's own <code>Cache-Control</code> header say it's cacheable?"</em> It only stores a response if the response itself is marked <code>public</code>, respects <code>max-age</code>/<code>no-store</code>/<code>private</code> the same way a compliant HTTP proxy would, and refuses anything with an <code>Authorization</code> or <code>Set-Cookie</code> header. It is Lesson 127's <code>CacheControlHeaderValue</code> given a place to actually land, enforced by code instead of trusted to whatever a downstream proxy chooses to honor.</li>
+<li><strong><dfn data-en="an ASP.NET Core middleware (Microsoft.AspNetCore.OutputCaching, .NET 7+) that stores and serves complete response bodies server-side based on policies the app configures in code, independent of the response's own Cache-Control header -- registered via AddOutputCache()/UseOutputCache(), selected per endpoint via the CacheOutput() method or the [OutputCache] attribute" data-vn="Output Caching Middleware (giữ nguyên) — middleware của ASP.NET Core (Microsoft.AspNetCore.OutputCaching, .NET 7+) lưu và trả nguyên response body ở server, dựa theo policy tự định nghĩa trong code, không phụ thuộc header Cache-Control của response -- đăng ký qua AddOutputCache()/UseOutputCache(), chọn cho từng endpoint qua method CacheOutput() hoặc attribute [OutputCache]">Output Caching Middleware</dfn></strong> (<code>AddOutputCache()</code>/<code>UseOutputCache()</code>) asks a completely different question: <em>"does my own app-configured policy say to cache this?"</em> It ignores the response's <code>Cache-Control</code> header entirely and instead stores whatever a policy written in C# tells it to, independent of HTTP semantics. Microsoft's own docs are blunt about which one to reach for in a typical API or UI app: output caching is "a better approach," because "the configuration determines what to cache independent of HTTP headers" — no fighting a browser that sends <code>Cache-Control: no-cache</code> on every refresh.</li>
+</ul>
+<p>Lesson 9's three caching layers (HTTP header, application cache, DB buffer cache) didn't have a slot for either of these — both middlewares sit <em>inside</em> the server process, between routing and the handler, which makes them a fourth shape: a server-side cache of entire response bodies, configured by the app rather than negotiated over HTTP.</p>
+
+<h2>2 · Wiring it up and picking an endpoint</h2>
+<p>Output caching needs both a service registration and a pipeline step, then an explicit opt-in per endpoint — nothing is cached just because the middleware is present:</p>
+<pre><code>builder.Services.AddOutputCache();
+<span class="cm">// ... later, after building the app:</span>
+app.UseOutputCache();
+
+app.MapGet(<span class="st">"/products/{id}"</span>, GetProduct).CacheOutput();</code></pre>
+<p>That single <code>.CacheOutput()</code> call opts one endpoint in, using the <dfn data-en="the rules ASP.NET Core's Output Caching Middleware applies to an endpoint when no custom policy is given: only HTTP 200 responses are cached, only GET or HEAD requests are cached, responses that set a cookie are never cached, and responses to authenticated requests are never cached -- the same four rules Response Caching Middleware enforces via the Cache-Control header, enforced here by code instead" data-vn="default caching policy (giữ nguyên) — luật mặc định của Output Caching Middleware khi không set policy riêng: chỉ cache response 200, chỉ cache GET/HEAD, response có set cookie hoặc đến từ request đã authenticate thì không bao giờ cache">default caching policy</dfn>: only 200 responses, only GET/HEAD, never a response that sets a cookie, never a response to an authenticated request. The same <code>[OutputCache]</code> attribute does the same thing on a controller action.</p>
+
+<h2>3 · Policies: expiry, and controlling the cache key</h2>
+<p>A single default expiry (one minute) rarely fits every endpoint, so named policies configured once at startup let different endpoints opt into different rules:</p>
+<pre><code>builder.Services.AddOutputCache(options =&gt;
+{
+    options.AddBasePolicy(b =&gt; b.Expire(TimeSpan.FromSeconds(10)));
+    options.AddPolicy(<span class="st">"ByCulture"</span>, b =&gt; b.SetVaryByQuery(<span class="st">"culture"</span>));
+});
+
+app.MapGet(<span class="st">"/catalog"</span>, GetCatalog).CacheOutput(<span class="st">"ByCulture"</span>);</code></pre>
+<p><code>SetVaryByQuery</code> is the policy-builder answer to a problem Lesson 127's own typed headers never had to solve: by default the whole URL — including every query string — is part of the cache key, so <code>/catalog?culture=en</code> and <code>/catalog?culture=vi</code> are correctly cached as two separate entries. Naming <code>culture</code> explicitly keeps the key scoped to the one query parameter that actually changes the response, instead of accidentally fragmenting the cache over every unrelated query string a client happens to send.</p>
+
+<h2>4 · Where Lesson 126's ETag comes back</h2>
+<p>Output caching doesn't replace Lesson 126's <code>ETag</code>/<code>If-None-Match</code> pattern — it reuses it. If a handler sets an <code>ETag</code> header before <code>CacheOutput()</code> returns the response, a later request carrying a matching <code>If-None-Match</code> gets a <code>304 Not Modified</code> instead of the cached body being resent in full:</p>
+<pre><code>app.MapGet(<span class="st">"/report"</span>, (context) =&gt;
+{
+    context.Response.Headers.ETag = <span class="st">$"\"{reportVersion}\""</span>;
+    <span class="kw">return</span> WriteReport(context);
+}).CacheOutput();</code></pre>
+<p>This is the same <code>ETag</code>-driven revalidation Lesson 126 covered — output caching just adds that the 304 can now be served without even running the handler again, since the response is already sitting in the cache store.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> a frontend dev reaching for <code>stale-while-revalidate</code> in React Query or a service worker is solving the same "serve something now, verify freshness in the background" problem — but that's a client-side cache deciding what <em>it</em> trusts. Output caching is the server deciding, for every client, what it's willing to hand out without recomputing — the two aren't the same cache and don't need to agree with each other.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>AddOutputCache()</code>/<code>UseOutputCache()</code>, the default caching policy, <code>CacheOutput()</code>/<code>[OutputCache]</code>, and policy-level <code>Expire()</code>/<code>SetVaryByQuery()</code> — plus naming Response Caching Middleware as the sibling that keys off the <code>Cache-Control</code> header instead. It does not cover tag-based eviction (<code>Tag()</code>/<code>IOutputCacheStore.EvictByTagAsync</code>), the Redis-backed <code>IOutputCacheStore</code> for multi-instance consistency, or writing a custom <code>IOutputCachePolicy</code> — real features, each a reasonable future lesson, out of scope for a first pass at the middleware's basic shape.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Response Caching Middleware keys its decision off the response's own Cache-Control header (public, max-age, etc.), the same way a compliant HTTP proxy would. Output Caching Middleware ignores that header and instead follows a policy configured in app code.">
+    <p class="stem">What actually distinguishes Output Caching from Response Caching Middleware?</p>
+    <button class="opt" data-ok>one follows an app-configured policy, while the other follows a header</button>
+    <button class="opt">one only works for POST, the other only works for GET</button>
+    <button class="opt">one requires Redis already installed, while the other needs no storage</button>
+    <button class="opt">one only runs during Development, while the other runs during Production</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs state output caching is a better fit for UI apps and general API caching because its configuration determines what to cache independent of HTTP headers -- browsers commonly send headers like Cache-Control: no-cache on refresh, which defeats header-driven response caching.">
+    <p class="stem">Why do the docs call output caching the better fit for most UI apps?</p>
+    <button class="opt" data-ok>its policy ignores headers a browser often sends to block caching</button>
+    <button class="opt">it is the only one of the two that supports HTTPS</button>
+    <button class="opt">it removes the need for any database connection in the app</button>
+    <button class="opt">it was the very first caching feature ASP.NET Core ever shipped</button>
+  </div>
+  <div class="q" data-why="The default caching policy applied by CacheOutput()/[OutputCache] with no arguments: only 200 responses, only GET or HEAD requests, never a response that sets a cookie, and never a response to an authenticated request.">
+    <p class="stem">Which response does the default output caching policy actually skip?</p>
+    <button class="opt" data-ok>a 200 response to an authenticated GET request that sets a cookie</button>
+    <button class="opt">a 200 response to a plain unauthenticated GET request with no cookies</button>
+    <button class="opt">a 200 response to a HEAD request that carries no cookie ever</button>
+    <button class="opt">a 200 response under one kilobyte returned from any plain GET route</button>
+  </div>
+  <div class="q" data-why="By default the whole URL, including every query string, is part of the cache key. SetVaryByQuery(\"culture\") narrows that key to just the named query parameter, so unrelated query strings stop fragmenting the cache into unnecessary separate entries.">
+    <p class="stem">What problem does calling SetVaryByQuery("culture") actually solve?</p>
+    <button class="opt" data-ok>it stops unrelated query strings from splitting the cache key apart</button>
+    <button class="opt">it forces every single request to skip the cache store entirely</button>
+    <button class="opt">it converts the whole response body into a different content type</button>
+    <button class="opt">it raises the configured maximum size of a single cached response</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/output">Microsoft Learn: Output Caching Middleware</a> confirms <code>AddOutputCache()</code>/<code>UseOutputCache()</code>, the default policy's four rules, <code>CacheOutput()</code>/<code>[OutputCache]</code>, and the policy-builder methods (<code>Expire</code>, <code>SetVaryByQuery</code>, <code>SetVaryByHeader</code>, <code>Tag</code>) this lesson uses, plus the explicit "better approach for UI apps" recommendation over header-based caching. <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/middleware">Microsoft Learn: Response Caching Middleware</a> confirms the sibling's <code>Cache-Control</code>-header-driven conditions for caching (response must be <code>public</code>, no <code>Authorization</code>/<code>Set-Cookie</code>, etc.), including that same "Output caching is a better approach for UI apps" cross-reference. Lesson 9's own MDN <code>Cache-Control</code> citation still covers the underlying HTTP freshness vocabulary in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 9's caching layers, Lesson 126's ETag/revalidation, and Lesson 127's Cache-Control header, closing the two middlewares that lesson's scope line deliberately deferred. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "Output caching với Response caching, nếu bật cả hai cùng lúc thì cái nào thắng, hay là chạy độc lập với nhau?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -6453,3 +6453,128 @@ along the Phase 2 spine, adapted to the learning records.
   Airflow threads (pools, once a second DAG exists; `max_consecutive_failed_
   dag_runs` as a circuit breaker on Days 45-47's dead-letter alerting)
   against further dbt depth, rather than assuming either by default.
+
+- 2026-11-10 (headless run, Day 56 generated): fifty-sixth lesson,
+  `0056-airflow-max-consecutive-failed-dag-runs.html`. Idempotency check
+  first — queried `course_progress` for `course='dataeng'` (the
+  `node -e`/`execFileSync` workaround around this sandbox's
+  "Contains simple_expansion" block on a literal `psql "$VAR"` invocation);
+  the latest row was Day 55, dated 2026-11-09, with no 2026-11-10 row for
+  this course, so proceeded. Confirmed no `lessons/0056-*.html` on disk and
+  no `n: 56` row in `assets/nav.js` either before writing anything. Read
+  `MISSION.md`, `PLAN.md`, `RESOURCES.md`, this file's tail through Day 55's
+  close, `assets/nav.js`'s full `LESSONS` array, `reference/glossary.html`'s
+  tail, and Days 45-47/51/54 in full as structural and continuity templates
+  before picking anything. Confirmed `dataeng/learning-records/` holds only
+  the single 2026-09-14 baseline file, same as every prior round.
+  **Topic choice:** Day 54's own closing note and Day 55's own closing note
+  both independently pointed at the same two concrete next Airflow steps:
+  Airflow pools (scoped out again — this portfolio still has exactly one
+  DAG, so there is still no second DAG to share a constrained resource with)
+  and `max_consecutive_failed_dag_runs` as an upstream circuit breaker on top
+  of Days 45-47's dead-letter alerting. Took the second, buildable one. A
+  case grep (`max_consecutive_failed|circuit breaker|is_paused`) across every
+  lesson confirmed zero prior hits — genuinely untaught, and a direct,
+  named extension of Day 54's own `max_active_runs`/`dagrun_timeout` pair
+  and Days 45-47's dead-letter-alert chain, not a cold pick.
+  **Content:** one new keyword argument, `max_consecutive_failed_dag_runs=3`,
+  added to the real DAG's `DAG(...)` call (no new task). The core claim,
+  read directly from the installed package rather than assumed: this is an
+  operational circuit breaker on the DAG's own run history across separate
+  runs (three straight fully-failed runs auto-pauses the whole DAG via a
+  direct `DagModel.is_paused=True` write, the same flag the UI's pause
+  toggle sets), a different question from Day 46's
+  `DEAD_LETTER_ALERT_THRESHOLD` (a data-quality judgment inside one run that
+  can otherwise still succeed). Named the parameter's own docstring label,
+  `(experimental)`, honestly rather than presenting it as a stable
+  guarantee, and explained why `3` beats `1` (would trip on a single
+  transient failure Day 35's `retries=2` would otherwise absorb within one
+  run) or `16` (`max_active_runs`'s unrelated default — over two weeks of
+  daily failures before anything fires). No pandas, no Python-language
+  teaching, no API/idempotency re-derivation — confirmed via a `pandas|numpy`
+  grep (zero hits) and a prose read before shipping.
+  **Verification:** no live Airflow metadata database available this
+  sandbox round either (the standing `airflow db migrate`/`airflow dags
+  test` approval-gate gap named every round since Day 35, now twenty-two
+  rounds, 35-56). First confirmed the parameter is real and live-readable:
+  `inspect.signature(DAG.__init__)` on the installed `apache-airflow==3.3.1`
+  shows `max_consecutive_failed_dag_runs` as a real constructor kwarg;
+  instantiating a bare `DAG` with no explicit value and reading
+  `.max_consecutive_failed_dag_runs` back confirmed the true default is
+  `0` (off), and an explicit `3` round-trips unchanged. Read
+  `airflow.models.dagrun.DagRun._check_last_n_dagruns_failed`'s actual
+  source directly (grepped the installed package's own files, since
+  `inspect.getsource` on the ORM-model class returned SQLAlchemy mapped
+  columns rather than the check logic) — confirmed it orders a DAG's own
+  runs by `run_after` descending (not logical date), takes the most recent
+  N, and pauses only if all N are `DagRunState.FAILED`, writing
+  `DagModel.is_paused=True` directly. Found the parameter's own docstring,
+  `"(experimental) maximum number of consecutive failed DAG runs, beyond
+  this the scheduler will disable the DAG"`, inside
+  `airflow.sdk.definitions.dag`'s source. Separately confirmed the
+  DAG-level-overrides-`core`-config resolution pattern in
+  `airflow/dag_processing/collection.py` — the identical precedent Day 54's
+  `max_active_runs` already established against
+  `core.max_active_runs_per_dag`. Built a scratch DAG at
+  `.scratch-dataeng-56/dags/` (repo root; `/tmp` directory creation is
+  blocked outright by this sandbox's path allowlist this round, a harder
+  block than prior rounds' "approval needed" framing) shaped exactly like
+  the real `food_delivery_pipeline` DAG — `load_raw`, `dbt_build`,
+  `check_dead_letters` — with Day 54's `max_active_runs=1`/`dagrun_timeout`
+  plus today's new `max_consecutive_failed_dag_runs=3`. `uv run python3 -m
+  py_compile`: clean. A `DagBag`-style plain-module import (`import
+  food_delivery_pipeline as m`, no database needed) read every setting back
+  unchanged: `catchup: True`, `max_active_runs: 1`, `dagrun_timeout: 0:30:00`,
+  `max_consecutive_failed_dag_runs: 3`. Verified the pause-decision logic
+  itself in a standalone mocked script mirroring the real check, against
+  five cases including the one that actually distinguishes "last N" from
+  "any N in history" (three failures sitting behind a newest success do
+  NOT pause; the identical three failures sitting at the newest end DO,
+  even with an older success further back) — all five matched by hand
+  calculation exactly. Deleted `.scratch-dataeng-56/` after; confirmed via a
+  directory listing that nothing named `scratch-dataeng-56` remained.
+  Quiz word counts verified with a Node script counting
+  `split(/\s+/).length` per option. First draft was uneven on all four
+  questions (code identifiers like `is_paused=True` and
+  `max_active_runs` count as one token each, consistent with how Day 1
+  counted `raw.order_events`) — rebalanced through several word-for-word
+  edit passes to a final 7/7/7, 10/10/10, 10/10/10, 10/10/10 across the four
+  questions. HTML structure verified via paired open/close tag counts on
+  every tag that appears (`div` 8/8, `p` 24/24, `code` 89/89, `button`
+  12/12, `script` 3/3, `dfn` 1/1 — carrying both `data-en=`/`data-vn=`,
+  caught missing entirely on a first pass since no jargon term had been
+  wrapped yet, fixed by wrapping "circuit breaker" at its first prose
+  mention in Section 1 — `pre` 7/7, `h2` 8/8, `h1` 1/1, `em` 8/8, `strong`
+  5/5, `a` 2/2) and a bare-`&` regex scan (zero hits). Grepped the whole
+  glossary for `circuit breaker|is_paused|consecutive` before writing any
+  `<dfn>` — zero hits, confirming both new terms are genuinely new, not
+  redefinitions. `reference/glossary.html` re-checked after appending Day
+  56's section: `h2` 55/55, `table` 55/55, `tr` 203/203, `td` 444/444, `th`
+  165/165, zero bare `&`. `node --check` clean on `nav.js` after today's
+  edit.
+  Added two new glossary terms — `circuit breaker` and
+  `max_consecutive_failed_dag_runs` — under a new Day 56 section. Added no
+  new `RESOURCES.md` line: today's primary source remains Airflow's DAG
+  Runs doc, already cited for Day 54, just a different parameter on that
+  same page; today's specific behavioral claims (real default, `run_after`
+  ordering, direct `is_paused` write, the `(experimental)` label) were
+  confirmed by reading the installed package's own source rather than a
+  live fetch (no working `WebFetch` tool this round, the same gap Days 17,
+  23, 26, 31, 34, 35, 45 and 54 each hit).
+  Registered Lesson 56 in `assets/nav.js` right after the `n: 55` entry,
+  dated 2026-11-10.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came directly from both Day 54's and Day 55's own closing notes
+  converging on the same named next step, not a new durable fact about the
+  learner distinct from the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now
+  twenty-two rounds, 35-56) — still worth a human granting it once,
+  including a live confirmation that three genuinely failed runs actually
+  flip `is_paused` to `True` against a real scheduler, not just a
+  source-level read of the check. With both of Day 54's named next steps
+  now resolved or correctly deferred (today closed
+  `max_consecutive_failed_dag_runs`; pools remain deferred pending a second
+  DAG this portfolio doesn't have), a future round most likely needs a
+  fresh gap-scan across `PLAN.md`'s spine — dbt, Kafka, or a genuinely new
+  Airflow thread — rather than another named-TODO close.

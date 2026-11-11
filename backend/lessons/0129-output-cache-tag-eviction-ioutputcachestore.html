@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 129 · Evicting an output cache on purpose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 129 · ~20 min</p>
+<h1>Evicting an output cache on purpose</h1>
+<p class="byline">Lesson 128's own scope line named exactly this as the next gap: tag-based eviction and the storage question behind <code>IOutputCacheStore</code>, both deliberately left out of that first pass at <code>AddOutputCache()</code>. A ten-second expiry (Lesson 128's <code>Expire()</code>) eventually clears a stale cached response on its own, but "a blog post just got edited, purge it now" can't wait ten seconds — it needs a way to reach in and evict specific entries on demand.</p>
+
+<h2>1 · Tagging a group of endpoints</h2>
+<p>A tag is just a label attached to a policy, applied to one endpoint directly or to a whole group through a base policy. <code>CacheOutput()</code> takes a builder lambda the same way <code>AddPolicy</code> does, so tagging a single endpoint needs no named policy at all:</p>
+<pre><code>app.MapGet(<span class="st">"/blog"</span>, GetBlogIndex)
+    .CacheOutput(b =&gt; b.Tag(<span class="st">"tag-blog"</span>));
+app.MapGet(<span class="st">"/blog/post/{id}"</span>, GetBlogPost)
+    .CacheOutput(b =&gt; b.Tag(<span class="st">"tag-blog"</span>));</code></pre>
+<p>Both endpoints now carry <code>tag-blog</code>, even though they cache two completely different shapes of response. A tag doesn't change what gets cached or for how long — <code>Expire()</code> and <code>SetVaryByQuery()</code> from Lesson 128 still control that. It only gives a later eviction call something to reference.</p>
+
+<h2>2 · The eviction call itself</h2>
+<p>Eviction happens through <dfn data-en="an ASP.NET Core interface (Microsoft.AspNetCore.OutputCaching) for the output cache's storage backend -- its EvictByTagAsync(tag, cancellationToken) method is injected and called directly from application code to remove every cache entry carrying a given tag, on demand rather than waiting for expiry" data-vn="IOutputCacheStore (giữ nguyên) — interface của ASP.NET Core (Microsoft.AspNetCore.OutputCaching) cho storage backend của output cache -- method EvictByTagAsync(tag, cancellationToken) được inject và gọi trực tiếp từ code để xoá mọi cache entry mang 1 tag, chủ động thay vì chờ hết hạn">IOutputCacheStore</dfn>, injected like any other service and called directly from a handler:</p>
+<pre><code>app.MapPost(<span class="st">"/purge/{tag}"</span>, <span class="kw">async</span> (IOutputCacheStore cache, <span class="kw">string</span> tag) =&gt;
+{
+    <span class="kw">await</span> cache.EvictByTagAsync(tag, <span class="kw">default</span>);
+});</code></pre>
+<p>A <code>POST /purge/tag-blog</code> removes every entry either of Lesson 1's two endpoints wrote, immediately — not after whatever <code>Expire()</code> happened to be set to. The natural place to call this isn't a dedicated purge endpoint, though: it's the same handler that just edited the blog post, right after its write to Postgres succeeds, so the cache and the database change together instead of the cache catching up on its own schedule.</p>
+<p>A base policy can tag everything at once, which is the shape a blanket "flush the whole output cache" button needs:</p>
+<pre><code>options.AddBasePolicy(b =&gt; b.Tag(<span class="st">"tag-all"</span>));</code></pre>
+<p>Calling <code>EvictByTagAsync("tag-all", default)</code> then clears every cached entry in the app, the same one-call shape as purging a single tag — no special "clear everything" method exists, because tagging everything with one shared tag already gets there.</p>
+
+<h2>3 · Why eviction needs its own storage question</h2>
+<p>Lesson 121's idempotency-key pattern already introduced a shared cache interface, <code>IDistributedCache</code>, and it would be reasonable to expect output caching to reuse it. It doesn't, and Microsoft's own docs give a specific reason: <code>EvictByTagAsync</code> needs to find and remove every entry sharing a tag as one atomic operation, and <code>IDistributedCache</code>'s plain key-value <code>Get</code>/<code>Set</code>/<code>Remove</code> contract has no operation shaped like that at all. <code>IOutputCacheStore</code> exists as its own interface precisely because tagging demands something <code>IDistributedCache</code> was never designed to do.</p>
+<p>The default <code>IOutputCacheStore</code> implementation sits on top of .NET's in-memory <code>MemoryCache</code> — fine for one instance, but Lesson 8's stateless-handler problem shows up again immediately: a tag evicted on instance A leaves instance B still serving the old cached response, since each instance's <code>MemoryCache</code> is its own separate copy. The documented fix is a Redis-backed store, wired in before <code>AddOutputCache()</code>:</p>
+<pre><code>builder.Services.AddStackExchangeRedisOutputCache(options =&gt;
+{
+    options.Configuration = builder.Configuration.GetConnectionString(<span class="st">"Redis"</span>);
+});
+
+builder.Services.AddOutputCache();</code></pre>
+<p><code>AddStackExchangeRedisOutputCache</code> is a different method from Lesson 121's <code>IDistributedCache</code>-flavored <code>AddStackExchangeRedisCache</code> — same backing store, two separate registrations, because the two interfaces solve different problems with different contracts on top of it.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this reads like invalidating a React Query key after a mutation — call a purge after the write, name what it affects precisely, done. The difference is scope: React Query's cache lives in one browser tab and dies when the tab closes. <code>EvictByTagAsync</code> against the default in-memory store only clears one server instance's copy; clearing every instance behind a load balancer needs the shared Redis store, the same "state has to live somewhere every instance can see" rule Lesson 8 raised for sessions and rate-limit counters.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Tag()</code> on a policy builder, <code>IOutputCacheStore.EvictByTagAsync</code>, and <code>AddStackExchangeRedisOutputCache</code> as the documented multi-instance fix. It does not cover writing a custom <code>IOutputCacheStore</code> implementation against a different backing store, the <code>SizeLimit</code>/<code>MaximumBodySize</code> cache-wide limits, or <code>SetLocking(false)</code>'s resource-locking opt-out — real knobs on the same options class, out of scope for a first pass at eviction specifically.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A tag is a label attached to a policy, applied per endpoint or via a base policy. It doesn't change what gets cached or for how long -- Expire() and SetVaryByQuery() still control that -- it only gives a later EvictByTagAsync call something to target.">
+    <p class="stem">What does calling Tag("tag-blog") on an endpoint's policy actually change?</p>
+    <button class="opt" data-ok>nothing about caching itself, only what a later eviction targets</button>
+    <button class="opt">the endpoint now skips the default caching policy for good</button>
+    <button class="opt">the endpoint's response body always gets compressed before any storage</button>
+    <button class="opt">the endpoint stops being eligible for any query string variation</button>
+  </div>
+  <div class="q" data-why="IOutputCacheStore is injected like any other service, and its one relevant method, EvictByTagAsync(tag, cancellationToken), is called directly from handler code -- commonly right after a write that makes the cached data stale, not only from a dedicated purge endpoint.">
+    <p class="stem">How does a handler actually trigger eviction of a tagged cache group?</p>
+    <button class="opt" data-ok>inject IOutputCacheStore and call its own EvictByTagAsync method right now</button>
+    <button class="opt">lower that one endpoint's Expire() value down to one second</button>
+    <button class="opt">restart the whole app so every MemoryCache entry clears out</button>
+    <button class="opt">remove the CacheOutput() call and then redeploy the entire service</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs state IDistributedCache isn't recommended for output caching because it lacks the atomic features tagging requires -- its plain Get/Set/Remove contract has no operation shaped like evicting every entry sharing one tag, which is why IOutputCacheStore exists as a separate interface.">
+    <p class="stem">Why doesn't output caching just reuse Lesson 121's IDistributedCache?</p>
+    <button class="opt" data-ok>its plain key-value contract lacks the atomic operation tagging needs</button>
+    <button class="opt">IDistributedCache was fully removed starting back in .NET version 8</button>
+    <button class="opt">IDistributedCache can only ever store plain strings, never response bytes</button>
+    <button class="opt">IOutputCacheStore actually predates IDistributedCache by several whole long odd years</button>
+  </div>
+  <div class="q" data-why="The default IOutputCacheStore implementation sits on MemoryCache, which is local to each server instance. Evicting a tag on instance A does nothing to instance B's separate in-memory copy -- the documented fix is AddStackExchangeRedisOutputCache, a shared store every instance reads and evicts from together.">
+    <p class="stem">Behind two instances, why might a tag eviction on instance A leave instance B still stale?</p>
+    <button class="opt" data-ok>the default store is in-memory and local to each instance</button>
+    <button class="opt">EvictByTagAsync only ever runs on whichever instance started up first</button>
+    <button class="opt">every tag quietly expires after sixty seconds no matter what</button>
+    <button class="opt">Redis is required before any tag can ever be attached</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/output">Microsoft Learn: Output Caching Middleware</a> confirms <code>Tag()</code> on the policy builder (per-endpoint, via a base policy's <code>With()</code> path match, or via <code>MapGroup</code>), the <code>IOutputCacheStore.EvictByTagAsync(tag, cancellationToken)</code> signature and its "a single statement that references that tag" eviction example, the default <code>MemoryCache</code>-backed store being local per server process, the explicit "not recommended" guidance against <code>IDistributedCache</code> for output caching ("doesn't provide atomic features, which are required for tagging"), and <code>AddStackExchangeRedisOutputCache</code> (distinct from <code>AddStackExchangeRedisCache</code>) as the documented Redis-backed alternative for cross-instance consistency. Lesson 128's own citation of this same page still covers <code>AddOutputCache()</code>/<code>UseOutputCache()</code> and the default policy in full, not repeated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 128's output caching middleware, Lesson 121's IDistributedCache, and Lesson 8's shared-state rule. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "Nếu EvictByTagAsync chạy xong mà ngay lúc đó có request khác đang cache response mới cho đúng tag đó, thì race condition này xử lý sao?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

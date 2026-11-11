@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 105 · locale: formatting numbers the way a reader expects</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 105 · ~20 min · 11 Nov 2026</p>
+<h1><code>locale</code>: formatting numbers the way a reader expects</h1>
+<p class="byline">An f-string's <code>{n:,}</code> always groups thousands with a comma and a period for the decimal point — fine for an English-speaking reader, wrong for plenty of others, who group with a period and use a comma for the decimal point instead. That grouping and punctuation choice is a <dfn data-en="a set of cultural formatting conventions for numbers, currency, dates, and text sorting tied to a language/region (e.g. en_US, de_DE) -- not a guess the program makes, but a named convention requested explicitly" data-vn="giữ nguyên &quot;locale&quot; — tập quy ước định dạng văn hóa cho số, tiền tệ, ngày tháng, sắp xếp chữ, gắn với 1 ngôn ngữ/vùng (ví dụ en_US, de_DE) — không phải thứ chương trình tự đoán, mà là 1 convention có tên, phải yêu cầu rõ ràng">locale</dfn>, and the standard library's <code>locale</code> module is what reads data formatted a given locale's way and writes output formatted the same way back.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>locale</code> is still genuinely zero-hit as a dedicated topic. Per Day 104's own cadence note, Day 104 was fresh day 1 of a new three-fresh-then-review cycle, so Day 105 is fresh day 2. Picked <code>locale</code> over the other standing candidate, <code>socket</code> (real networking is deeper than a 20-minute lesson and edges toward Phase 2b's FastAPI/deployment territory Days 21-25 already touch at a conceptual level — see those lessons' own repeated "no real socket opens" callouts). <code>locale</code> is squarely language/stdlib — a formatting-and-parsing corner of Python itself, not a data library. Zero pandas/NumPy surface: this is about <code>str</code>/<code>float</code> formatting, not a DataFrame column.</div>
+
+<h2>1 · Setting one, and why it is process-wide</h2>
+<p>By default a fresh Python process runs in the <code>'C'</code> locale — no grouping, plain <code>.</code> decimal point. <code>locale.setlocale()</code> changes that, but confirmed live: it mutates global state for the <em>entire process</em>, not just the calling function or module — every later call anywhere in the program sees the new setting:</p>
+<pre><code><span class="kw">import</span> locale
+
+<span class="kw">print</span>(locale.getlocale())                          <span class="cm"># ('C', 'UTF-8') -- confirmed live, before any change</span>
+
+locale.setlocale(locale.LC_ALL, <span class="str">"en_US.UTF-8"</span>)
+<span class="kw">print</span>(locale.getlocale())                          <span class="cm"># ('en_US', 'UTF-8') -- confirmed live</span></code></pre>
+<p><code>locale.LC_ALL</code> sets every category at once (numbers, currency, dates, text sorting); narrower constants like <code>LC_NUMERIC</code> or <code>LC_MONETARY</code> exist to set just one. An unrecognized name raises <dfn data-en="the exception locale.setlocale() raises when the requested locale name isn't installed/available on the running system -- confirmed live with locale.setlocale(locale.LC_ALL, 'not_a_real_locale')" data-vn="giữ nguyên &quot;locale.Error&quot; — exception mà locale.setlocale() raise khi tên locale yêu cầu không có sẵn/không cài trên máy đang chạy">locale.Error</dfn>, not a silent fallback — confirmed live, requesting a made-up name raises it immediately rather than quietly keeping the old setting.</p>
+
+<h2>2 · Formatting numbers the locale's way</h2>
+<p><code>locale.format_string()</code> and <code>locale.currency()</code> read the active locale's grouping and punctuation rules rather than hard-coding English conventions:</p>
+<pre><code>locale.setlocale(locale.LC_ALL, <span class="str">"en_US.UTF-8"</span>)
+
+<span class="kw">print</span>(locale.format_string(<span class="str">"%d"</span>, 1234567, grouping=<span class="kw">True</span>))
+<span class="cm"># 1,234,567 -- confirmed live</span>
+
+<span class="kw">print</span>(locale.currency(1234567.5, grouping=<span class="kw">True</span>))
+<span class="cm"># $1,234,567.50 -- confirmed live</span></code></pre>
+<p><code>grouping=True</code> is required — without it, no thousands separator is inserted at all, confirmed live. These both read from <code>locale.localeconv()</code>'s table under the hood, which exposes the raw punctuation directly if a value needs custom formatting beyond what the two helpers cover:</p>
+<pre><code>conv = locale.localeconv()
+<span class="kw">print</span>(conv[<span class="str">"decimal_point"</span>], conv[<span class="str">"thousands_sep"</span>])   <span class="cm"># . , -- confirmed live, en_US</span></code></pre>
+
+<h2>3 · Parsing numbers back the same way</h2>
+<p><code>locale.atof()</code> is the reverse direction: given a string formatted the active locale's way, it parses it back into a <code>float</code>, correctly stripping whatever grouping character that locale uses before handing the rest to <code>float()</code>. Confirmed live, this genuinely strips the comma rather than tripping on it — a plain <code>float()</code> call could not do this:</p>
+<pre><code><span class="kw">print</span>(locale.atof(<span class="str">"12,345,678.9"</span>))   <span class="cm"># 12345678.9 -- confirmed live, comma stripped correctly</span>
+
+<span class="kw">try</span>:
+    locale.atof(<span class="str">"abc"</span>)
+<span class="kw">except</span> <span class="kw">ValueError</span> <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># could not convert string to float: 'abc' -- confirmed live</span></code></pre>
+<p>This is the real reason the module exists beyond cosmetics: a number typed by a user, or read from a file produced by a locale-aware tool (a spreadsheet export, say), may already contain locale-specific grouping and decimal punctuation — <code>locale.atof()</code> is how a program undoes that correctly instead of a bespoke string-replace guess.</p>
+
+<div class="callout"><strong>f-string <code>{n:,}</code> is not locale-aware — confirmed live.</strong> <code>f"{1234567:,}"</code> always inserts a comma and always means a period as the decimal point, in <em>every</em> locale, regardless of what <code>locale.setlocale()</code> was most recently called with. The comma-grouping mini-language in format specs is a fixed, English-style convention baked into the language itself — reaching for the <code>locale</code> module is the deliberate opt-in when output genuinely needs to match the user's own locale instead.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/105_locale_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/105_locale_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: setting the <code>en_US.UTF-8</code> locale and reading back <code>getlocale()</code>, grouping a large integer with <code>locale.format_string()</code>, formatting currency with <code>locale.currency()</code>, and parsing a comma-grouped string back to a <code>float</code> with <code>locale.atof()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live: locale.setlocale() mutates process-wide global state, not anything scoped to a function, module, or thread -- every later call anywhere in the same process sees the new setting, which is exactly why calling it in a library import is considered bad practice elsewhere in the ecosystem.">
+    <p class="stem">What is true about calling <code>locale.setlocale(locale.LC_ALL, "en_US.UTF-8")</code> once, confirmed live?</p>
+    <button class="opt" data-ok>it changes global state for the whole process, seen by every later call</button>
+    <button class="opt">it only changes formatting for the one function that made that exact call</button>
+    <button class="opt">it only changes formatting for the current module, reset on each new import</button>
+  </div>
+  <div class="q" data-why="Confirmed live: locale.format_string('%d', n, grouping=True) only inserts the thousands separator when grouping=True is passed explicitly -- leaving it out produces no grouping at all, the plain digits with no separator inserted anywhere.">
+    <p class="stem">What happens calling <code>locale.format_string("%d", 1234567)</code> with no <code>grouping=True</code> argument, confirmed live?</p>
+    <button class="opt" data-ok>plain digits come back with no thousands separator inserted anywhere at all</button>
+    <button class="opt">a ValueError is raised right away, since grouping is a required argument</button>
+    <button class="opt">the English comma grouping style still gets applied anyway by default here</button>
+  </div>
+  <div class="q" data-why="Confirmed live: f-string comma-grouping (f'{n:,}') is a fixed English-style convention baked into the language's format-spec mini-language, completely unaffected by whatever locale.setlocale() was most recently called with -- it always uses a comma and a period no matter the active locale.">
+    <p class="stem">After calling <code>locale.setlocale(locale.LC_ALL, "en_US.UTF-8")</code>, what does <code>f"{1234567:,}"</code> actually do, confirmed live?</p>
+    <button class="opt" data-ok>still always groups with a comma, totally unaffected by the active locale setting</button>
+    <button class="opt">now groups the digits using whatever separator the currently active locale itself defines</button>
+    <button class="opt">raises a RuntimeError immediately, since every f-string requires locale.setlocale() to run first always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/locale.html"><code>locale</code></a> docs — the complete reference for every <code>LC_*</code> category, <code>localeconv()</code>'s full punctuation table, and the platform caveats around which locale names are actually installed (confirmed live in this environment: only <code>en_US.UTF-8</code> and <code>C</code> were available to test against — a real deployment target may have more or fewer installed, which is itself a thing worth checking rather than assuming).</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day105">glossary</a> under Day 105.<br>
+💬 Anything unclear — why calling <code>setlocale()</code> inside a library (rather than once at an application's entry point) is considered bad practice, or how this relates to Day 98's <code>string.Template</code> for a different kind of locale-independent substitution? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -256,6 +256,8 @@
       file: "lessons/0123-np-nan-to-num.html" },
     { n: 124, date: "2026-11-10", title: "np.nonzero() and np.flatnonzero(): finding WHERE, and a tuple that is always truthy",
       file: "lessons/0124-np-nonzero-flatnonzero.html" },
+    { n: 125, date: "2026-11-11", title: "np.take(): fancy indexing that also works on plain lists, with a mode= safety valve",
+      file: "lessons/0125-np-take.html" },
   ];
 
   const REFS = [

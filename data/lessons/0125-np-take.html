@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 125 · np.take(): fancy indexing that also works on plain lists, with a mode= safety valve</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 125 · ~20 min · 11 Nov 2026</p>
+<h1>np.take(): fancy indexing that also works on plain lists, with a mode= safety valve</h1>
+<p class="byline">Lesson 124 closed with two standing candidates from Lesson 122's own scan: <code>np.take()</code> and <code>np.roll()</code> (<code>np.corrcoef()</code> stays out of scope per <code>MISSION.md</code>'s "no deep linear algebra" line). Today picks <code>np.take()</code> — the function form of the fancy-indexing lookup <code>arr[[0, 2, 4]]</code> this course has used since Lesson 93, except it also works on a plain Python list and offers a <code>mode=</code> switch for out-of-bounds indices that fancy indexing has no equivalent for at all.</p>
+
+<h2>1 · The gap: arr[indices] silently assumes arr is already a NumPy array</h2>
+<p>Every "pick these positions" lookup so far — <code>arr[np.nonzero(arr)]</code> (Lesson 124), <code>arr[[-1, -2]]</code> — has relied on fancy indexing: square brackets directly on an <code>ndarray</code>, given a list or array of integer positions. That syntax is a method NumPy arrays define, not a general Python feature — a plain <code>list</code> has no such lookup at all. <dfn data-en="a NumPy function that returns the elements at given integer positions from an array-like input, along a chosen axis -- functionally equivalent to fancy indexing (arr[indices]) on an ndarray, but also accepts plain Python lists/tuples as input directly" data-vn="giữ nguyên 'np.take()' — hàm lấy các phần tử tại những vị trí (index) chỉ định từ một input dạng mảng, theo 1 axis chọn trước; về chức năng giống fancy indexing (arr[indices]) trên ndarray, nhưng nhận trực tiếp cả list/tuple Python thường làm input">np.take(a, indices)</dfn> does the same lookup as a plain function call instead, confirmed directly to accept either kind of input (numpy 2.5.4, pandas 3.1.1):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>])
+
+np.take(arr, [<span class="kw">0</span>, <span class="kw">2</span>, <span class="kw">4</span>])
+<span class="cm"># array([10, 30, 50])  -- identical result to arr[[0, 2, 4]]</span>
+
+plain_list = [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>]
+
+plain_list[[<span class="kw">0</span>, <span class="kw">2</span>]]
+<span class="cm"># TypeError: list indices must be integers or slices, not list -- fancy indexing is an ndarray-only feature</span>
+
+np.take(plain_list, [<span class="kw">0</span>, <span class="kw">2</span>])
+<span class="cm"># array([10, 30])  -- np.take() accepts the same plain list directly, no np.array() conversion needed first</span></code></pre>
+<p>Confirmed directly against the official docs page (which does show a plain-list example but never calls out the contrast): the official docs do not mention anywhere that this is exactly the gap fancy indexing cannot cross — <code>arr[indices]</code> raises a <code>TypeError</code> immediately on a plain list, while <code>np.take()</code> works on both a list and an array through the same one call.</p>
+
+<h2>2 · The trap: fancy indexing has no graceful out-of-bounds option; np.take()'s mode= does</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4) — documented, but easy to miss since the default hides it:</strong> both <code>arr[indices]</code> and <code>np.take(arr, indices)</code> raise <code>IndexError</code> by default on an out-of-bounds position — same behavior, no difference yet. The difference is that <code>np.take()</code> has a documented <code>mode=</code> parameter offering two alternatives to that crash, and fancy indexing has no equivalent parameter at all:</p>
+<pre><code>arr = np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>])
+
+arr[[<span class="kw">10</span>]]
+<span class="cm"># IndexError: index 10 is out of bounds for axis 0 with size 5</span>
+
+np.take(arr, [<span class="kw">10</span>])
+<span class="cm"># IndexError: index 10 is out of bounds for axis 0 with size 5 -- same crash, mode="raise" is the default</span>
+
+np.take(arr, [<span class="kw">10</span>, -<span class="kw">10</span>], mode=<span class="str">"clip"</span>)
+<span class="cm"># array([50, 10])  -- out-of-range indices get pinned to the nearest valid position (last/first element)</span>
+
+np.take(arr, [<span class="kw">10</span>, -<span class="kw">10</span>], mode=<span class="str">"wrap"</span>)
+<span class="cm"># array([10, 10])  -- out-of-range indices wrap around with modulo arithmetic instead</span></code></pre>
+<p>Confirmed directly from the official docs' own wording on <code>mode="clip"</code>: "clip mode means that all indices that are too large are replaced by the index that addresses the last element along that axis," and it explicitly adds that clip mode <strong>disables indexing with negative numbers</strong> — confirmed directly above, <code>-10</code> under <code>mode="clip"</code> clips to position <code>0</code> (the first element), not to a wrapped negative-index lookup the way plain fancy indexing treats <code>-1</code> as "last element." Reach for <code>mode="clip"</code>/<code>"wrap"</code> only when out-of-range positions are an expected, tolerable input — the default <code>"raise"</code> stays correct for everything else, since a silent clip/wrap on a position that was supposed to be valid hides a real bug instead of surfacing it.</p>
+</div>
+
+<h2>3 · axis= on a 2-D array, and Series.take() keeps the original labels</h2>
+<p>Confirmed directly, <code>axis=</code> controls which dimension the positions index into — omitted entirely, <code>np.take()</code> flattens the array first, same default as <code>np.flatnonzero()</code> from Lesson 124:</p>
+<pre><code>grid = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>], [<span class="kw">7</span>, <span class="kw">8</span>, <span class="kw">9</span>]])
+
+np.take(grid, [<span class="kw">0</span>, <span class="kw">2</span>], axis=<span class="kw">0</span>)
+<span class="cm"># array([[1, 2, 3], [7, 8, 9]])  -- rows 0 and 2, every column</span>
+
+np.take(grid, [<span class="kw">0</span>, <span class="kw">2</span>], axis=<span class="kw">1</span>)
+<span class="cm"># array([[1, 3], [4, 6], [7, 9]])  -- every row, columns 0 and 2</span>
+
+np.take(grid, [<span class="kw">0</span>, <span class="kw">2</span>, <span class="kw">4</span>])
+<span class="cm"># array([1, 3, 5])  -- no axis= at all: grid is flattened first, then positions 0, 2, 4 are taken</span></code></pre>
+<p>pandas defines its own <code>Series.take()</code>, confirmed directly to be position-based like <code>.iloc</code> rather than label-based like <code>.loc</code> — it keeps the <strong>original</strong> index labels attached to whichever rows got picked, it does not renumber them:</p>
+<pre><code>ser = pd.Series([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>], index=[<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>, <span class="str">"d"</span>, <span class="str">"e"</span>])
+
+ser.take([<span class="kw">0</span>, <span class="kw">2</span>, <span class="kw">4</span>])
+<span class="cm"># a    10
+# c    30
+# e    50
+# dtype: int64  -- labels a, c, e survive unchanged; .take() never renumbers the index</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.take()</code> as the function form of fancy indexing, confirmed to also accept plain Python lists where <code>arr[indices]</code> raises <code>TypeError</code>; the confirmed <code>mode="raise"/"clip"/"wrap"</code> out-of-bounds behavior and clip's confirmed negative-index side effect; <code>axis=</code> on a 2-D array versus the flatten-first default; and <code>Series.take()</code>'s confirmed position-based, label-preserving behavior. It does not cover <code>np.take_along_axis()</code>, a related function for per-row/per-column index arrays rather than one shared index list (mentioned only in passing) — out of scope until a lesson needs that exact shape.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/125_np_take.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/125_np_take.py</code></pre>
+<p>Exercise 1 confirms the Section 1 gap: <code>np.take()</code> matches fancy indexing on an array but also works directly on a plain Python list, where <code>list[[...]]</code> raises <code>TypeError</code>. Exercise 2 confirms the Section 2 trap: the default <code>mode="raise"</code> crashes on an out-of-bounds index exactly like fancy indexing, while <code>mode="clip"</code> pins it to the nearest valid position instead (and clips a negative index to position <code>0</code>, not the last element). Exercise 3 confirms the Section 3 behavior: <code>axis=0</code> picks rows from a 2-D array, and <code>Series.take()</code> keeps the original index labels on the rows it picks.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.take() accepts array_like input, including a plain Python list, and returns an ndarray with the selected positions. Fancy indexing (list[[...]]) is an ndarray-only feature and raises TypeError on a plain list -- np.take() has no such restriction.">
+    <p class="stem">What happens when calling <code>np.take(plain_python_list, [0, 2])</code> on a plain Python list (not a NumPy array)?</p>
+    <button class="opt" data-ok>it works fine, returning an array of the selected positions</button>
+    <button class="opt">it raises a TypeError, the same way fancy indexing does</button>
+    <button class="opt">it silently returns the original unmodified list right back untouched</button>
+  </div>
+  <div class="q" data-why="Confirmed directly from the official docs' own wording: clip mode replaces an out-of-range index with the index of the last element along that axis, and it explicitly disables negative-number indexing -- so a negative index under mode=clip clips toward the FIRST element (position 0), not the last one the way plain negative indexing treats -1.">
+    <p class="stem">Under <code>np.take(arr, [-10], mode="clip")</code> on a 5-element array, which position does the out-of-range negative index clip to?</p>
+    <button class="opt" data-ok>position 0, the first element -- clip mode disables negative wraparound</button>
+    <button class="opt">position 4, the last element, same as a normal negative index</button>
+    <button class="opt">it still raises an IndexError -- clip never rescues negative indices</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: Series.take() is position-based, like .iloc, not label-based like .loc. It keeps the ORIGINAL index labels attached to whichever rows got selected -- it never renumbers or resets the index to a fresh RangeIndex.">
+    <p class="stem">After <code>pd.Series([10,20,30], index=["a","b","c"]).take([0, 2])</code>, what are the resulting index labels?</p>
+    <button class="opt" data-ok>the original labels "a" and "c" -- take() never renumbers them</button>
+    <button class="opt">a fresh RangeIndex of 0 and 1, like any reset index</button>
+    <button class="opt">the original labels, but reordered alphabetically instead of by selected position</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.take.html"><code>numpy.take()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the <code>mode=</code> parameter's three values precisely, including clip mode's negative-index side effect, and its first example does show a plain-list input — but it never calls out the contrast with fancy indexing's <code>TypeError</code> on that same plain list, a confirmed gap this lesson filled by direct probe.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.take()</code> is new today, added right after Lesson 124's <code>np.nonzero()</code>/<code>np.flatnonzero()</code> entry.<br>
+<strong>Next lesson:</strong> one standing candidate remains from Lesson 122's own scan, not pre-committed per this course's "fresh scan each round" convention: <code>np.roll()</code>.<br><br>
+💬 Anything unclear — the plain-list gap, the clip-mode negative-index trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

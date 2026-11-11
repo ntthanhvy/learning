@@ -93,6 +93,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 102 — `array.array(typecode, values)` for a typed sequence packed as fixed-width machine values instead of a `list`'s pointers to separate objects, the `TypeError` every mismatched-type write raises, the measured memory gap over an equivalent `list`, and `tobytes()`/`frombytes()` for a raw-byte round trip.
 - [Docs: `types.SimpleNamespace`](https://docs.python.org/3/library/types.html#types.SimpleNamespace)
   Use for: Day 104 — `types.SimpleNamespace(**kwargs)` for dot-accessible attributes built from arbitrary keyword arguments with no class declared first, the plain `AttributeError` a missing attribute raises, `object_hook=types.SimpleNamespace` for turning parsed JSON into nested dot-access objects, and the contrast with Day 7's `dataclass` (required fields, no required shape here).
+- [Docs: `locale`](https://docs.python.org/3/library/locale.html)
+  Use for: Day 105 — `locale.setlocale()` as process-wide global state (not scoped to a function or module), `locale.format_string()`/`locale.currency()` for locale-aware number/currency formatting with `grouping=True`, `locale.atof()` for parsing a locale-grouped string back to `float`, and the contrast with f-string `{n:,}` grouping, which is a fixed English-style convention unaffected by the active locale.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

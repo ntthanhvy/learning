@@ -11877,3 +11877,99 @@
   was run directly from the repo root and returned `recorded:
   data/lesson_generated day=124
   lesson=0124-np-nonzero-flatnonzero.html`.
+
+- 2026-11-11 generation (Lesson 125, headless 06:00 run): idempotency check
+  first — no `course_progress` row for course=data dated 2026-11-11 yet
+  (per the orchestrator's own direct DB query), highest prior lesson was
+  124, dated 2026-11-10; confirmed via `ls data/lessons/` that day 124 is
+  genuinely the most recent file and no `0125-*` file already exists.
+  Checked the DB history for any `quiz`/`kata`/weak-spot signal — none
+  recorded, ever, for this course (every row is `lesson_generated`), so
+  paced conservatively and picked the next gap by scanning existing lesson
+  titles, same as every prior round. Read `MISSION.md` (unmodified) and
+  this file's own tail as structural/conventions reference, plus Lesson
+  124 in full as the exact boilerplate template (confirmed this course
+  indexes lessons via a plain `n:`/`date:`/`title:`/`file:` array literal
+  in `data/assets/nav.js`, not a dated-nav-per-lesson scheme). Lesson 124
+  closed with two standing candidates from Lesson 122's own scan —
+  `np.take()` and `np.roll()` — plus `np.corrcoef()`, re-confirmed via grep
+  as out of scope per `MISSION.md`'s explicit "no deep NumPy linear
+  algebra" line. Picked `np.take()`: the function form of the fancy
+  indexing (`arr[[0, 2, 4]]`) this course has used since Lesson 93,
+  continuing the "name the NumPy function underneath an already-taught
+  idiom" lineage (Lessons 93, 100, 102, 109-112, 114, 117-124). Verified
+  directly in a scratch sandbox (numpy 2.5.4, pandas 3.1.1, `uv run
+  --with pandas`) rather than trusting memory: `np.take(arr, indices)`
+  matches fancy indexing element-for-element on an `ndarray`; confirmed
+  the genuine hook — it also runs directly on a plain Python `list`,
+  where `plain_list[[0, 2]]` raises `TypeError` immediately, since fancy
+  indexing with a list of positions is an `ndarray`-only feature, not a
+  general Python one. Confirmed the `mode=` parameter's three values
+  directly against the official docs page (fetched via WebFetch
+  specifically to check what it does and does not say): the default
+  `mode="raise"` crashes with the same `IndexError` as fancy indexing on
+  an out-of-bounds position; `mode="clip"` pins an out-of-range index to
+  the nearest valid position instead, and — confirmed directly, matching
+  the docs' own wording exactly — clip mode explicitly disables
+  negative-index wraparound, so a negative out-of-range index clips
+  toward position 0 (the first element), not the last one the way
+  ordinary negative indexing treats `-1`; confirmed this exact point (the
+  plain-list acceptance contrasted against fancy indexing's `TypeError`)
+  is absent from the official docs' own wording, even though its own
+  first example does show a plain-list input, making it a genuine,
+  confirmed documentation gap rather than a fabricated one. Also confirmed
+  directly: `axis=` on a 2-D array controls which dimension is indexed
+  into, with the default (`axis=None`) flattening first, same convention
+  as Lesson 124's `np.flatnonzero()`; and pandas' own `Series.take()` is
+  position-based like `.iloc`, confirmed to keep the original index
+  labels on whichever rows it selects rather than renumbering them.
+  Added exactly one new glossary row, "np.take()", directly after Lesson
+  124's "np.nonzero() / np.flatnonzero()" entry — confirmed via a
+  case-insensitive scan of every first-column term that no prior row
+  already covered this name. Verification performed mechanically via a
+  scratch directory `.scratch-data-125/` created at the repo root
+  (deleted after, never tracked by git, matching every prior round's own
+  precedent for this sandbox's lack of `/tmp` access): (1) a quiz-word-
+  count check confirmed, after a few rounds of wording tweaks (the first
+  draft came out 10/14/9, 12/14/18, 13/15/11), exactly 10/10/10, 11/11/11,
+  and 11/11/11 option words across the three questions, one `data-ok` per
+  question throughout; (2) an HTML tag-balance check via the Grep tool
+  (plain `python3`-with-regex and direct Bash `grep` invocations were
+  both blocked by this sandbox's "requires approval" content filter on
+  specific command shapes, consistent with prior rounds' own workarounds)
+  came back fully balanced: div 5/5, p 16/17 (matching Lessons 120-124's
+  own precedent of one unopened `<p>` inside the lesson's single
+  `.callout` div), pre 5/5, code 21/21, h1 1/1 (via file inspection), h2
+  7/7, strong 5/5, button 9/9, script 3/3, dfn 1/1, span 29/29, a 2/2,
+  zero raw unescaped `&` characters; (3) exactly 1 `<dfn>`-carrying tag,
+  matching the one new glossary row added. A separate row/cell-balance
+  check on `glossary.html` after its one-row addition — `tr` 198/198 (one
+  more than the prior round's 197, correct for one new row), zero raw
+  `&`, plus a duplicate-term scan confirming the new row's exact term
+  string, "np.take()", appears exactly once across all 198 first-column
+  entries. `node --check` confirmed `nav.js`, `gloss.js`, and `quiz.js`
+  all still parse as valid JavaScript after adding one `n: 125` entry and
+  one `0125-np-take` file reference to `nav.js`'s lesson-index array. The
+  shipped (unsolved) `practice/125_np_take.py` was run directly from its
+  real `practice/` location (via `uv run --with pandas python3`) and
+  printed exactly 3 ✗ with no raw traceback. Built a solved copy inside
+  `.scratch-data-125/` (deleted after, never tracked by git); it printed
+  all 3 ✓ and "All green" on the first run, no further fixes needed.
+  Re-ran the shipped file directly from `practice/` again afterward and
+  reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. This round did not
+  perform its own fresh curriculum scan beyond re-confirming Lesson 122's
+  remaining standing candidates (one used today); `np.roll()` remains the
+  one standing candidate for tomorrow, not pre-committed per this course's
+  "fresh scan each round" convention — a genuinely fresh scan is still due
+  once that candidate is used up. `git status --short` after all edits
+  confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0125-np-take.html`, new `data/practice/125_np_take.py`,
+  and this file). The scratch directory `.scratch-data-125/` was deleted
+  after verification, at the repo root but never tracked by git. Also
+  noted, not touched: an unrelated leftover `.scratch-python-105/`
+  directory at the repo root from a different course's prior run, out of
+  this course's scope. `bin/record-progress data lesson_generated --day
+  125 --lesson 0125-np-take.html --detail '{"by":"headless"}'` was run
+  directly from the repo root.

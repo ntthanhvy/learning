@@ -10809,3 +10809,115 @@
   .NET resilience libraries, still deliberately out of scope per MISSION.md's
   "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
   gap, still not investigated.
+- 2026-11-11 generation (Lesson 129, headless run): idempotency check first —
+  confirmed no `lessons/0129-*.html` on disk, no `n: 129`/2026-11-11 entry in
+  `nav.js`, and no 2026-11-11 entry already in this file before writing
+  anything (highest prior lesson was 128, dated 2026-11-10). No DB read this
+  round — the orchestrator had already confirmed no `course_progress` row
+  for today, so this round went straight to content. Read `MISSION.md`,
+  `RESOURCES.md`, this file's tail (Lessons 125-128), both
+  `learning-records/` files, `nav.js`'s and `glossary.html`'s tails, and
+  Lesson 128 in full (the most recent C#-port lesson, as structural
+  template) before writing anything. Topic choice: Lesson 128's own scope
+  line named its direct follow-up explicitly — tag-based eviction
+  (`Tag()`/`IOutputCacheStore.EvictByTagAsync`) and the Redis-backed
+  `IOutputCacheStore` for multi-instance consistency, both deliberately
+  scoped out of that lesson as "real features, each a reasonable future
+  lesson." Confirmed via case-insensitive grep across `lessons/*.html` and
+  `glossary.html` that no existing lesson or glossary entry already covers
+  `EvictByTagAsync`/`IOutputCacheStore`/Redis-backed output cache eviction
+  (only Lesson 128's own scope-line text and unrelated Redis mentions in
+  other lessons' pub/sub and distributed-cache contexts matched). Confirmed
+  the first-party angle via one `WebFetch` call against
+  `.../performance/caching/output` before writing anything: the `Tag()`
+  policy-builder method (per-endpoint, via a base policy's `With()` path
+  match, or via `MapGroup`), `IOutputCacheStore.EvictByTagAsync(tag,
+  cancellationToken)`'s exact signature and the docs' own "single statement
+  that references that tag" eviction example, the default store sitting on
+  .NET's in-process `MemoryCache` (lost on restart, separate per instance),
+  the explicit "not recommended" guidance against reusing `IDistributedCache`
+  for output caching because it "doesn't provide atomic features, which are
+  required for tagging," and `AddStackExchangeRedisOutputCache` (a distinct
+  method from Lesson 121's `AddStackExchangeRedisCache`) as the documented
+  Redis-backed alternative for cross-instance consistency. Picked this topic
+  over re-checking Lesson 35's upsert/ON CONFLICT or Lesson 49's dead-letter
+  queues (both already confirmed, across several prior rounds, to have no
+  clean first-party EF Core/ASP.NET Core angle) — a named, already-verified
+  gap beat re-litigating closed candidates. Deliberately contrasted this
+  lesson's `IOutputCacheStore` against Lesson 121's `IDistributedCache`
+  rather than treating them as interchangeable, since the docs themselves
+  draw that exact line and a learner reusing Lesson 121's interface here
+  would be a real, documented mistake. One new term, checked against the
+  glossary first via case-insensitive grep — zero collisions:
+  `IOutputCacheStore` (its `EvictByTagAsync` method and the
+  `AddStackExchangeRedisOutputCache` registration call were described inline
+  in the glossary row's own body rather than becoming separate rows,
+  consistent with how Lesson 128 didn't give `CacheOutput()` or `[OutputCache]`
+  their own separate rows either). Added the row immediately after Lesson
+  128's `default caching policy` row, same Term/Tiếng Việt (dev-style)/
+  English column order, confirmed by inspecting the file's actual last row
+  directly rather than assumed. `which dotnet` and `dotnet --version` were
+  not attempted this round — every round since Lesson 103 has hit the same
+  sandbox interactive-approval block with no user present to grant it, so
+  the three C# snippets (the `Tag()`/`CacheOutput()` tagging calls, the
+  `IOutputCacheStore`/`EvictByTagAsync` purge endpoint, and the
+  `AddStackExchangeRedisOutputCache` registration block) were checked by
+  hand against the fetched docs page's exact method signatures instead,
+  consistent with every prior C#-port round's fallback. Verification
+  performed via throwaway `node -e` scripts (nothing written to a file,
+  one scratch file written to `/tmp` and left in place since `rm` outside
+  the repo's allowed directories is blocked by this sandbox — harmless,
+  not part of the repo): (1) a quiz-word-count check per `<div class="q">`
+  block — first draft landed uneven on all four questions (Q1 11/9/8/9, Q2
+  8/10/10/9, Q3 10/8/8/6, Q4 11/9/9/12), fixed through several
+  rewrite-and-recount passes per option, converged to exactly 10/10/10/10
+  across all four questions, both `.split(/\s+/)` and `.split(" ")`
+  counting methods agreeing exactly, exactly one `data-ok` and four options
+  per question confirmed the same way; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td/ul/li —
+  first pass caught a real mismatch (p 19/20, one stray `</p>` left inside
+  the closing callout `<div>` with no matching opening `<p>`), fixed by
+  removing the stray tag, then clean on recheck (div 6/6, p 19/19, code
+  48/48, button 16/16, script 3/3, dfn 1/1, pre 4/4, h2 6/6, h1 1/1, em 0/0,
+  strong 3/3, a 2/2, table 0/0, tr 0/0, th 0/0, td 0/0, ul 0/0, li 0/0), the
+  one `dfn` tag confirmed via regex to carry both `data-en=` and `data-vn=`;
+  (3) a brace/paren balance check on all four `<pre><code>` blocks after
+  stripping syntax-highlighting spans and unescaping HTML entities — all
+  balanced (1/1 braces, 6/6 parens; 2/2 braces, 3/3 parens; 0/0 braces, 2/2
+  parens; 1/1 braces, 3/3 parens); (4) a raw-unescaped-`&` scan across the
+  lesson — zero hits, the five `&gt;` occurrences all correctly escaped;
+  (5) a table/tr/td/p/div balance check on `glossary.html` after its
+  one-row addition — balanced (tr 406/406, td 1215/1215), plus a
+  duplicate-term scan across all 405 first-column entries — zero
+  duplicates; (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js` —
+  all clean, before and after the `nav.js` edit; (7) a basic HTML
+  well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+  three script tags in gloss/quiz/nav order) — clean. Registered Lesson 129
+  in `nav.js` (date 2026-11-11, today's actual generation date) right after
+  `n: 128`, confirmed exactly one matching `n: 129` entry and exactly one
+  matching `0129-*.html` file on disk afterward. No new `RESOURCES.md` line
+  added this round — the one fetched page is `learn.microsoft.com`, the
+  same domain already covered by this file's standing entries' pattern;
+  cited inline in the lesson's own "Go deeper" section instead, consistent
+  with every prior C#-port round. No new `learning-records/` file this
+  round — the topic came from a prior round's own named scope-line gap, not
+  a new surprise about the learner. `bin/record-progress backend
+  lesson_generated --day 129 --lesson
+  0129-output-cache-tag-eviction-ioutputcachestore.html --detail
+  '"'"'{"by":"headless"}'"'"'` run from the repo root, expected to succeed with no
+  approval blocker per every prior round's precedent (outcome recorded
+  separately if it ever differs). Day number used 129, matching this file's
+  own standing day-equals-lesson-number convention (confirmed again — no
+  deviation found anywhere in this log). Candidates spotted but not picked
+  this round, still worth checking fresh next time: a custom
+  `IOutputCachePolicy` implementation beyond the built-in default/tag/query
+  policies (explicitly named in this lesson's own scope line); the
+  `SizeLimit`/`MaximumBodySize` cache-wide limits and `SetLocking(false)`'s
+  resource-locking opt-out (also named in this lesson's scope line); Lesson
+  35's upsert/ON CONFLICT, still confirmed to have no clean first-party EF
+  Core angle; Go's `select`-statement arbitration rules, still deferred many
+  rounds running on fetched-page-truncation grounds; Lesson 49's dead-letter
+  queues, still confirmed to have no first-party ASP.NET Core angle; Polly/
+  .NET resilience libraries, still deliberately out of scope per MISSION.md's
+  "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
+  gap, still not investigated.

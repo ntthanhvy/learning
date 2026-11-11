@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 57 · dbt retry: resuming a failed build instead of rerunning it whole</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 57 · ~20 min · 11 Nov 2026</p>
+<h1>dbt <code>retry</code>: resuming a failed build instead of rerunning it whole</h1>
+<p class="byline">Today's tangible win: when <code>dbt build</code> fails partway through — one bad model, everything after it skipped — <code>dbt retry</code> re-runs <em>only</em> the nodes that didn't succeed last time, using the exact same command and flags as the run it's resuming, instead of either rerunning the whole project or hand-picking <code>--select</code> survivors from memory. Confirmed this round straight from the installed dbt-core 1.12 source: <code>retry</code> reads <code>target/run_results.json</code> from the failed run, keeps only the nodes whose status was <code>error</code>, <code>fail</code>, <code>skipped</code>, <code>runtime error</code> or <code>partial success</code>, and replays whichever original command produced that file — <code>build</code>, <code>run</code>, or <code>test</code> — against exactly that set.</p>
+
+<div class="callout"><strong>Before today — confirm the project still parses:</strong> today adds no new model and no new DAG task; it's a new terminal habit for a failure every build already produces sometimes.
+<pre><code>cd dbt_env &amp;&amp; uv run dbt parse</code></pre>
+Expected: a clean parse with no <code>Error</code> in the output, same as every round since Day 2. If that's not clean, fix it before touching <dfn data-en="a dbt command that reads the most recent run's own run_results.json, keeps only the nodes whose last status was error, fail, skipped, runtime error or (with --warn-error) warn, and replays the original command (build, run or test) against exactly that node set -- a resumption of the last attempt's unfinished work, not a fresh diagnosis of why anything failed" data-vn="giữ nguyên &quot;dbt retry&quot; — lệnh dbt đọc lại run_results.json của lần chạy gần nhất, chỉ giữ các node có trạng thái cuối là error/fail/skipped/runtime error (hoặc warn nếu có --warn-error), rồi chạy lại đúng command gốc (build/run/test) chỉ trên đúng tập node đó — tiếp tục phần việc chưa xong của lần chạy trước, không tự tìm hiểu lại lý do thất bại"><code>retry</code></dfn> — retry needs a <em>previous run's</em> results file to exist, and a project that won't even parse has never produced one.</div>
+
+<h2>1 · The gap: a partial failure has always meant "start over" or "guess by hand"</h2>
+<p>Every build failure this project has shipped on purpose — Day 1's two planted bad rows, Day 3's negative-subtotal test, Day 13's late-arriving correction, Day 45's dead-letter threshold — has been fixed by either a full <code>dbt build</code> rerun (cheap here, at a few hundred rows; expensive on a real warehouse with a year of history) or a hand-written <code>--select bad_model+</code> that only works if you remember exactly which nodes failed and which ones got skipped as a result. Neither is really dbt's own memory of what happened — it's you, reconstructing the failure from the terminal scrollback or the CI log. <code>dbt build</code> already writes that memory to disk on every single invocation, success or failure, as <dfn data-en="a JSON file dbt writes to the target directory after every invocation of build, run or test, recording every node it attempted and the exact status each one ended in -- success, error, fail, skipped and more -- plus the full set of CLI args and flags that invocation was run with" data-vn="giữ nguyên &quot;run_results.json&quot; — file JSON dbt ghi vào thư mục target sau mỗi lần build/run/test, lưu lại mọi node đã chạy cùng trạng thái kết thúc của từng node, và toàn bộ args/flags của lần chạy đó"><code>target/run_results.json</code></dfn>; today's lesson is the command that reads it back.</p>
+<p>This matters most exactly where Day 15 and Day 39 already live: a CI pipeline building forty models where node 23 fails on a flaky warehouse connection, not a real bug. Without retry, a human either reruns everything (slow, and risks a second flake somewhere else) or digs through CI logs to build a manual <code>--select</code> list. With retry, the fix is "run it again, same command" — dbt already knows node 23 is the only thing that needs to happen.</p>
+
+<h2>2 · Confirmed from the installed package: retry replays the original command, not always <code>build</code></h2>
+<p>Reading <code>dbt.task.retry.RetryTask</code> directly (installed locally via <code>uv run --with "dbt-postgres==1.11.0"</code>, no live database needed to read source — the same approach Days 20-22, 25, 35, 45, 46, 54 and 56 already used) shows the actual mechanism:</p>
+<pre><code>RETRYABLE_STATUSES = {
+    NodeStatus.Error, NodeStatus.Fail, NodeStatus.Skipped,
+    NodeStatus.RuntimeErr, NodeStatus.PartialSuccess,
+}
+
+<span class="cm"># in RetryTask.__init__: load the previous run's own results file</span>
+state_path = args.state <span class="kw">or</span> config.target_path
+previous_results = load_result_state(
+    Path(config.project_root) / Path(state_path) / <span class="str">"run_results.json"</span>
+)
+previous_command_name = previous_results.args.get(<span class="str">"which"</span>)  <span class="cm"># "build", "run", "test", ...</span>
+
+<span class="cm"># in RetryTask.run(): keep only nodes whose last status was retryable</span>
+unique_ids = {
+    result.unique_id <span class="kw">for</span> result <span class="kw">in</span> previous_results.results
+    <span class="kw">if</span> result.status <span class="kw">in</span> RETRYABLE_STATUSES
+}</code></pre>
+<p>Three details worth more than the headline. First, <code>retry</code> looks in <code>target/</code> by default — the same directory a normal run already writes to, not the separate <code>--state</code> comparison directory Day 15's callout warned never to collide with <code>target-path</code>. A second <code>dbt build</code> between the failure and the retry overwrites that file with a new, probably-all-success result, and retry would then find nothing left to retry — the failure record is only good until the next run clobbers it. Second, <code>previous_command_name</code> is read from the saved results, not chosen by the retry invocation: a failed <code>dbt test</code> gets retried as <code>test</code>, a failed <code>dbt build</code> as <code>build</code>, even though the command typed on the terminal is just <code>dbt retry</code> both times. Third, <code>skipped</code> is itself retryable — every node dbt skipped as a consequence of an upstream failure (not just the node that actually errored) gets a second attempt automatically, with no manual dependency-tracing required.</p>
+<div class="callout">What <code>dbt retry</code> does <em>not</em> do: it does not re-decide anything about <em>why</em> a node failed. If <code>bad_model.sql</code> still divides by zero, retry reruns it, it fails again, identically — this is a resumption mechanism for the build's own progress, not a self-healing one. Fix the actual cause first; retry only saves you from re-doing the parts that already worked.</div>
+
+<h2>3 · Why this is a different claim than Day 15's slim CI or Day 13's <code>--full-refresh</code></h2>
+<p>It's easy to blur this with other "run less than everything" dbt features already in this project, so naming the boundary matters. Day 15's <code>state:modified+</code> asks <em>"what changed since a prior git commit's manifest?"</em> — a diff against a different project state, used to skip work that's definitely still correct. Day 13's <code>--full-refresh</code> asks the opposite question, <em>"ignore what's already built and recompute everything for this one incremental model"</em> — more work, not less. Today's <code>retry</code> asks neither: <em>"what, in the single most recent invocation, did not finish successfully?"</em> — a diff against this project's own last attempt, not against git history and not against an incremental model's own prior state. All three read a file from a previous run, but a different file, for a different purpose: <code>state:modified+</code> reads a copied-aside <code>manifest.json</code>, <code>retry</code> reads <code>target/run_results.json</code> in place, and <code>--full-refresh</code> reads nothing — it's a flag that tells one model's own compiled SQL to ignore its usual incremental filter.</p>
+<p>They compose, too: a CI job can run <code>dbt build --select state:modified+</code> to scope a build to what changed, have one of those nodes fail on a transient warehouse hiccup, and retry <em>that same scoped build</em> with a plain <code>dbt retry</code> — the node set retry resumes from is whatever the prior invocation actually attempted, state-selection and all, not the whole project.</p>
+
+<h2>4 · Build: wire retry into the CI job Day 15 already wrote</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, open the GitHub Actions workflow Day 15 added (the one running <code>dbt build</code> against a Postgres service container). Add one step immediately after the existing build step, running only if that step failed:</p>
+<pre><code><span class="cm"># .github/workflows/dbt-ci.yml -- add right after the existing "dbt build" step</span>
+      - name: dbt build
+        id: dbt_build
+        run: dbt build --profiles-dir . --select state:modified+ --state ./prod-manifest
+        continue-on-error: <span class="kw">true</span>
+
+      - name: dbt retry (resume a transient failure once)
+        if: steps.dbt_build.outcome == 'failure'
+        run: dbt retry --profiles-dir .</code></pre>
+<p>Note that <code>retry</code> itself takes no <code>--select</code> — the node set is already fixed by whatever <code>run_results.json</code> the build step just wrote. One retry, not a loop: a real bug fails the same way twice, and two straight failures should surface to a human rather than retry forever, the identical reasoning behind Day 56's <code>max_consecutive_failed_dag_runs</code> choosing 3 over an unbounded retry loop.</p>
+
+<h2>5 · Verify: the structural claims, since this sandbox has no reachable Postgres</h2>
+<p>This sandbox still has no learner Postgres available (the same standing gap named every round since Day 35, now including today) so the full build-fail-then-retry cycle against a real warehouse can't run live here. What <em>was</em> confirmed live this round: the retryable-status set read directly from the installed package, and that a scratch project — two models, <code>ok_model.sql</code> (<code>select 1 as id</code>) and <code>bad_model.sql</code> (<code>select 1 / 0 as id</code>) — parses cleanly, so the project shape itself is not the problem:</p>
+<pre><code>uv run --with <span class="str">"dbt-postgres==1.11.0"</span> python3 -c <span class="str">"
+from dbt.artifacts.schemas.results import NodeStatus
+print([s.value for s in NodeStatus])
+"</span></code></pre>
+<pre><code>['success', 'error', 'fail', 'warn', 'skipped', 'partial success', 'pass', 'runtime error', 'no-op', 'reused']</code></pre>
+<p>That confirms every status name used in Section 2's <code>RETRYABLE_STATUSES</code> set against the real enum — <code>error</code>, <code>fail</code>, <code>skipped</code>, <code>runtime error</code> and <code>partial success</code> are retryable; <code>warn</code> is retryable only when the original run passed <code>--warn-error</code> (confirmed in the same source read); <code>success</code>, <code>pass</code>, <code>no-op</code> and <code>reused</code> are never retried, correctly, since nothing about them needs resuming. With a real Postgres available, confirm the full cycle directly:</p>
+<pre><code><span class="cm"># in a scratch project with one deliberately broken model and one healthy one</span>
+uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --profiles-dir .
+<span class="cm"># expect: ok_model succeeds, bad_model errors (division by zero)</span>
+<span class="cm"># fix bad_model.sql, then:</span>
+uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt retry --profiles-dir .
+<span class="cm"># expect: only bad_model runs this time -- ok_model is not rebuilt</span></code></pre>
+<p>Expected on that second command: dbt's own log names exactly one node selected (<code>bad_model</code>), skipping <code>ok_model</code> entirely — the concrete, visible proof that retry is scoped to the prior failure, not a second full build wearing a different command name.</p>
+<div class="callout"><strong>What this round could and couldn't run live:</strong> confirmed live — the real <code>NodeStatus</code> enum, the <code>RetryTask</code> source (state-path resolution, retryable-status set, original-command replay), and a clean <code>dbt parse</code> on a two-model scratch project matching the lesson's own example. Not run live — the actual fail-then-retry cycle against a real warehouse, since this sandbox has no reachable Postgres this round either, the same honest-disclosure convention Days 17, 38, 41, 43, 44, 46, 47 and 56 each used. The scratch project was deleted after use.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>dbt retry</code> as a node-resumption command reading <code>target/run_results.json</code>, confirmed via the installed package's own <code>RetryTask</code> source and a scratch-project parse. It does not cover retry's interaction with microbatch models' per-batch retry (a dbt 1.9+ feature tracking which date batches of a microbatch-incremental model succeeded independently) — named as existing in the source read (<code>batch_map</code> in <code>RetryTask.run</code>) but out of scope, since this project has no microbatch model and Day 13 already covers this project's actual incremental strategy (<code>merge</code>/<code>delete+insert</code>) in depth. It also does not cover automatic retry loops or exponential backoff — Section 4's one-retry-then-surface choice is deliberate, the same reasoning Day 56 used to pick 3 over an unbounded auto-pause threshold.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round by reading RetryTask.__init__: the state path defaults to config.target_path (the normal target/ directory a build already writes to), not a separate --state comparison directory -- so a second dbt build run between the failure and the retry overwrites run_results.json with a fresh, likely all-success result, and retry would then find nothing left to resume.">
+    <p class="stem">Confirmed this round: where does <code>dbt retry</code> read its previous-run results from by default?</p>
+    <button class="opt" data-ok>the normal <code>target/</code> directory a build already writes to</button>
+    <button class="opt">a separate directory only <code>retry</code> itself ever writes to</button>
+    <button class="opt">nowhere; dbt re-derives failures fresh from the warehouse now</button>
+  </div>
+  <div class="q" data-why="Read directly from dbt.task.retry.RetryTask this round: previous_command_name is read back out of the saved run_results.json's own args ('which'), not chosen by the dbt retry invocation itself -- a failed dbt test is retried as test, a failed dbt build as build, even though the terminal command typed both times is just 'dbt retry'.">
+    <p class="stem">A previous run was <code>dbt test</code>, and it failed. What command does <code>dbt retry</code> actually replay?</p>
+    <button class="opt" data-ok><code>test</code>, read back from that saved run's own args</button>
+    <button class="opt"><code>build</code>, since that is retry's own fixed hardcoded default</button>
+    <button class="opt">whichever command name the user happens to type next</button>
+  </div>
+  <div class="q" data-why="Confirmed via the real NodeStatus enum and RETRYABLE_STATUSES set read this round: skipped is itself one of the retryable statuses. Every node dbt skipped purely as a downstream consequence of an upstream node's failure gets picked up and attempted again automatically on dbt retry, with no manual dependency-tracing required to find them.">
+    <p class="stem">A build fails on one model; three downstream models get skipped as a result. What does <code>dbt retry</code> do with those three?</p>
+    <button class="opt" data-ok>attempts all three again, since <code>skipped</code> counts as retryable</button>
+    <button class="opt">leaves all three skipped forever unless manually selected afterward</button>
+    <button class="opt">marks all three as <code>success</code> without ever running them</button>
+  </div>
+  <div class="q" data-why="Day 15's state:modified+ diffs the current project against a different project state (a prior git commit's copied-aside manifest.json) to find what changed in source, unrelated to whether any run succeeded or failed. dbt retry diffs nothing about source code at all -- it reads target/run_results.json to find out what the single most recent invocation of dbt itself did not finish successfully. Different question, different file, both from a 'previous run' but not the same one.">
+    <p class="stem">How does <code>dbt retry</code> differ from Day 15's <code>state:modified+</code>?</p>
+    <button class="opt" data-ok>retry resumes an unfinished run; that scopes to changed source code</button>
+    <button class="opt">they are simply two separate command names for one identical thing</button>
+    <button class="opt">that selector only ever exists as part of <code>dbt retry</code> itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/reference/commands/retry">dbt retry</a> reference page is the right page to check for this command's current, documented flags before relying on it in a real CI pipeline — not fetched live this round (no working <code>WebFetch</code> tool this round, the same gap Days 17, 23, 26, 31, 34, 35, 45, 54 and 56 each hit), so every behavioral claim above comes from reading <code>dbt.task.retry.RetryTask</code> in the installed <code>dbt-core</code> package (pulled in transitively by <code>dbt-postgres==1.11.0</code>) directly, plus a live read of the real <code>NodeStatus</code> enum, not from the docs page's prose. Confirm flag-level detail (especially around <code>--state</code> overrides) against the live page before quoting it in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 57.<br>
+<strong>Next up:</strong> the standing environment gap — no reachable Postgres or Airflow metadata database this sandbox round either — now spans both the dbt side (today) and the Airflow side (every round since Day 35), and is worth a human resolving once so a real fail-then-retry cycle and a real three-run pause cycle can both be confirmed end to end, not just at the source level. With today closing a genuine, previously-untaught dbt command, a future round should run a fresh gap-scan across <code>PLAN.md</code>'s spine rather than assuming the next topic — Kafka has had the least recent attention of the three (last touched Day 55), which is worth weighing first.<br><br>
+💬 Anything unclear — why retry reads <code>target/</code> and not <code>--state</code>, or how it decides which original command to replay? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

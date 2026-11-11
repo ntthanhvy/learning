@@ -12795,3 +12795,109 @@ fail *gracefully* so the learner sees which task failed.
   --day 104 --lesson 0104-types-simplenamespace.html --detail
   '{"by":"headless"}'` was run from the repo root at the end of this round
   and succeeded.
+- 2026-11-11 generation (Lesson 105, headless run): idempotency check first
+  confirmed no `lessons/0105-*.html` on disk, no `n: 105` entry in `nav.js`,
+  and no 2026-11-11 entry already in this file; the orchestrator had also
+  already confirmed no `course_progress` row for `course='python'` dated
+  today. Read `MISSION.md` (no-pandas/no-NumPy exclusion re-confirmed before
+  writing a line), this file's tail through Day 104's own closing note,
+  `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, and `reference/glossary.html`'s
+  tail. Per Day 104's own cadence note, Day 104 was fresh day 1 of a new
+  three-fresh-then-review cycle, so Day 105 is fresh day 2 — not a review
+  day. A fresh case-insensitive grep across every lesson title/body, every
+  practice file, `glossary.html`, and `RESOURCES.md` confirmed both standing
+  candidates from Day 104's note, `locale` and `socket`, were still zero-hit
+  as dedicated topics. Picked `locale` over `socket`: `socket` already has
+  several passing mentions across the FastAPI/deployment lessons (Days
+  21-25, 58) each explicitly calling out "no real socket opens" in their own
+  in-process-testing discipline, and real networking runs deeper than a
+  20-minute lesson and edges toward Phase 2b territory those days already
+  touch conceptually; `locale` is a clean, self-contained language/stdlib
+  formatting-and-parsing corner with zero existing hits anywhere. Probed
+  every behavioral claim live in a scratch dir (`.scratch-python-105/`,
+  created inside the repo per this file's established convention, deleted
+  after; `uv run python3 probeN.py`) rather than trusting memory: confirmed
+  a fresh process starts in the `'C'` locale (`getlocale()` returns
+  `('C', 'UTF-8')`); confirmed `locale.setlocale(locale.LC_ALL, name)`
+  mutates global state for the whole process — a second function with no
+  explicit locale argument of its own still sees the changed setting;
+  confirmed an unrecognized locale name raises `locale.Error` immediately
+  rather than falling back silently; confirmed `locale.format_string("%d",
+  n, grouping=True)` and `locale.currency(amount, grouping=True)` both
+  require `grouping=True` explicitly — omitting it inserts no thousands
+  separator at all; confirmed `locale.atof("12,345,678.9")` correctly
+  strips the thousands separator and returns `12345678.9` as a plain
+  `float`, something a bare `float()` call cannot do on a comma-grouped
+  string; confirmed `f"{1234567:,}"` is untouched by `locale.setlocale()`
+  — it always groups with a comma and a period regardless of the active
+  locale, a deliberate language-level fixed convention rather than a locale
+  lookup. One sandbox limitation discovered and worked around: only
+  `en_US.UTF-8` and `C` are installed as locales in this environment —
+  `de_DE.UTF-8` raised `locale.Error: unsupported locale setting` when
+  probed, so the lesson and practice file were written and verified against
+  `en_US.UTF-8` only, with the lesson's own "Go deeper" section calling out
+  explicitly that a real deployment target may have a different set
+  installed and should check rather than assume. Checked the glossary for
+  term collisions before writing — grepped `locale`, `setlocale`,
+  `format_string`, `currency`, and `atof` case-insensitively across the
+  full `glossary.html`, zero existing rows for any of the four new terms.
+  **New jargon: 4 inline `<dfn>`/glossary-scoped terms** (`locale`,
+  `locale.setlocale()` as process-wide state, `locale.format_string()`/
+  `locale.currency()`, `locale.atof()`) **folded into 4 glossary rows**,
+  added as a new `<h2 id="day105">` section directly after Day 104's.
+  Verification performed mechanically, from dedicated scripts in
+  `.scratch-python-105/` (deleted after): (1) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new
+  lesson — balanced (div 6/6, p 16/16, code 55/55, button 9/9, script 3/3,
+  dfn 2/2, pre 5/5, h2 6/6, h1 1/1, em 2/2, strong 3/3, a 2/2), plus a
+  raw-unescaped-`&` regex scan — zero hits; (2) a per-question quiz option
+  word-count check via regex-strip-tags extraction — first draft mismatched
+  on all three questions (14/13/13, 12/12/10, 13/11/9), iterated
+  option-by-option until all three landed on equal per-question counts:
+  13/13/13, 12/12/12, 13/13/13; (3) an `html.parser.HTMLParser` full-document
+  parse of the new lesson and of `glossary.html` — no parse errors on
+  either; (4) a table/tr/th/td/h2/p/div balance check on `glossary.html`
+  after its new section, plus a duplicate-`id="dayNN"` scan — balanced
+  (table 88/88, tr 385/385, th 264/264, td 891/891, h2 88/88) with zero
+  duplicates among 88 ids, `day105` present exactly once; a case-insensitive
+  duplicate-term scan across the glossary's term column reproduced the one
+  pre-existing collision already on record (`dependency`), confirmed none
+  of the four new terms collide with it or any other existing row; (5)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all three clean; (6) a duplicate `n:` scan across
+  `nav.js`'s `LESSONS` array — 105 entries, zero duplicates, max `n` is
+  105; (7) a case-insensitive `pandas|numpy|dataframe|pd\.|np\.` grep on
+  the new lesson — 3 hits total (`pandas`, `NumPy`, `DataFrame`), all
+  confirmed by direct line lookup to sit inside the single required "Why
+  today" scope-boundary callout, and zero hits in the practice file — no
+  worked pandas/NumPy example anywhere; this lesson's subject matter (`str`/
+  `float` formatting and parsing) never needed a dedicated "Where pandas/
+  NumPy go from here" callout the way Day 104's object-shaped topic did,
+  so none was added. The shipped (unsolved) `practice/105_locale_module.py`
+  was executed directly from its real `practice/` location and printed
+  exactly 4 ✗ with no raw traceback. A solved copy built in
+  `.scratch-python-105/` (copied from the shipped file, then each TODO body
+  filled in directly — never editing the shipped file itself, deleted
+  after) printed all 4 ✓ and "All green" on two consecutive runs; the
+  shipped file was re-run afterward from its real location and reproduced
+  the identical all-✗ result, confirming no leakage back into the
+  baseline. Added one new `RESOURCES.md` line for `locale`, placed directly
+  after Day 104's `types.SimpleNamespace` line and before the PEP 8 line,
+  following the file's chronological-by-day ordering. Registered Lesson 105
+  in `nav.js` with today's date (2026-11-11) right after the `n: 104`
+  entry. `python/learning-records/` was not touched this round — the sole
+  file there is still the Day 1 baseline record with no newer quiz/kata/
+  lesson_completed signal, so a routine fresh-topic pick following the
+  course's own settled cadence was the right call, same fallback this
+  file's own convention has used in recent rounds. Cadence note for the
+  next round: Day 105 is fresh day 2 of the current three-fresh-then-review
+  cycle — Day 106 should be fresh day 3, and per this course's own steer
+  against three fresh-content days in a row without a review day, Day 107
+  should be a review/retrieval day covering Days 104-106. Standing
+  fresh-gap candidate still open going into Day 106: `socket` remains
+  passing-mention-only and could still be picked if a stronger candidate
+  doesn't surface, though a fresh gap-scan should run again next round
+  rather than assuming this list is exhaustive. `bin/record-progress python
+  lesson_generated --day 105 --lesson 0105-locale-module.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this round
+  and succeeded.

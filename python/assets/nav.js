@@ -216,6 +216,8 @@
       file: "lessons/0103-review-retrieval-day-19.html" },
     { n: 104, date: "2026-11-10", title: "types.SimpleNamespace: attribute access without a class",
       file: "lessons/0104-types-simplenamespace.html" },
+    { n: 105, date: "2026-11-11", title: "locale: formatting numbers the way a reader expects",
+      file: "lessons/0105-locale-module.html" },
   ];
 
   const REFS = [

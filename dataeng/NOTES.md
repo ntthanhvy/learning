@@ -6578,3 +6578,122 @@ along the Phase 2 spine, adapted to the learning records.
   DAG this portfolio doesn't have), a future round most likely needs a
   fresh gap-scan across `PLAN.md`'s spine — dbt, Kafka, or a genuinely new
   Airflow thread — rather than another named-TODO close.
+
+- 2026-11-11 (headless run, Day 57 generated): fifty-seventh lesson,
+  `0057-dbt-retry.html`. Idempotency check first — the orchestrator
+  confirmed no `course_progress` row for `course='dataeng'` dated today
+  before this round started. Confirmed no `lessons/0057-*.html` on disk and
+  no `n: 57` row in `assets/nav.js` before writing anything; Day 56 remains
+  the latest prior lesson. Read `MISSION.md`, this file's tail through Day
+  56's close, `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, the glossary's
+  tail, confirmed `dataeng/learning-records/` still holds only the single
+  2026-09-14 baseline file, and read Day 56 in full as a structural
+  template before picking anything.
+  **Topic choice:** with no closing-note TODO pointing at one specific next
+  step this round (Day 56 only said "fresh gap-scan, dbt/Kafka/Airflow"),
+  delegated a broad gap-scan across all 56 prior lesson filenames and
+  bodies against `PLAN.md`'s own named sub-topics. Ruled out several
+  plausible-looking candidates on inspection: `source freshness`
+  (`loaded_at_field`/`warn_after`/`error_after`/`dbt source freshness`) is
+  already taught hands-on in Day 3 and extended in Day 6, despite being
+  *named* in passing in Days 2, 15, 27 and 33 — those later mentions read
+  like gaps on a filename grep alone but aren't on an actual content read.
+  `generate_surrogate_key`'s own mechanics (coalesce/concat/hash) are
+  already explained in Day 11. Incremental `merge`/`delete+insert`/
+  late-arriving-events/`--full-refresh` are already deep in Day 13. Took
+  `dbt retry` instead: a real dbt command, confirmed zero prior hits across
+  every lesson body (grepped `dbt retry|run_results.json|RetryTask`), that
+  closes a genuine gap between Day 15/39's CI-failure handling (today, a
+  transient CI failure got a one-line "retry the previous invocation's
+  unfinished nodes" fix instead of either a full rerun or a hand-built
+  `--select` list) and Day 56's own circuit-breaker theme (resuming
+  unfinished work vs. giving up after N failures — named as a deliberate
+  parallel in Section 4's "one retry, not a loop" design choice). No
+  pandas, no Python-language teaching, no API/idempotency re-derivation —
+  confirmed via a `pandas|numpy` grep (zero hits) and a prose read before
+  shipping.
+  **Content:** no new model, no new DAG task — a CI workflow addition (one
+  `dbt retry` step after the existing `dbt build` step, conditional on
+  failure) plus the command's own mechanics. Confirmed from the installed
+  `dbt-core` package's own source (pulled in transitively via `uv run
+  --with "dbt-postgres==1.11.0"`, the same no-live-database approach Days
+  20-22, 25, 35, 45, 46, 54 and 56 already used): `dbt.task.retry.RetryTask`
+  reads `target/run_results.json` (not the separate `--state` comparison
+  directory Day 15's own callout warned never to collide with
+  `target-path` — a deliberate callback, since retry's file and slim CI's
+  manifest are both "a file from a previous run" but genuinely different
+  files for different purposes), keeps only nodes whose last status is in
+  `{Error, Fail, Skipped, RuntimeErr, PartialSuccess}` (plus `Warn` only
+  under `--warn-error`), and replays whichever original command produced
+  that file — `build`, `run`, or `test`, read back from the saved run's own
+  recorded args, not a fixed default. Named and scoped out deliberately:
+  microbatch per-batch retry (`batch_map` in the same source, real but this
+  project has no microbatch model) and unbounded retry loops (one retry,
+  then surface to a human — the same reasoning Day 56 used picking `3` over
+  an unbounded auto-pause threshold).
+  **Verification:** no reachable Postgres this sandbox round either (the
+  standing gap named every round since Day 35, now also hitting the dbt
+  side directly for the first time, not just Airflow's metadata database).
+  Confirmed live: the real `NodeStatus` enum (`uv run --with
+  "dbt-postgres==1.11.0" python3 -c "from dbt.artifacts.schemas.results
+  import NodeStatus; print([s.value for s in NodeStatus])"` →
+  `['success', 'error', 'fail', 'warn', 'skipped', 'partial success',
+  'pass', 'runtime error', 'no-op', 'reused']`, confirming every status
+  name used in the lesson's retryable-set claim against the real enum
+  values, not an assumption); `dbt.task.retry.RetryTask`'s actual source,
+  read directly (state-path resolution, the retryable-status set,
+  original-command replay via `previous_args.get("which")`); and a
+  two-model scratch project (`ok_model.sql` returning a literal row,
+  `bad_model.sql` dividing by zero) built at the repo root under
+  `.scratch-dataeng-57/` parsing cleanly — `uv run --with
+  "dbt-postgres==1.11.0" dbt parse --profiles-dir .` produced only
+  `Running with dbt=...`/`Registered adapter...`/`Performance info...`
+  lines, greped for the literal string `Error` afterward and found none.
+  Not run live: the actual fail-then-retry cycle against a real warehouse,
+  the same honest-disclosure convention Days 17, 38, 41, 43, 44, 46, 47 and
+  56 each used — named explicitly in the lesson's own closing callout
+  rather than presented as captured output. Deleted `.scratch-dataeng-57/`
+  after; confirmed via a directory listing that nothing named
+  `scratch-dataeng-57` remained.
+  Quiz word counts verified with a small Python script stripping HTML tags
+  and counting whitespace-split tokens per option (code identifiers count
+  as one token each, consistent with how prior days counted
+  `is_paused=True` and `max_active_runs`). First draft was uneven across
+  all four questions (9/9/10, 10/9/10, 10/8/9, 11/11/11) — rebalanced
+  through several word-for-word edit passes, including one round where a
+  hyphenated phrase (`--select`ed → `--selected` after tag-stripping, and
+  `hand-selected` as one token) silently cost a word versus a hand count,
+  caught only by re-running the script after each edit rather than trusting
+  a manual recount — to a final clean 9/9/9, 9/9/9, 9/9/9, 11/11/11 across
+  the four questions. HTML structure verified via paired open/close tag
+  counts on every tag that appears (`div` 8/8, `p` 21/21, `code` 111/111,
+  `button` 12/12, `script` 3/3, `dfn` 2/2, `pre` 6/6, `h2` 8/8, `h1` 1/1,
+  `em` 9/9, `strong` 4/4, `a` 2/2) and a bare-`&` regex scan (zero hits).
+  Grepped the whole glossary for `run_results|dbt retry` before writing any
+  `<dfn>` — zero hits, confirming both new terms are genuinely new, not
+  redefinitions. `reference/glossary.html` re-checked after appending Day
+  57's section: `h2` 56/56, `table` 56/56, `tr` 206/206, `td` 450/450, `th`
+  168/168, zero bare `&`. `node --check` clean on `nav.js` after today's
+  edit.
+  Added two new glossary terms — `run_results.json` and `dbt retry` —
+  under a new Day 57 section. Added one new `RESOURCES.md` line (the dbt
+  retry docs page, under the dbt-in-depth cluster next to state selection
+  and defer) since today is the first lesson on this specific command;
+  marked not fetched live this round for the same reason as every other
+  citation this round (no working `WebFetch` tool), with today's specific
+  behavioral claims sourced from the installed package directly rather
+  than the docs page's prose.
+  Registered Lesson 57 in `assets/nav.js` right after the `n: 56` entry,
+  dated 2026-11-11.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a fresh gap-scan across `PLAN.md`'s own named sub-topics
+  against all 56 prior lesson bodies, not a new durable fact about the
+  learner distinct from the single 2026-09-14 baseline record on file.
+  **Next up:** the no-reachable-Postgres/no-Airflow-metadata-database gap
+  remains standing and now spans both this course's dbt and Airflow
+  threads — still worth a human resolving once so a real fail-then-retry
+  cycle and a real three-run pause cycle can both be confirmed end to end.
+  Kafka has had the least recent attention of the three (last touched Day
+  55, vs. Airflow's Day 56 and dbt's Day 57) — worth weighing first on a
+  future round's gap-scan, though not assumed by default per this round's
+  own convention of scanning fresh rather than rotating mechanically.

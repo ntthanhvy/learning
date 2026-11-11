@@ -264,6 +264,8 @@
       file: "lessons/0127-cache-control-aspnetcore-cachecontrolheadervalue.html" },
     { n: 128, date: "2026-11-10", title: "Output caching, now in C# too",
       file: "lessons/0128-output-caching-aspnetcore-addoutputcache.html" },
+    { n: 129, date: "2026-11-11", title: "Evicting an output cache on purpose",
+      file: "lessons/0129-output-cache-tag-eviction-ioutputcachestore.html" },
   ];
 
   const REFS = [

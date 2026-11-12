@@ -6697,3 +6697,124 @@ along the Phase 2 spine, adapted to the learning records.
   55, vs. Airflow's Day 56 and dbt's Day 57) — worth weighing first on a
   future round's gap-scan, though not assumed by default per this round's
   own convention of scanning fresh rather than rotating mechanically.
+
+- 2026-11-12 (headless run, Day 58 generated): fifty-eighth lesson,
+  `0058-kafka-on-lost-and-max-poll-interval.html`. Idempotency check first —
+  the orchestrator confirmed no `course_progress` row for `course='dataeng'`
+  dated today before this round started (last 40 rows showed no signal for
+  any course since 2026-10-15). Confirmed no `lessons/0058-*.html` on disk
+  and no `n: 58` row in `assets/nav.js` before writing anything; Day 57
+  remains the latest prior lesson. Read `MISSION.md`, this file's tail
+  through Day 57's close, `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, the
+  glossary's tail, confirmed `dataeng/learning-records/` still holds only
+  the single 2026-09-14 baseline file, and read Days 55, 41 and 50 in full
+  as structural templates before picking anything.
+  **Topic choice:** Day 57's own closing note named Kafka as having had the
+  least recent attention of the three threads (last touched Day 55, vs.
+  Airflow's 56 and dbt's 57) and flagged it for weighing first on a future
+  gap-scan — but not by default, so a real scan ran first. Grepped every
+  lesson body against every named sub-topic in `PLAN.md`'s 2b list
+  (delivery semantics, schema evolution, retention/compaction/lag, Connect
+  and CDC, stream-processing vocabulary) and found all of them already
+  taught in depth (Days 16, 17, 18, 23, 30 respectively), several extended
+  further since (consumer-group rebalancing Day 34, lag monitoring Day 37,
+  partition-assignment strategy Day 55, producer backpressure Day 50). With
+  `PLAN.md`'s own named spine fully exhausted on Kafka, re-read Day 55's own
+  "Scope line" for a named-but-deferred thread the way Days 41 and 50 had
+  already supplied for prior rounds — found one directly: Day 55 named
+  `on_lost`, the third rebalance callback, and deliberately scoped it out
+  as "a corner case closer to Day 50's crash-handling thread than today's
+  assignment-strategy focus." Took that gap today: a real, confirmed-unused
+  callback (grepped the whole `lessons/` tree for `on_lost` first — zero
+  hits) that closes the loop on Day 55's own callback trio
+  (`on_assign`/`on_revoke`/`on_lost`) and gives Day 41's crash-handling
+  thread a genuinely different failure mode to contrast against: a
+  consumer that is still alive and still polling eventually, just too
+  slowly, rather than one that crashed outright. No pandas, no
+  Python-language teaching, no API/idempotency re-derivation — confirmed
+  via a `pandas|numpy` grep (zero hits) and a prose read before shipping;
+  the one `backend/`-adjacent idea in the lesson (a rolling-deploy-shaped
+  question from Day 55) was not repeated, since today's interview answer
+  stays entirely inside Kafka's own coordinator mechanics.
+  **Content:** no new model, no new DAG task — one more callback
+  (`on_lost`) added to the exact consumer Day 55 already edited, plus one
+  new consumer config, `max.poll.interval.ms`, named as the actual trigger.
+  Confirmed from the installed `confluent-kafka==2.16.1` client's own
+  `subscribe()` docstring, read directly via `help()`: the real three-
+  callback signature (`on_assign`, `on_revoke`, `on_lost`, each
+  `(consumer, partitions)`), and its own explicit fallback statement —
+  "If not specified, lost partition events will be delivered to
+  on_revoke" — which is the fact Section 1's whole argument rests on, not
+  an inference. Named and scoped out deliberately: tuning
+  `max.poll.interval.ms` for a real processing budget (a capacity
+  question, out of this course's working-level Kafka scope per
+  `MISSION.md`), `session.timeout.ms`'s and `heartbeat.interval.ms`'s own
+  broader heartbeat-thread semantics beyond the one constraint today
+  needed to touch, and writing a genuinely slow step into the course's own
+  consumer script just to force the eviction honestly, rather than
+  modeling the symptom with `kill -STOP`/`kill -CONT`.
+  **Verification:** no reachable Postgres or Kafka broker this sandbox
+  round either (the standing gap named every round since Day 35). Caught
+  one real mistake live rather than shipping it: the lesson's first draft
+  set only `max.poll.interval.ms: 10000` to shrink today's proof window,
+  and instantiating a real `Consumer` with that exact config immediately
+  raised a genuine `KafkaException` (`val=-186`,
+  `"max.poll.interval.ms must be >= session.timeout.ms"`) — librdkafka's
+  own live-enforced constraint, not something read off a doc page first.
+  Fixed by also shortening `session.timeout.ms` to 6000 in the same
+  config block, re-run clean (the corrected `Consumer` construction and
+  `subscribe()` call succeeded with no broker reachable, failing only on
+  the expected, unrelated connection-refused error). The lesson's own
+  verification callout and Section 4 prose both name this live catch
+  explicitly rather than presenting the corrected two-value config as if
+  it had been right the first time. The `kill -STOP`/`kill -CONT` sequence
+  itself is standard Unix process control, confirmed to be the right tool
+  for modeling "the application thread stops calling `poll()`" without
+  adding a slow code path to the real script — named honestly in the
+  lesson as not run live end-to-end against a real two-consumer group this
+  round, the same disclosure convention Days 17, 38, 41, 43, 44, 46, 47,
+  50, 55 and 57 each used. The `consume_order_events.py` edit itself
+  (extracted standalone, matching Day 55's own verification shape) was
+  separately checked with `py_compile`, clean, both before and after the
+  `session.timeout.ms` fix.
+  Quiz word counts verified with the same small Python script prior
+  rounds used, stripping HTML tags and counting whitespace-split tokens
+  per option. First draft was uneven across all four questions (9/9/10,
+  7/10/8, 7/8/9, 9/8/9) — rebalanced through several word-for-word edit
+  passes (re-running the script after each edit rather than trusting a
+  hand recount, the same lesson Day 57 drew from its own hyphenation
+  near-miss) to a final clean 9/9/9 across all four questions. HTML
+  structure verified via paired open/close tag counts on every tag that
+  appears (`div` 8/8, `p` 23/23, `code` 117/117, `button` 12/12, `script`
+  3/3, `dfn` 2/2, `pre` 7/7, `h2` 7/7, `h1` 1/1, `em` 4/4, `strong` 5/5,
+  `a` 3/3) and a bare-`&` regex scan (zero hits).
+  Grepped the whole glossary for `on_lost|max.poll.interval` before
+  writing either `<dfn>` — zero hits, confirming both new terms are
+  genuinely new, not redefinitions. `reference/glossary.html` re-checked
+  after appending Day 58's section: `h2` 57/57, `table` 57/57, `tr`
+  209/209, `td` 456/456, `th` 171/171, zero bare `&`. `node --check` clean
+  on `nav.js` after today's edit.
+  Added two new glossary terms — `on_lost` and `max.poll.interval.ms` —
+  under a new Day 58 section. Added no new `RESOURCES.md` line: today's
+  primary source is the confluent-kafka Python client docs, already cited
+  and reused across Days 5–6, 34, 50 and 55, so the existing line's own
+  "Use for" list was extended to name today's angle instead of adding a
+  duplicate entry for the same URL.
+  Registered Lesson 58 in `assets/nav.js` right after the `n: 57` entry,
+  dated 2026-11-12.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a fresh gap-scan confirming `PLAN.md`'s own Kafka spine fully
+  exhausted, then Day 55's own named-but-deferred `on_lost` thread, not a
+  new durable fact about the learner distinct from the single 2026-09-14
+  baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now over
+  twenty rounds, 35-57) — still worth a human granting it once, including
+  a live confirmation that a real two-consumer group's `on_lost` eviction
+  and Day 56's three-failed-runs pause can both be confirmed end to end,
+  not just read from source or caught via a config-validation exception.
+  With Kafka's rebalance-callback trio and `PLAN.md`'s named 2b spine now
+  both fully built out, a future round's fresh gap-scan should weigh dbt
+  or Airflow depth next, since Kafka has now had three of the last four
+  rounds' worth of attention (Days 50, 55, 58) against Airflow's one (Day
+  56) and dbt's one (Day 57).

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 130 · Writing your own output-cache policy</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 130 · ~20 min</p>
+<h1>Writing your own output-cache policy</h1>
+<p class="byline">Both Lesson 128's and Lesson 129's scope lines named the same thing as a real, deliberately deferred feature: a custom <code>IOutputCachePolicy</code>. Everything so far — <code>Expire()</code>, <code>Tag()</code>, <code>SetVaryByQuery()</code> — composes existing policy-builder methods. This lesson is about the one rung up: writing the policy itself, for rules the builder has no method for at all.</p>
+
+<h2>1 · What the default policy can't express</h2>
+<p>Lesson 128's default caching policy is fixed: only HTTP 200, only GET/HEAD, never a response that sets a cookie, never a response to an authenticated request. The policy-builder methods from Lessons 128-129 adjust knobs within that shape — how long, which query keys, which tag — but none of them can change the shape itself. Nothing in <code>OutputCachePolicyBuilder</code> can say "also cache POST" or "also cache a 301." That rule isn't a missing method waiting to be added; it's deliberate, because allowing it by accident is how one tenant's cached response ends up served to another. Reaching past the builder means implementing the interface the builder itself is built on.</p>
+
+<h2>2 · The <code>IOutputCachePolicy</code> interface</h2>
+<p><dfn data-en="an ASP.NET Core interface (Microsoft.AspNetCore.OutputCaching) with three methods -- CacheRequestAsync, ServeFromCacheAsync, ServeResponseAsync -- each given an OutputCacheContext to read and mutate, implemented when a caching rule can't be expressed through OutputCachePolicyBuilder's existing methods" data-vn="IOutputCachePolicy (giữ nguyên) — interface của ASP.NET Core (Microsoft.AspNetCore.OutputCaching) có 3 method -- CacheRequestAsync, ServeFromCacheAsync, ServeResponseAsync -- mỗi method nhận 1 OutputCacheContext để đọc và chỉnh, tự viết khi 1 luật cache không thể diễn tả bằng method có sẵn của OutputCachePolicyBuilder">IOutputCachePolicy</dfn> has three methods, each called at a different point in the request:</p>
+<pre><code><span class="kw">public sealed class</span> MyCustomPolicy : IOutputCachePolicy
+{
+    <span class="kw">public static readonly</span> MyCustomPolicy Instance = <span class="kw">new</span>();
+    <span class="kw">private</span> MyCustomPolicy() { }
+
+    ValueTask IOutputCachePolicy.CacheRequestAsync(
+        OutputCacheContext context, CancellationToken cancellationToken)
+    {
+        <span class="kw">var</span> allow = AttemptOutputCaching(context);
+        context.EnableOutputCaching = <span class="kw">true</span>;
+        context.AllowCacheLookup = allow;
+        context.AllowCacheStorage = allow;
+        <span class="kw">return</span> ValueTask.CompletedTask;
+    }
+
+    ValueTask IOutputCachePolicy.ServeFromCacheAsync(
+        OutputCacheContext context, CancellationToken cancellationToken)
+        =&gt; ValueTask.CompletedTask;
+
+    ValueTask IOutputCachePolicy.ServeResponseAsync(
+        OutputCacheContext context, CancellationToken cancellationToken)
+    {
+        <span class="kw">var</span> response = context.HttpContext.Response;
+        <span class="kw">if</span> (response.StatusCode != StatusCodes.Status200OK &amp;&amp;
+            response.StatusCode != StatusCodes.Status301MovedPermanently)
+        {
+            context.AllowCacheStorage = <span class="kw">false</span>;
+        }
+        <span class="kw">return</span> ValueTask.CompletedTask;
+    }
+
+    <span class="kw">private static bool</span> AttemptOutputCaching(OutputCacheContext context)
+    {
+        <span class="kw">var</span> request = context.HttpContext.Request;
+        <span class="kw">return</span> HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)
+            || HttpMethods.IsPost(request.Method);
+    }
+}</code></pre>
+<p><code>CacheRequestAsync</code> runs first, before a handler executes — this is where the policy decides, from the request alone, whether to even look in the cache or consider storing a result. <code>ServeFromCacheAsync</code> runs if a stored entry was found, right before it's served. <code>ServeResponseAsync</code> runs after the handler produced a fresh response, deciding whether that response is actually allowed into the store — the example above widens Lesson 128's default past GET/HEAD-only and past 200-only, to also allow POST requests and 301 responses, exactly the two rules the builder's methods have no knob for.</p>
+
+<h2>3 · Registering and selecting it</h2>
+<p>A singleton custom policy registers like any named policy, then selects the same way <code>Expire20</code> did back in Lesson 128:</p>
+<pre><code>builder.Services.AddOutputCache(options =&gt;
+{
+    options.AddPolicy(<span class="st">"CachePost"</span>, MyCustomPolicy.Instance);
+});
+
+app.MapPost(<span class="st">"/cachedpost"</span>, Gravatar.WriteGravatar)
+    .CacheOutput(<span class="st">"CachePost"</span>);</code></pre>
+<p>If the policy needs constructor-injected dependencies instead of being a parameterless singleton, drop the private constructor and <code>Instance</code> field, give it a public constructor, and register it through DI instead:</p>
+<pre><code>options.AddPolicy(<span class="st">"CachePost"</span>, b =&gt; b.AddPolicy&lt;MyCustomPolicy2&gt;(), <span class="kw">true</span>);</code></pre>
+<p>One documented trap: a custom policy used as a <em>base</em> policy must never sit alongside a bare <code>CacheOutput()</code> or <code>[OutputCache]</code> with no policy name on the same endpoint — calling either with no arguments silently re-adds Lesson 128's default policy on top, which is exactly the shape rule the custom policy exists to override.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like writing a custom React Query <code>queryClient</code> default — override one global rule, done. The gap is where the rule runs: a custom <code>IOutputCachePolicy</code>'s three methods execute entirely server-side, in the request pipeline, before and after a handler most callers never see — there's no client-side equivalent moment to reach into, since the client never holds the cached entity in the first place.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the <code>IOutputCachePolicy</code> interface's three methods, <code>OutputCacheContext</code>'s <code>EnableOutputCaching</code>/<code>AllowCacheLookup</code>/<code>AllowCacheStorage</code> flags, and registering a custom policy by singleton or by DI. It does not cover <code>IOutputCachePolicyProvider</code> (resolving policies dynamically from a database or per tenant — a .NET 11+ addition), the <code>SizeLimit</code>/<code>MaximumBodySize</code> cache-wide limits, or <code>SetLocking(false)</code>'s resource-locking opt-out — each a reasonable follow-up, out of scope for a first custom policy specifically.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="OutputCachePolicyBuilder's methods (Expire, Tag, SetVaryByQuery, and so on) only adjust knobs within the default policy's fixed shape. None of them can change which status codes or HTTP methods are eligible at all -- that requires implementing IOutputCachePolicy directly.">
+    <p class="stem">Why can't Expire() or Tag() alone make POST requests eligible for output caching?</p>
+    <button class="opt" data-ok>builder methods only adjust the existing policy, not its fixed shape</button>
+    <button class="opt">POST requests are permanently blocked at the HTTP protocol layer itself</button>
+    <button class="opt">Expire() and Tag() already fully support every HTTP verb by default</button>
+    <button class="opt">AddOutputCache() itself must be called twice before any POST route works</button>
+  </div>
+  <div class="q" data-why="CacheRequestAsync runs first, before the handler, deciding whether to even look up or consider storing a response. ServeFromCacheAsync runs only when a stored entry was actually found, right before it is served to the caller.">
+    <p class="stem">What is the real difference between CacheRequestAsync and ServeFromCacheAsync?</p>
+    <button class="opt" data-ok>one runs before the handler always, the other given an entry</button>
+    <button class="opt">they are simply two completely different names for the exact method</button>
+    <button class="opt">ServeFromCacheAsync always runs first of all, before any request even starts</button>
+    <button class="opt">CacheRequestAsync only ever fires once per whole entire application process lifetime</button>
+  </div>
+  <div class="q" data-why="ServeResponseAsync runs after the handler has already produced a fresh response, and decides whether that specific response is allowed into the store -- the sample policy sets AllowCacheStorage to false there for any status code besides 200 and 301.">
+    <p class="stem">In the sample policy, which method decides whether a fresh 404 response gets stored?</p>
+    <button class="opt" data-ok>ServeResponseAsync, by setting AllowCacheStorage squarely based on its own real status</button>
+    <button class="opt">CacheRequestAsync, purely from reading the inbound request before any handler ran</button>
+    <button class="opt">ServeFromCacheAsync, since every single fresh response always passes through that method</button>
+    <button class="opt">none of these three methods ever even look at any status</button>
+  </div>
+  <div class="q" data-why="The docs state explicitly that applying a bare CacheOutput() or an [OutputCache] attribute with no policy name on an endpoint re-adds the default policy on top -- which defeats the point of a custom base policy meant to override that default shape entirely.">
+    <p class="stem">What documented mistake silently undoes a custom base policy on one endpoint?</p>
+    <button class="opt" data-ok>also calling bare CacheOutput() with no policy name on that endpoint</button>
+    <button class="opt">registering the custom policy instance as a plain singleton field instead</button>
+    <button class="opt">calling AddOutputCache() before UseOutputCache() way too early inside the pipeline setup</button>
+    <button class="opt">naming the custom policy class itself with a plain Policy term</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/output">Microsoft Learn: Output Caching Middleware</a> ("Override the default policy" section) gives the full <code>MyCustomPolicy</code> example this lesson adapts verbatim-signature: the <code>IOutputCachePolicy</code> interface's three methods (<code>CacheRequestAsync</code>, <code>ServeFromCacheAsync</code>, <code>ServeResponseAsync</code>), each taking an <code>OutputCacheContext</code> and <code>CancellationToken</code>; the <code>EnableOutputCaching</code>/<code>AllowCacheLookup</code>/<code>AllowCacheStorage</code> flags on that context; registering via <code>options.AddPolicy("CachePost", MyCustomPolicy.Instance)</code> versus the DI form <code>options.AddPolicy("CachePost", b =&gt; b.AddPolicy&lt;MyCustomPolicy2&gt;(), true)</code>; and the explicit warning that a bare <code>OutputCache()</code> call or attribute with no policy name re-adds the default policy on an endpoint meant to use a custom base policy instead. The same page's newer "Resolve policies dynamically with <code>IOutputCachePolicyProvider</code>" section (.NET 11+) is this lesson's named, deliberately out-of-scope follow-up.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 128's <code>AddOutputCache()</code>/default policy and Lesson 129's <code>Tag()</code>/<code>IOutputCacheStore</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "IOutputCachePolicyProvider khác IOutputCachePolicy ở điểm nào, và khi nào mới cần cái provider đó thay vì chỉ AddPolicy() tĩnh?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

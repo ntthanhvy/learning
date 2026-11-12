@@ -12901,3 +12901,118 @@ fail *gracefully* so the learner sees which task failed.
   lesson_generated --day 105 --lesson 0105-locale-module.html --detail
   '{"by":"headless"}'` was run from the repo root at the end of this round
   and succeeded.
+- 2026-11-12 generation (Lesson 106, headless run): idempotency check first
+  confirmed no `lessons/0106-*.html` on disk, no `n: 106` entry in `nav.js`,
+  and no 2026-11-12 entry already in this file; the orchestrator had also
+  already confirmed no `course_progress` row for `course='python'` dated
+  today (last recorded signal of any kind across any course: 2026-10-15).
+  Read `MISSION.md` (no-pandas/no-NumPy exclusion re-confirmed before
+  writing a line — never modified), this file's tail through Day 105's own
+  closing note, `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, and
+  `reference/glossary.html`'s tail. Also checked
+  `learning-records/` — still only the Day 1 baseline record
+  (`0001-baseline-reads-python-writes-little.md`) with no later quiz/kata/
+  lesson_completed signal, so a routine fresh-topic pick following the
+  course's own settled cadence was the right call again this round. Per
+  Day 105's own cadence note, Day 105 was fresh day 2 of the current
+  three-fresh-then-review cycle, so Day 106 is fresh day 3 — Day 107 should
+  be the next review, covering Days 104-106. A fresh case-insensitive grep
+  across every lesson title/body, every practice file, `glossary.html`, and
+  `RESOURCES.md` re-checked the standing candidate (`socket`, passing-
+  mention-only across Days 21-25/58) plus swept broadly for other untaught
+  stdlib corners: confirmed `enum`, `fractions`, `textwrap`/`string`,
+  `functools`, `glob`/`fnmatch`, `namedtuple`, `argparse`, and `calendar`
+  are all already fully taught (the last explicitly ruled out on Day 92's
+  own note for overlapping Day 14's `datetime`), while `shelve` and
+  `queue`/`multiprocessing`/`zoneinfo` are genuinely untouched — not even a
+  passing mention anywhere, unlike `socket`. Picked `shelve` over `socket`
+  (still ruled out for the same reason every prior round gave: real
+  networking runs deeper than 20 minutes and edges into Phase 2b/FastAPI
+  territory Days 21-25 already touch) and over `queue` (less sharply
+  motivated without a concurrency lesson already in place to hang it off
+  of): `shelve` closes a real, concrete gap sitting directly between two
+  named prior lessons — Day 72's `pickle` (round-trips one object, no key-
+  based lookup or persistence model of its own) and Day 93's `sqlite3`
+  (full SQL and a schema, real ceremony for something that's often just a
+  saved dict) — squarely language/stdlib, zero pandas/NumPy surface.
+  Probed every behavioral claim live in a scratch dir
+  (`.scratch-python-106/`, created inside the repo per this file's
+  established convention, deleted after; `uv run python3 probeN.py`)
+  rather than trusting memory: confirmed `shelve.open(path)` returns a
+  `Shelf` supporting `[]` lookup, `in`, `.keys()`, `len()`, `del`, and a
+  plain `KeyError` on a missing key, exactly like a `dict`; confirmed a
+  value written and the shelf closed is still there, byte-for-byte equal,
+  after a fresh `shelve.open()` on the same path in a brand-new `with`
+  block (simulating a process restart); confirmed a `dataclass` instance
+  stores and reads back intact with no hand-conversion, the same pickle-
+  backed round trip Day 72 taught for one object now addressable by key;
+  confirmed the classic in-place-mutation trap live — appending to a list
+  nested inside a stored value with a plain `shelve.open()` silently does
+  not persist, because reading a value unpickles a fresh copy each time
+  and mutating that copy is never an assignment — and confirmed
+  `shelve.open(path, writeback=True)` is the documented fix, reproducing
+  the appended item correctly on a subsequent plain re-open. One
+  environment-specific detail recorded rather than assumed: this sandbox's
+  `shelve` backend is `dbm.gnu` (confirmed live via
+  `dbm.whichdb(path)`), writing a single file at the given path rather
+  than the classic `.dat`/`.dir`/`.bak` trio some platforms produce — the
+  lesson's own "Go deeper" section flags this as something to check per
+  platform rather than assume. Checked the glossary for term collisions
+  before writing — grepped `shelve`, `writeback`, and `persistent dict`
+  case-insensitively across the full `glossary.html`, zero existing rows
+  for any of the three. **New jargon: 3 inline `<dfn>`/glossary-scoped
+  terms** (`shelve` as a persistent dict, the `str`-only key restriction,
+  `writeback=True`) **folded into 3 glossary rows**, added as a new
+  `<h2 id="day106">` section directly after Day 105's. Verification
+  performed mechanically, from dedicated scripts (deleted after): (1) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a on the new lesson — balanced (div 6/6, p 16/16, code 63/63,
+  button 9/9, script 3/3, dfn 1/1, pre 4/4, h2 6/6, h1 1/1, em 2/2,
+  strong 3/3, a 2/2), plus a raw-unescaped-`&` regex scan — zero hits; (2)
+  an `html.parser.HTMLParser` full-document parse of the new lesson and of
+  `glossary.html` — no parse errors on either; (3) a per-question quiz
+  option word-count check via regex-strip-tags extraction — first draft
+  mismatched across all three questions, iterated option-by-option,
+  re-verifying exact per-word lists (not just counts) after each edit,
+  until all three landed on equal per-question counts: 12/12/12, 12/12/12,
+  11/11/11; (4) a table/tr/th/td/h2/p/div balance check on `glossary.html`
+  after its new section, plus a duplicate-`id="dayNN"` scan — balanced
+  (table 89/89, tr 389/389, th 267/267, td 900/900, h2 89/89) with zero
+  duplicates among 89 ids, `day106` present exactly once; a case-
+  insensitive duplicate-term scan across the glossary's term column
+  reproduced the one pre-existing collision already on record
+  (`dependency`), confirmed none of the three new terms collide with it or
+  any other existing row; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all three clean; (6) a
+  duplicate `n:` scan across `nav.js`'s `LESSONS` array — 106 entries,
+  zero duplicates, max `n` is 106; (7) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 1 hit total,
+  confirmed by direct line lookup to sit inside the required "Why today"
+  scope-boundary callout stating zero pandas/NumPy surface, never a worked
+  example, and zero hits in the practice file. The shipped (unsolved)
+  `practice/106_shelve_persistent_dicts.py` was executed directly from its
+  real `practice/` location and printed exactly 4 ✗ with no raw traceback.
+  A solved copy built in `.scratch-python-106/` (copied from the shipped
+  file, then each TODO body filled in directly — never editing the shipped
+  file itself, deleted after) printed all 4 ✓ and "All green" on two
+  consecutive runs; the shipped file was re-run afterward from its real
+  location and reproduced the identical all-✗ result, confirming no
+  leakage back into the baseline. Added one new `RESOURCES.md` line for
+  `shelve`, placed directly after Day 105's `locale` line and before the
+  PEP 8 line, following the file's chronological-by-day ordering.
+  Registered Lesson 106 in `nav.js` with today's date (2026-11-12) right
+  after the `n: 105` entry. `python/learning-records/` was not touched this
+  round — the sole file there is still the Day 1 baseline record with no
+  newer quiz/kata/lesson_completed signal, so a routine fresh-topic pick
+  following the course's own settled cadence was the right call, same
+  fallback this file's own convention has used in recent rounds. Cadence
+  note for the next round: Day 106 is fresh day 3 of the current
+  three-fresh-then-review cycle — Day 107 should be a review/retrieval day
+  covering Days 104-106, not a fourth fresh day. Standing fresh-gap
+  candidates still open after today: `socket` (still passing-mention-only,
+  repeatedly ruled out on scope-depth grounds) and `queue`/
+  `multiprocessing`/`zoneinfo` (genuinely untouched, not yet strong enough
+  to override review-day cadence math). `bin/record-progress python
+  lesson_generated --day 106 --lesson 0106-shelve-persistent-dicts.html
+  --detail '{"by":"headless"}'` was run from the repo root at the end of
+  this round and succeeded.

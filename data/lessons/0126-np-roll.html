@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 126 · np.roll(): shift-with-wraparound, the sibling Series.shift() doesn't have</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 126 · ~20 min · 12 Nov 2026</p>
+<h1>np.roll(): shift-with-wraparound, the sibling Series.shift() doesn't have</h1>
+<p class="byline">Lesson 125 closed with one standing candidate left from Lesson 122's own fresh scan: <code>np.roll()</code> (<code>np.corrcoef()</code> stays out of scope per <code>MISSION.md</code>'s "no deep linear algebra" line). Today picks it — it looks like a NumPy cousin of pandas' <code>Series.shift()</code>, both "move every element over by N," but <code>np.roll()</code> never introduces <code>NaN</code>: elements that fall off one end wrap back around to the other.</p>
+
+<h2>1 · shift() leaves holes; roll() has none to leave</h2>
+<p><code>Series.shift()</code> moves values down the index and pads the vacated spots with <code>NaN</code> — useful for day-over-day deltas, but it means the array grows a missing value every time. <dfn data-en="a NumPy function that shifts every element of an array by a given number of positions along an axis, where elements that roll past the last position wrap back around to the first position instead of leaving a gap -- the array's shape and element count never change" data-vn="giữ nguyên 'np.roll()' — hàm dịch (shift) mọi phần tử trong mảng đi N vị trí theo 1 axis, phần tử bị dịch ra khỏi vị trí cuối thì VÒNG LẠI (wrap around) về vị trí đầu, không để trống; shape và số phần tử mảng không đổi">np.roll(a, shift)</dfn> shifts the same way but wraps instead of padding, confirmed directly (numpy 2.5.4, pandas 3.1.1):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>])
+
+np.roll(arr, <span class="kw">2</span>)
+<span class="cm"># array([40, 50, 10, 20, 30])  -- last 2 elements wrap around to the front</span>
+
+np.roll(arr, -<span class="kw">1</span>)
+<span class="cm"># array([20, 30, 40, 50, 10])  -- negative shift rolls the other direction; the first element wraps to the end</span>
+
+ser = pd.Series([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>])
+
+ser.shift(<span class="kw">1</span>).tolist()
+<span class="cm"># [nan, 10.0, 20.0, 30.0, 40.0]  -- shift() pads with NaN and even upcasts int to float to hold it</span>
+
+np.roll(ser.to_numpy(), <span class="kw">1</span>)
+<span class="cm"># array([50, 10, 20, 30, 40])  -- roll() wraps the dropped-off 50 back to the front; no NaN, no upcast</span></code></pre>
+<p>Confirmed directly against the official docs' own wording: "elements that roll beyond the last position are re-introduced at the first" — that sentence is the entire semantic difference from <code>shift()</code>. Reach for <code>np.roll()</code> only when "wrap around" is genuinely the intended behavior (e.g. cyclic data like days-of-week buckets or a circular buffer) — using it in place of <code>shift()</code> on a plain time series would quietly smuggle the oldest value back in as if it were the newest, a correctness bug that prints a plausible-looking array with no error at all.</p>
+
+<h2>2 · Like np.take(), it also accepts a plain Python list — and an oversized shift just wraps further</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4):</strong> <code>np.roll()</code> shares <code>np.take()</code>'s (Lesson 125) plain-list acceptance, and a shift count larger than the array's length does not error or clip — it keeps wrapping, equivalent to <code>shift % len(a)</code>:</p>
+<pre><code>plain_list = [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>]
+
+np.roll(plain_list, <span class="kw">2</span>)
+<span class="cm"># array([40, 50, 10, 20, 30])  -- plain list accepted directly, same as np.take()</span>
+
+np.roll(arr, <span class="kw">5</span>)
+<span class="cm"># array([10, 20, 30, 40, 50])  -- shift == array length: one full lap, back to the original order</span>
+
+np.roll(arr, <span class="kw">7</span>)
+<span class="cm"># array([40, 50, 10, 20, 30])  -- shift > length: same result as shift=2, since 7 % 5 == 2</span>
+
+np.roll(arr, <span class="kw">0</span>)
+<span class="cm"># array([10, 20, 30, 40, 50])  -- shift=0 is a genuine no-op, but still returns a NEW array (a copy, not a view)</span></code></pre>
+<p>Confirmed directly via <code>np.shares_memory()</code>: <code>np.roll()</code> always returns an independent copy, even at <code>shift=0</code> — never a view into the original array, unlike <code>np.ravel()</code>'s (Lesson 112) view-when-possible behavior. Mutating the result never touches the input array.</p>
+</div>
+
+<h2>3 · axis= on a 2-D array, and there is no Series.roll()</h2>
+<p>Confirmed directly, omitting <code>axis=</code> flattens the array first, rolls, then restores the original shape — the same default convention as <code>np.take()</code> and <code>np.flatnonzero()</code> (Lessons 124-125). Passing <code>axis=</code> instead rolls within each row or column independently:</p>
+<pre><code>grid = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>], [<span class="kw">7</span>, <span class="kw">8</span>, <span class="kw">9</span>]])
+
+np.roll(grid, <span class="kw">1</span>, axis=<span class="kw">0</span>)
+<span class="cm"># array([[7, 8, 9], [1, 2, 3], [4, 5, 6]])  -- whole ROWS wrap downward, each row's own values stay intact</span>
+
+np.roll(grid, <span class="kw">1</span>, axis=<span class="kw">1</span>)
+<span class="cm"># array([[3, 1, 2], [6, 4, 5], [9, 7, 8]])  -- each ROW rolls independently along its own columns</span>
+
+np.roll(grid, <span class="kw">1</span>)
+<span class="cm"># array([[9, 1, 2], [3, 4, 5], [6, 7, 8]])  -- no axis=: flattened first, rolled, then reshaped back to 3x3</span></code></pre>
+<p>Confirmed directly: pandas defines no <code>Series.roll()</code> or <code>DataFrame.roll()</code> at all — <code>DataFrame.rolling()</code> exists but is an unrelated windowing operation (moving averages, not element wraparound), and calling <code>.roll()</code> on a <code>Series</code> raises <code>AttributeError</code>. To roll a <code>Series</code>' values, confirmed directly, the pattern is <code>pd.Series(np.roll(ser.to_numpy(), n), index=ser.index)</code> — <code>np.roll()</code> stays a NumPy-array-only function with no direct pandas method sibling, a genuine gap unlike <code>take()</code>, which pandas does mirror.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.roll()</code>'s confirmed shift-with-wraparound semantics versus <code>Series.shift()</code>'s pad-with-<code>NaN</code> semantics; the confirmed oversized-shift wraparound (equivalent to modulo the array length) and always-a-copy behavior; <code>axis=</code> on a 2-D array versus the flatten-then-restore default; and the confirmed absence of any pandas <code>.roll()</code> method. It does not cover using <code>np.roll()</code> for signal-processing circular convolution, a legitimate but out-of-scope use case per <code>MISSION.md</code>'s "no deep NumPy" line — mentioned only in passing.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/126_np_roll.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/126_np_roll.py</code></pre>
+<p>Exercise 1 confirms the Section 1 contrast: <code>np.roll()</code> wraps dropped-off elements back around with no <code>NaN</code>, where <code>Series.shift()</code> pads with <code>NaN</code> and upcasts to float. Exercise 2 confirms the Section 2 behavior: a plain Python list works directly, and a shift larger than the array's length wraps exactly as if taken modulo the length. Exercise 3 confirms the Section 3 behavior: <code>axis=0</code> rolls whole rows in a 2-D array, and there is no <code>Series.roll()</code> method at all — calling it raises <code>AttributeError</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly against the official docs' own wording: elements that roll beyond the last position are re-introduced at the first -- np.roll() never pads with NaN or drops any element. Series.shift() is the pandas method that pads with NaN; np.roll() wraps instead.">
+    <p class="stem">What happens to the element that rolls off the end of the array under <code>np.roll(arr, 1)</code>?</p>
+    <button class="opt" data-ok>it wraps back around, becoming the array's brand new first element</button>
+    <button class="opt">it is dropped, and a NaN is padded in at front</button>
+    <button class="opt">it is dropped entirely, which shrinks the array by one element</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a shift count larger than the array's length does not error or clip -- it keeps wrapping, equivalent to shift % len(a). On a 5-element array, np.roll(arr, 7) gives the identical result to np.roll(arr, 2), since 7 % 5 == 2.">
+    <p class="stem">On a 5-element array, what does <code>np.roll(arr, 7)</code> produce, given that 7 is larger than the array's length?</p>
+    <button class="opt" data-ok>the same result as np.roll(arr, 2), since 7 modulo 5 equals 2</button>
+    <button class="opt">an IndexError, since this particular shift count exceeds the array's own length</button>
+    <button class="opt">the array clipped down to only 5 minus 7 remaining elements left</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pandas defines no Series.roll() or DataFrame.roll() method at all. DataFrame.rolling() exists but is a completely different operation -- windowed aggregation like moving averages -- not element-wise wraparound shifting. Calling .roll() on a Series raises AttributeError.">
+    <p class="stem">Calling <code>pd.Series([1,2,3]).roll(1)</code> does what?</p>
+    <button class="opt" data-ok>raises AttributeError, since pandas has no Series.roll() method at all</button>
+    <button class="opt">works fine, wrapping its last value forward, same as roll()</button>
+    <button class="opt">it silently runs DataFrame.rolling()'s own, completely unrelated windowed-average logic instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.roll.html"><code>numpy.roll()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) states the wraparound rule directly — "elements that roll beyond the last position are re-introduced at the first" — and documents the <code>axis=</code> tuple form for rolling multiple dimensions at once by different amounts simultaneously, a shape this lesson did not need and leaves for whenever a task calls for it.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.roll()</code> is new today, added right after Lesson 125's <code>np.take()</code> entry.<br>
+<strong>Next lesson:</strong> Lesson 122's own standing-candidate list is now fully used up (<code>np.nan_to_num()</code>, <code>np.take()</code>, <code>np.roll()</code>, <code>np.nonzero()</code>/<code>flatnonzero()</code> all shipped; <code>np.corrcoef()</code> stays out of scope) — tomorrow's round is due a genuinely fresh curriculum scan.<br><br>
+💬 Anything unclear — the shift-vs-roll contrast, the modulo-wraparound trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

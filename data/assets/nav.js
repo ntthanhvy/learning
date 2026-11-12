@@ -258,6 +258,8 @@
       file: "lessons/0124-np-nonzero-flatnonzero.html" },
     { n: 125, date: "2026-11-11", title: "np.take(): fancy indexing that also works on plain lists, with a mode= safety valve",
       file: "lessons/0125-np-take.html" },
+    { n: 126, date: "2026-11-12", title: "np.roll(): shift-with-wraparound, the sibling Series.shift() doesn't have",
+      file: "lessons/0126-np-roll.html" },
   ];
 
   const REFS = [

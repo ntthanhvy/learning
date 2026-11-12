@@ -218,6 +218,8 @@
       file: "lessons/0104-types-simplenamespace.html" },
     { n: 105, date: "2026-11-11", title: "locale: formatting numbers the way a reader expects",
       file: "lessons/0105-locale-module.html" },
+    { n: 106, date: "2026-11-12", title: "shelve: a dict that survives the process ending",
+      file: "lessons/0106-shelve-persistent-dicts.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 106 · shelve: a dict that survives the process ending</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 106 · ~20 min · 12 Nov 2026</p>
+<h1><code>shelve</code>: a dict that survives the process ending</h1>
+<p class="byline">Day 93's <code>sqlite3</code> is a real database — a schema, SQL, typed columns. Most scripts never need that much ceremony; they just want a plain <code>dict</code> that is still there the next time the program runs. The standard-library <code>shelve</code> module is exactly that: a <dfn data-en="a persistent, dict-like object that stores Python objects on disk under string keys, built on dbm for the on-disk key/value store and pickle (Day 72) for serializing the values -- values persist across process restarts with no schema and no SQL, unlike a plain in-memory dict" data-vn="giữ nguyên &quot;shelve&quot; — object giống dict nhưng lưu được xuống đĩa, key bắt buộc là string, value là object Python bất kỳ; dùng dbm để lưu key/value trên đĩa và pickle (Day 72) để serialize value, không cần schema hay SQL">persistent dict</dfn>, keyed by strings, holding almost any Python object as the value, backed by Day 72's <code>pickle</code> underneath.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>shelve</code> is genuinely zero-hit as a dedicated topic — not even a passing mention, unlike <code>socket</code> (repeatedly ruled out across many prior rounds: real networking runs deeper than 20 minutes and edges into Phase 2b/FastAPI territory Days 21-25 already touch) or <code>calendar</code> (ruled out on Day 92's own note for overlapping too heavily with Day 14's <code>datetime</code>). Per Day 105's cadence note, Day 105 was fresh day 2 of the current three-fresh-then-review cycle, so Day 106 is fresh day 3 — the next day, 107, should be a review covering Days 104-106. Picked <code>shelve</code>: it closes a real gap between Day 72's <code>pickle</code> (round-trips one object, no key-based lookup, no persistence model) and Day 93's <code>sqlite3</code> (full SQL, but real ceremony for something that's really just a saved dict) — squarely language/stdlib, zero pandas/NumPy surface, and a natural continuation of both named lessons rather than an unrelated new corner.</div>
+
+<h2>1 · Opening one, and why it looks exactly like a <code>dict</code></h2>
+<p><code>shelve.open(path)</code> opens (or creates) a persistent store at that path and returns a <code>Shelf</code> — something that behaves like a <code>dict</code> for almost everything: <code>[]</code> lookup, <code>in</code>, <code>.keys()</code>, <code>len()</code>, <code>del</code>. Day 6's <code>with</code> block applies the same way it does to a file, closing the shelf (and flushing anything unwritten) when the block ends:</p>
+<pre><code><span class="kw">import</span> shelve
+
+<span class="kw">with</span> shelve.open(<span class="str">"contacts"</span>) <span class="kw">as</span> db:
+    db[<span class="str">"ada"</span>] = {<span class="str">"age"</span>: 30, <span class="str">"city"</span>: <span class="str">"Hanoi"</span>}
+    db[<span class="str">"grace"</span>] = {<span class="str">"age"</span>: 40, <span class="str">"city"</span>: <span class="str">"Hue"</span>}
+
+<span class="cm"># a brand-new process, or just a later line, re-opening the same path:</span>
+<span class="kw">with</span> shelve.open(<span class="str">"contacts"</span>) <span class="kw">as</span> db:
+    <span class="kw">print</span>(<span class="str">"ada"</span> <span class="kw">in</span> db)        <span class="cm"># True -- confirmed live, still there</span>
+    <span class="kw">print</span>(db[<span class="str">"ada"</span>])          <span class="cm"># {'age': 30, 'city': 'Hanoi'} -- confirmed live</span>
+    <span class="kw">print</span>(<span class="kw">sorted</span>(db.keys()))  <span class="cm"># ['ada', 'grace'] -- confirmed live</span></code></pre>
+<p>Nothing here is a new data structure to learn — it is Day 3's <code>dict</code> vocabulary, pointed at a file instead of memory. A missing key still raises a plain <code>KeyError</code>, confirmed live, exactly Day 3's lookup rule, unchanged.</p>
+
+<h2>2 · Keys must be strings; values go through <code>pickle</code></h2>
+<p><code>shelve</code> keys must be <code>str</code> — unlike a regular <code>dict</code>, which accepts any hashable key. Values have no such limit: <em>almost</em> anything <code>pickle</code> (Day 72) can serialize can be a shelf's value, including a <code>dataclass</code> instance, with no hand-conversion:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Order:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">float</span>
+
+<span class="kw">with</span> shelve.open(<span class="str">"orders"</span>) <span class="kw">as</span> db:
+    db[<span class="str">"o1"</span>] = Order(<span class="str">"Hanoi"</span>, <span class="kw">120.0</span>)
+
+<span class="kw">with</span> shelve.open(<span class="str">"orders"</span>) <span class="kw">as</span> db:
+    <span class="kw">print</span>(db[<span class="str">"o1"</span>])   <span class="cm"># Order(city='Hanoi', amount=120.0) -- confirmed live, round-tripped intact</span></code></pre>
+<p>This is Day 72's gap, closed with lookup: <code>pickle.dumps()</code>/<code>loads()</code> round-trips one object at a time with no addressing scheme of its own; <code>shelve</code> is that same serialization wrapped in a key/value store, so a program can save and fetch many objects by name instead of managing separate files or one big list.</p>
+
+<h2>3 · The trap: mutating a value in place does nothing, unless <code>writeback=True</code></h2>
+<p>Because a shelf writes a value back to disk only when it is <em>assigned</em>, mutating a mutable value already stored there — appending to a list that's a value, say — silently does not persist, confirmed live:</p>
+<pre><code><span class="kw">with</span> shelve.open(<span class="str">"recs"</span>) <span class="kw">as</span> db:
+    db[<span class="str">"rec"</span>] = {<span class="str">"tags"</span>: [<span class="str">"a"</span>, <span class="str">"b"</span>]}
+
+<span class="kw">with</span> shelve.open(<span class="str">"recs"</span>) <span class="kw">as</span> db:
+    db[<span class="str">"rec"</span>][<span class="str">"tags"</span>].append(<span class="str">"c"</span>)   <span class="cm"># mutates an in-memory copy only -- no assignment happened</span>
+
+<span class="kw">with</span> shelve.open(<span class="str">"recs"</span>) <span class="kw">as</span> db:
+    <span class="kw">print</span>(db[<span class="str">"rec"</span>])   <span class="cm"># {'tags': ['a', 'b']} -- confirmed live, the append never saved</span></code></pre>
+<p><code>db["rec"]</code> unpickles a fresh copy every time it's read; <code>.append()</code> changes that throwaway copy, not anything on disk. <code>shelve.open(path, writeback=True)</code> fixes this by caching every accessed entry in memory and writing all of them back on close — confirmed live, the identical code above persists the appended tag correctly once opened with <code>writeback=True</code>. The cost: every entry ever touched stays cached in memory until the shelf closes, which can use real memory on a shelf with many large values — the right trade only when in-place mutation is actually needed, not the default to reach for blindly.</p>
+
+<div class="callout"><strong>Bridge from Day 93's <code>sqlite3</code>:</strong> both are "a database in a file with no server," but <code>shelve</code> has no schema, no SQL, and no query language — only key lookup, same as a <code>dict</code>. Reach for <code>shelve</code> for a script's own cache or saved state keyed by a simple name; reach for <code>sqlite3</code> the moment the data needs filtering, joining, or any shape of query beyond "fetch by exact key."</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/106_shelve_persistent_dicts.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/106_shelve_persistent_dicts.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing then re-opening a shelf to confirm a value survives the close/reopen round trip, storing a <code>dataclass</code> instance as a value and reading it back intact, confirming a missing key raises <code>KeyError</code> just like a plain <code>dict</code>, and reproducing the <code>writeback=True</code> fix for in-place mutation of a stored list.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="shelve.open() returns a Shelf that supports the same [] lookup, 'in' check, .keys(), len(), and del a plain dict supports -- the one restriction is that keys must be strings, unlike a regular dict which accepts any hashable key. Values have no such restriction beyond what pickle itself can serialize.">
+    <p class="stem">What is true of a <code>shelve.open()</code> result, confirmed live?</p>
+    <button class="opt" data-ok>it behaves like a dict, but every key must be a string</button>
+    <button class="opt">it behaves like a dict, but every value must be plain text</button>
+    <button class="opt">it behaves like a list, reached only by a numeric index value</button>
+  </div>
+  <div class="q" data-why="A Shelf unpickles a fresh copy of a value every time it's read by key, so db['rec']['tags'].append('c') mutates that throwaway in-memory copy only -- no assignment to db['rec'] ever happened, so nothing gets written back to disk. Confirmed live: re-opening the shelf afterward shows the append never took effect.">
+    <p class="stem">Why does <code>db["rec"]["tags"].append("c")</code> not persist on a normally opened shelf, confirmed live?</p>
+    <button class="opt" data-ok>reading unpickles a fresh copy, so mutating it is not an assignment</button>
+    <button class="opt">append() always raises a plain AttributeError on any shelved list value too</button>
+    <button class="opt">shelve always blocks every single list value from ever accepting new items</button>
+  </div>
+  <div class="q" data-why="shelve.open(path, writeback=True) caches every accessed entry in memory and writes all of them back when the shelf closes, which is what makes in-place mutation of a stored value persist correctly. The real cost is memory: every touched entry stays cached until close, which can add up on a shelf with many large values -- not something to reach for by default.">
+    <p class="stem">What does <code>shelve.open(path, writeback=True)</code> actually change, confirmed live?</p>
+    <button class="opt" data-ok>caches touched entries in memory, writing them all back on close</button>
+    <button class="opt">makes every lookup run noticeably faster by skipping pickle now itself</button>
+    <button class="opt">switches key lookup from an exact match to a fuzzy search</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/shelve.html"><code>shelve</code></a> docs — covers today's dict-like interface and the <code>writeback=True</code> trade-off directly, plus the underlying <code>dbm</code> module this environment uses (confirmed live here: <code>dbm.gnu</code>), which can differ by platform.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day106">glossary</a> under Day 106.<br>
+💬 Anything unclear — when a shelf's single-file storage is risky under concurrent writers, or how this compares to Day 93's <code>sqlite3</code> for a real multi-process use case? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

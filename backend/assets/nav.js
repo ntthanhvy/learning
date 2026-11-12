@@ -266,6 +266,8 @@
       file: "lessons/0128-output-caching-aspnetcore-addoutputcache.html" },
     { n: 129, date: "2026-11-11", title: "Evicting an output cache on purpose",
       file: "lessons/0129-output-cache-tag-eviction-ioutputcachestore.html" },
+    { n: 130, date: "2026-11-12", title: "Writing your own output-cache policy",
+      file: "lessons/0130-custom-output-cache-policy-ioutputcachepolicy.html" },
   ];
 
   const REFS = [

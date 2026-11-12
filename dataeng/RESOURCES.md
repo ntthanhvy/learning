@@ -69,7 +69,7 @@ before Phase 2.
 - [Course: Kafka 101 — Confluent Developer](https://developer.confluent.io/courses/apache-kafka/events/)
   Short, clear videos on events, topics, partitions and consumer groups. Use for: Day 5's primary source for a first-timer. Skip the Confluent Cloud sign-up steps, since this course runs locally.
 - [Docs: confluent-kafka Python client](https://docs.confluent.io/kafka-clients/python/current/overview.html)
-  Producer/consumer API, delivery callbacks, manual commits. Use for: Days 5–6 code.
+  Producer/consumer API, delivery callbacks, manual commits. Use for: Days 5–6 code, reused for Day 34's rebalancing, Day 50's producer backpressure, Day 55's partition-assignment strategy, and Day 58's `on_lost`/`max.poll.interval.ms` — the same one documented client contract, a different angle on it each time.
 - [Book: _Kafka: The Definitive Guide_, 2nd ed. — Shapira, Palino, Sivaram, Petty](https://www.confluent.io/resources/kafka-the-definitive-guide-v2/)
   Deep reference, free download from Confluent (registration). Use for: Phase 2b delivery semantics, retention and compaction.
 - [Docs: Kafka Connect — Apache Kafka Documentation](https://kafka.apache.org/documentation/#connect)

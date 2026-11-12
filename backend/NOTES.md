@@ -10921,3 +10921,124 @@
   .NET resilience libraries, still deliberately out of scope per MISSION.md's
   "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
   gap, still not investigated.
+- 2026-11-12 generation (Lesson 130, headless run): idempotency check first —
+  the orchestrator had already confirmed via the `node -e`/`execFileSync`
+  psql workaround that the last 40 `course_progress` rows show no
+  `lesson_completed`/quiz/kata signal for any course since backend's own
+  Lesson 102 quiz on 2026-10-15 (all correct), and separately confirmed no
+  `lesson_generated` row dated today and no `lessons/0130-*.html` on disk —
+  no DB re-check needed this round, went straight to content. Read
+  `MISSION.md`, this file's tail (Lessons 125-129), both
+  `learning-records/` files, `nav.js`'s tail, and Lesson 129 in full (the
+  most recent C#-port lesson, as structural template) before writing
+  anything. Topic choice: both Lesson 128's and Lesson 129's own scope
+  lines independently named the same direct follow-up — writing a custom
+  `IOutputCachePolicy` implementation, deliberately deferred twice running
+  as "a reasonable future lesson" / "out of scope for a first pass at
+  eviction specifically." Confirmed via case-insensitive grep across
+  `lessons/*.html` and `glossary.html` that no existing lesson or glossary
+  entry already covers `IOutputCachePolicy`, `SizeLimit`, `MaximumBodySize`,
+  or `SetLocking` (zero matches anywhere outside the two scope-line
+  mentions themselves) — picked the named, twice-deferred `IOutputCachePolicy`
+  gap over the `SizeLimit`/`MaximumBodySize`/`SetLocking` knobs, since the
+  interface itself is the deeper, more reusable concept and the knobs are
+  one-line `OutputCacheOptions` properties better suited to a passing
+  mention than a full lesson. Confirmed the first-party angle via one
+  `WebFetch` call against `.../performance/caching/output` before writing
+  anything: the exact `IOutputCachePolicy` interface shape (three methods —
+  `CacheRequestAsync`, `ServeFromCacheAsync`, `ServeResponseAsync` — each
+  taking an `OutputCacheContext` and `CancellationToken`, returning
+  `ValueTask`), the full `MyCustomPolicy` worked example (explicit-interface
+  method syntax, the `EnableOutputCaching`/`AllowCacheLookup`/
+  `AllowCacheStorage` context flags, widening the default past GET/HEAD-only
+  and 200-only to also allow POST and 301), both registration forms
+  (`AddPolicy("CachePost", MyCustomPolicy.Instance)` for a parameterless
+  singleton versus `AddPolicy("CachePost", b => b.AddPolicy<MyCustomPolicy2>(),
+  true)` for DI-constructed policies), the explicit documented trap that a
+  bare `CacheOutput()`/`[OutputCache]` with no policy name re-adds the
+  default policy on top of a custom base policy, and — new in this fetch,
+  not present in Lessons 128/129's earlier reads of the same page — a
+  .NET 11+ `IOutputCachePolicyProvider` section for resolving policies
+  dynamically from a database or per tenant, which this lesson names
+  explicitly as its own out-of-scope follow-up rather than silently
+  omitting. The lesson's code sample trims the docs' own example down to
+  the GET/HEAD/POST-plus-200/301 rule only, dropping the docs' additional
+  cookie-header check and `CacheVaryByRules.QueryKeys = "*"` line, since
+  covering every line of the docs' sample would crowd a ~20-minute lesson
+  that's really about the three-method shape, not that one sample's every
+  branch. One new term, checked against the glossary first via
+  case-insensitive grep — zero collisions: `IOutputCachePolicy` (its three
+  methods and the `OutputCacheContext` flags were described inline in the
+  glossary row's own body rather than becoming separate rows, consistent
+  with how Lesson 129 didn't give `EvictByTagAsync` its own separate row
+  either). Added the row immediately after Lesson 129's `IOutputCacheStore`
+  row, same Term/Tiếng Việt (dev-style)/English column order, confirmed by
+  inspecting the file's actual last row directly rather than assumed.
+  `dotnet --version` was attempted directly this round (not skipped on
+  assumption) and the sandbox flagged it as requiring interactive approval
+  with no user present to grant it, the same block every round has hit
+  since Lesson 103 — so the one C# code block (the `MyCustomPolicy` class
+  plus the two registration snippets) was checked by hand against the
+  fetched docs page's exact method signatures instead, consistent with
+  every prior C#-port round's fallback; the class signatures, explicit-
+  interface method syntax, and both `AddPolicy` registration forms all
+  match the docs' own `MyCustomPolicy`/`MyCustomPolicy2` example verbatim
+  where not intentionally trimmed. Verification performed via throwaway
+  `node -e` scripts and one throwaway `/tmp` script file (nothing written
+  to the repo besides the three intended files): (1) a quiz-word-count
+  check per `<div class="q">` block — first draft landed uneven on all four
+  questions (Q1 11/11/11/10, Q2 13/12/9/9, Q3 8/10/9/14, Q4 11/10/8/12),
+  fixed through several rewrite-and-recount passes per option, converged to
+  exactly 11/11/11/11 across all four questions, both `.split(/\s+/)` and
+  `.split(" ")` counting methods agreeing exactly, exactly one `data-ok` and
+  four options per question confirmed the same way; (2) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/
+  th/td/ul/li — clean on the first pass this round (div 6/6, p 16/16, code
+  44/44, button 16/16, script 3/3, dfn 1/1, pre 3/3, h2 6/6, h1 1/1, em
+  1/1, strong 3/3, a 2/2, table/tr/th/td/ul/li all 0/0), the one `dfn` tag
+  confirmed via regex to carry both `data-en=` and `data-vn=`; (3) a
+  brace/paren balance check on all three `<pre><code>` blocks after
+  stripping tags and unescaping HTML entities — all balanced (6/6 braces,
+  11/11 parens; 1/1 braces, 4/4 parens; 0/0 braces, 2/2 parens); (4) a
+  raw-unescaped-`&` scan across the lesson — zero hits; (5) a table/tr/td
+  balance check on `glossary.html` after its one-row addition — balanced
+  (tr 407/407, td 1218/1218), plus a duplicate-term scan across all 406
+  first-column entries — zero duplicates; (6) `node --check` against
+  `nav.js`, `gloss.js`, `quiz.js` — all clean, before and after the
+  `nav.js` edit; (7) a basic HTML well-formedness check (one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags in
+  gloss/quiz/nav order) — clean. Registered Lesson 130 in `nav.js` (date
+  2026-11-12, today's actual generation date) right after `n: 129`,
+  confirmed exactly one matching `n: 130` entry and exactly one matching
+  `0130-*.html` file on disk afterward. No new `RESOURCES.md` line added
+  this round — the one fetched page is `learn.microsoft.com`, the same
+  domain already covered by this file's standing entries' pattern; cited
+  inline in the lesson's own "Go deeper" section instead, consistent with
+  every prior C#-port round. No new `learning-records/` file this round —
+  the topic came from two prior rounds' own named scope-line gap, not a
+  new surprise about the learner. Before writing, `git status --short`
+  showed pre-existing unrelated uncommitted changes under `python/`,
+  `data/`, and `dataeng/` (other courses' own concurrent work, not touched
+  this round) — confirmed after shipping that this round's own diff was
+  scoped to exactly `backend/assets/nav.js`, `backend/reference/
+  glossary.html`, and the new `backend/lessons/0130-*.html`, nothing else.
+  `bin/record-progress backend lesson_generated --day 130 --lesson
+  0130-custom-output-cache-policy-ioutputcachepolicy.html --detail
+  '{"by":"headless"}'` run from the repo root, expected to succeed with no
+  approval blocker per every prior round's precedent (outcome recorded
+  separately if it ever differs). Day number used 130, matching this
+  file's own standing day-equals-lesson-number convention (confirmed again
+  — no deviation found anywhere in this log). Candidates spotted but not
+  picked this round, still worth checking fresh next time:
+  `IOutputCachePolicyProvider` (resolving policies dynamically from a
+  database or per tenant, .NET 11+, explicitly named in this lesson's own
+  scope line); the `SizeLimit`/`MaximumBodySize` cache-wide limits and
+  `SetLocking(false)`'s resource-locking opt-out (also still named in this
+  lesson's scope line, deferred a second round running now); Lesson 35's
+  upsert/ON CONFLICT, still confirmed to have no clean first-party EF Core
+  angle; Go's `select`-statement arbitration rules, still deferred many
+  rounds running on fetched-page-truncation grounds; Lesson 49's
+  dead-letter queues, still confirmed to have no first-party ASP.NET Core
+  angle; Polly/.NET resilience libraries, still deliberately out of scope
+  per MISSION.md's "concepts first" rule; and the backfill-missing-
+  Lesson-117-NOTES-entry gap, still not investigated.

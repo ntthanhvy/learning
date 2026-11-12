@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 58 · Kafka on_lost: when a slow message, not a crash, gets a consumer evicted</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 58 · ~20 min · 12 Nov 2026</p>
+<h1>Kafka on_lost: when a slow message, not a crash, gets a consumer evicted</h1>
+<p class="byline">Today's tangible win: <code>scripts/consume_order_events.py</code> gets a third rebalance callback, <code>on_lost</code> — the one Day 55 named and deliberately deferred — plus the one config, <code>max.poll.interval.ms</code>, that makes it fire for a reason that has nothing to do with the process crashing: a message handler that just runs too long.</p>
+
+<div class="callout"><strong>Before today — confirm Day 55's callbacks are in place:</strong> today adds a third callback next to the two Day 55 wired in, so confirm those exist first:
+<pre><code>grep -n "on_assign\|on_revoke\|cooperative-sticky" scripts/consume_order_events.py</code></pre>
+Expected: <code>on_assign</code> and <code>on_revoke</code> function definitions, and <code>"partition.assignment.strategy": "cooperative-sticky"</code> in the <code>Consumer({...})</code> call. If any are missing, finish Day 55 first — today assumes that consumer already exists, because today adds one more callback and one more config line to it, not a new consumer.</div>
+
+<h2>1 · The gap Day 55 named and left open on purpose</h2>
+<p>Day 55 wired <code>on_assign</code> and <code>on_revoke</code> into <code>subscribe()</code> and named a third callback, <code>on_lost</code>, only to scope it out: "a corner case closer to Day 50's crash-handling thread than today's assignment-strategy focus." That line undersold it slightly — <code>on_lost</code> isn't about a crash at all. It's about a consumer that is still running, still inside its own <code>poll()</code> loop, and still gets treated by the rest of the group as if it had vanished.</p>
+<p>Confirmed directly against the installed <code>confluent-kafka</code> client's own <code>subscribe()</code> docstring: <code>on_revoke</code> fires when a rebalance cleanly asks this consumer to give up partitions it still holds — the handoff Day 55 already saw, cooperative and orderly. <dfn data-en="a third callback argument to subscribe() (alongside on_assign and on_revoke) that fires when the group coordinator has already decided this consumer is gone and reassigned its partitions to a different member, before this consumer had any chance to hand them back cleanly -- distinct from on_revoke's orderly, cooperative handoff" data-vn="giữ nguyên &quot;on_lost&quot; — callback thứ 3 truyền vào subscribe() (cùng on_assign, on_revoke), chạy khi group coordinator đã quyết consumer này chết/mất và chia partition của nó cho member khác rồi, consumer gốc chưa kịp trả lại partition theo cách sạch sẽ — khác hẳn on_revoke (bàn giao có trật tự, hợp tác)">on_lost</dfn> fires in the other case: the group coordinator has already decided, on its own, that this consumer is gone and <em>reassigned its partitions to someone else</em> before this consumer ever got a chance to hand them back. The same docstring is explicit about what happens if a project never bothers to pass <code>on_lost</code> at all: "If not specified, lost partition events will be delivered to <code>on_revoke</code>" — so a consumer that only wired <code>on_revoke</code>, the way today's starting point does, silently treats a forced eviction exactly like a clean handoff, with no way to tell the two apart from inside the callback.</p>
+
+<h2>2 · The config that actually causes it: <code>max.poll.interval.ms</code></h2>
+<p>A consumer group's coordinator doesn't wait for a crash to declare a member dead. It watches one specific clock per consumer: the time since that consumer's last call to <code>poll()</code>. <dfn data-en="a Kafka consumer config bounding the maximum time allowed between two consecutive calls to poll() before the group coordinator considers that consumer dead and triggers a rebalance to hand its partitions to someone else -- a separate failure mode from session.timeout.ms, which bounds how long the broker will go without a heartbeat from a process that may simply be dead or network-partitioned, heartbeats and all" data-vn="giữ nguyên &quot;max.poll.interval.ms&quot; — cấu hình consumer, giới hạn thời gian tối đa giữa 2 lần gọi poll() liên tiếp; quá giới hạn này, group coordinator coi consumer đó đã chết và rebalance luôn, chia partition của nó cho consumer khác — khác session.timeout.ms (giới hạn thời gian broker chờ heartbeat trước khi coi consumer chết hẳn, kể cả không liên quan gì đến poll())">max.poll.interval.ms</dfn> is that bound. The confluent-kafka client's own documentation (the same page Days 5–6, 34, 50 and 55 already cite) names its default as 300000 — five minutes — and the reasoning behind it directly: Kafka's heartbeats run on their own background thread in librdkafka, separate from the application thread calling <code>poll()</code>, specifically so a slow message handler doesn't look like a dead process from the network's point of view. <code>max.poll.interval.ms</code> exists precisely to put a ceiling back on that: if the <em>application thread</em> itself — not the heartbeat thread — doesn't get back to <code>poll()</code> within that window, the client proactively leaves the group, and the coordinator reassigns its partitions before this consumer calls <code>poll()</code> again.</p>
+<p>Day 41's own per-message <code>try</code>/<code>except</code> handles a message that fails fast — bad JSON, a missing field, caught and dead-lettered in milliseconds. Nothing in this course's consumer loop so far has a step that runs <em>long</em>: a slow downstream call, a large batch write, a retry loop with real sleeps between attempts. The moment one does, <code>max.poll.interval.ms</code> is the clock actually running against it, and it has nothing to do with whether that slow step eventually succeeds.</p>
+
+<h2>3 · Build: add <code>on_lost</code>, and see what it actually warns</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>scripts/consume_order_events.py</code>. Add a third callback next to Day 55's two, and pass it to <code>subscribe()</code>:</p>
+<pre><code><span class="kw">def</span> on_assign(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"assigned: {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> on_revoke(consumer, partitions):
+    <span class="kw">print</span>(<span class="str">f"revoked: {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> on_lost(consumer, partitions):
+    <span class="cm"># Partitions here may already be owned by another consumer --
+    # committing an offset from this callback can fail, on purpose,
+    # because this consumer no longer has the right to commit for them.
+    <span class="kw">print</span>(<span class="str">f"LOST (not a clean handoff): {[p.partition for p in partitions]}"</span>)
+
+
+<span class="kw">def</span> main():
+    consumer = Consumer(
+        {
+            <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+            <span class="str">"group.id"</span>: GROUP_ID,
+            <span class="str">"auto.offset.reset"</span>: <span class="str">"earliest"</span>,
+            <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+            <span class="str">"partition.assignment.strategy"</span>: <span class="str">"cooperative-sticky"</span>,
+            <span class="str">"session.timeout.ms"</span>: <span class="kw">6000</span>,       <span class="cm"># new today -- librdkafka requires max.poll.interval.ms &gt;= this</span>
+            <span class="str">"max.poll.interval.ms"</span>: <span class="kw">10000</span>,  <span class="cm"># new today -- 10s, shortened only to make Section 4 provable fast</span>
+        }
+    )
+    consumer.subscribe([TOPIC], on_assign=on_assign, on_revoke=on_revoke, on_lost=on_lost)  <span class="cm"># on_lost new today</span>
+
+    <span class="cm"># everything below -- the psycopg connection, the poll loop, the</span>
+    <span class="cm"># try/except dead-letter write from Day 41 -- is untouched</span>
+    ...</code></pre>
+<p>The comment inside <code>on_lost</code> is the actual behavioral difference from <code>on_revoke</code>, not decoration: a clean <code>on_revoke</code> handoff still lets this consumer commit an offset for the partitions it's giving up, if it needs to. By the time <code>on_lost</code> fires, the coordinator has already handed those same partitions to a different consumer — attempting to commit against them from here can fail, which is exactly why the client distinguishes the two cases instead of calling everything a revoke.</p>
+
+<h2>4 · Verify: a handler that oversleeps its own poll interval, forced and watched</h2>
+<p>Reproducing a real eviction needs a handler slow enough to blow past <code>max.poll.interval.ms</code> but not the whole terminal session, so today's build shortens it to 10 seconds (Section 3's comment says so) purely to make this provable in under a minute — production would leave the 300000ms default or tune it deliberately, never shrink it this far. librdkafka enforces one constraint on that shortening directly: <code>max.poll.interval.ms</code> must be greater than or equal to <code>session.timeout.ms</code> — confirmed live this round by hitting the real <code>KafkaException</code> it raises otherwise (<code>val=-186</code>, <code>"max.poll.interval.ms must be >= session.timeout.ms"</code>) — which is why Section 3 also shortens <code>session.timeout.ms</code> to 6000 rather than touching only one of the two.</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+sleep 2
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+kill -STOP $CONSUMER_B   <span class="cm"># freezes the process -- simulates a handler stuck past max.poll.interval.ms, no code path taken</span>
+sleep 12
+kill -CONT $CONSUMER_B
+sleep 3</code></pre>
+<p>Expected on <code>CONSUMER_A</code>'s stdout once the 10-second window on <code>CONSUMER_B</code> expires — the coordinator reassigns <code>CONSUMER_B</code>'s partitions to <code>CONSUMER_A</code> as a plain <code>on_assign</code>, because from <code>CONSUMER_A</code>'s side this looks like any other member leaving:</p>
+<pre><code>assigned: [1]</code></pre>
+<p>Expected on <code>CONSUMER_B</code>'s own stdout once <code>kill -CONT</code> lets it resume and it finally calls <code>poll()</code> again — this is the actual point of today, and it is not an <code>on_revoke</code> line:</p>
+<pre><code>LOST (not a clean handoff): [1]</code></pre>
+<div class="callout"><strong>Checked as a static proof this round, not a live broker (noted honestly, same convention Days 17, 41, 50 and 55 each used):</strong> this sandbox has no learner Kafka stack to run against, so the claims above were confirmed two different ways instead. First, directly against the installed <code>confluent-kafka==2.16.1</code> client (librdkafka 2.16.0): <code>Consumer.subscribe</code>'s own docstring, read via <code>help()</code>, documents the exact three-callback signature used above (<code>on_assign</code>, <code>on_revoke</code>, <code>on_lost</code>, each <code>(consumer, partitions)</code>) and states plainly that <code>on_lost</code>, if unset, falls back to <code>on_revoke</code> — the fact Section 1 is built on. Second, a real <code>Consumer</code> was instantiated with today's exact config block and all three callbacks; the first attempt, <code>max.poll.interval.ms: 10000</code> alone, failed loudly and immediately with the exact <code>KafkaException</code> named above — caught directly, not predicted — which is the live reason Section 3's example sets <code>session.timeout.ms: 6000</code> too, not a detail invented after the fact. The corrected pair of values was then instantiated successfully with no broker reachable, confirming the config itself is well-formed, though no broker was reachable to actually trigger a live eviction this round. The <code>kill -STOP</code>/<code>kill -CONT</code> sequence above is standard Unix process control (not Kafka-specific) used to model "the application thread stops calling <code>poll()</code>" without writing a deliberately slow, flaky message handler into the real script — confirm the exact timing against your own machine, since the 10-second window plus however long the coordinator actually takes to detect and reassign will vary slightly run to run. The actual <code>consume_order_events.py</code> edit itself was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm no data was lost or duplicated despite the forced eviction — the same equality check Days 6, 34 and 55 each used:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code> — an <code>on_lost</code> eviction changes who owns a partition, not whether Day 6's <code>ON CONFLICT DO NOTHING</code> and manual-commit-after-write still hold. Revert <code>max.poll.interval.ms</code> to the 300000 default (or omit the key entirely) before committing, since 10 seconds is today's proof window, not a real setting:</p>
+<pre><code>kill -9 $CONSUMER_A $CONSUMER_B 2&gt;/dev/null</code></pre>
+<p>Commit <code>scripts/consume_order_events.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "A consumer in your group got evicted and its partitions reassigned, but the process never crashed and no error appeared in its logs. What happened, and how would you confirm it?"</strong> A strong answer, out loud: <em>"The group coordinator doesn't need a crash to declare a member dead — it watches the time between that consumer's own calls to poll(), bounded by max.poll.interval.ms, defaulting to five minutes. Heartbeats run on a separate background thread in the client, specifically so they keep going even while the application thread is stuck in a slow message handler — which means a slow handler, not a dead process, is enough to blow that window. Once it does, the client itself proactively leaves the group before the coordinator even times it out, and that consumer's partitions get handed to someone else. I'd confirm it by wiring an on_lost callback into subscribe() — it fires specifically for this forced-eviction case, distinct from on_revoke's clean handoff, and if I'd only wired on_revoke, Kafka's own client silently routes a lost-partition event there too, so I'd have had no way to tell a graceful handoff from an eviction apart from checking how long the last message actually took to process."</em> The signal: naming max.poll.interval.ms and the separate-heartbeat-thread mechanism as the actual cause, not "the consumer probably crashed," and knowing on_lost exists specifically to distinguish this case from on_revoke.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>on_lost</code>'s signature and its documented fallback to <code>on_revoke</code>, and <code>max.poll.interval.ms</code> as the config that actually triggers a forced eviction while the process stays alive. It does not cover tuning <code>max.poll.interval.ms</code> for a real production message-processing budget (a capacity question, out of this course's working-level Kafka scope per <code>MISSION.md</code>), <code>session.timeout.ms</code>'s own heartbeat-thread semantics beyond the one constraint today needed to shrink it at all (it governs a genuinely dead or network-partitioned process, a different failure mode from today's "alive but too slow to poll"), <code>heartbeat.interval.ms</code> (the third related timer, untouched today), or building a real long-running step into this course's own consumer to force the eviction honestly — today's <code>kill -STOP</code>/<code>kill -CONT</code> models the symptom (application thread not calling <code>poll()</code>) without adding a slow code path to a script every other lesson also edits.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The group coordinator tracks the time since each consumer's own last poll() call, bounded by max.poll.interval.ms. librdkafka runs heartbeats on a separate background thread specifically so a slow application-thread handler doesn't look like a dead process over the network -- but once the application thread itself fails to call poll() again inside that window, the client proactively leaves the group regardless of whether the process ever crashed.">
+    <p class="stem">What actually causes a Kafka consumer to get evicted from its group under <code>max.poll.interval.ms</code>?</p>
+    <button class="opt" data-ok>the app thread waits too long between poll() calls</button>
+    <button class="opt">the broker itself crashes and loses that one consumer</button>
+    <button class="opt">the topic itself simply runs out of free partitions</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the installed client's own subscribe() docstring: on_lost fires when the group coordinator has already reassigned this consumer's partitions to someone else before it got a chance to hand them back cleanly. on_revoke fires for an orderly handoff where this consumer still gets a chance to act before giving partitions up -- a materially different situation, including for whether committing an offset from inside the callback can even still succeed.">
+    <p class="stem">How does <code>on_lost</code> differ from <code>on_revoke</code>?</p>
+    <button class="opt" data-ok>on_lost means partitions already got reassigned to someone else</button>
+    <button class="opt">on_lost only ever fires on the first subscribe() call</button>
+    <button class="opt">on_lost fully replaces on_revoke inside every single Kafka client</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round by reading the installed confluent-kafka client's own subscribe() docstring directly: 'If not specified, lost partition events will be delivered to on_revoke.' A consumer that only wires on_revoke has no way to distinguish a forced eviction from a clean handoff from inside that one callback -- both arrive as the exact same call.">
+    <p class="stem">What does <code>confluent-kafka</code> do with a lost-partition event if a consumer never passes <code>on_lost</code> to <code>subscribe()</code> at all?</p>
+    <button class="opt" data-ok>delivers it to on_revoke instead, indistinguishable from a handoff</button>
+    <button class="opt">raises an uncatchable exception that kills the whole process</button>
+    <button class="opt">silently drops the event with absolutely no callback firing</button>
+  </div>
+  <div class="q" data-why="Day 41's try/except handles a message that fails fast -- bad JSON or a missing field, caught and dead-lettered in milliseconds, which never threatens the poll() timing at all. max.poll.interval.ms is a completely different risk: a handler that eventually succeeds but simply takes too long, which Day 41's fast-fail design never addresses because nothing about it was slow.">
+    <p class="stem">Why doesn't Day 41's dead-letter <code>try</code>/<code>except</code> already protect against a <code>max.poll.interval.ms</code> eviction?</p>
+    <button class="opt" data-ok>it only catches fast failures, never a slow handler</button>
+    <button class="opt">dead-lettering a message always resets this one exact timer</button>
+    <button class="opt">Day 41's own fix already raised the interval unlimited</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client</a> docs, already cited since Days 5–6 and reused for Days 34, 50 and 55, document <code>subscribe()</code>'s three-callback signature and <code>max.poll.interval.ms</code> directly — today's claims were confirmed against that same documented contract by reading the installed client's own docstring and instantiating a real <code>Consumer</code> with the config (no working <code>WebFetch</code> tool this round either, the same recurring gap prior rounds noted — confirmed by reading the installed client's own accepted config and callback behavior directly instead). The <a href="https://kafka.apache.org/documentation/#semantics">Apache Kafka Design docs</a>, cited since Day 16 for delivery semantics, cover the broker-side consumer-group protocol <code>max.poll.interval.ms</code> enforces, worth a read before an interview question asks how the coordinator actually detects a stalled consumer under the hood.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 58.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now over twenty rounds, 35-57) — still worth a human granting it once. With today's <code>on_lost</code> pick, Kafka's rebalance-callback trio (<code>on_assign</code>/<code>on_revoke</code>/<code>on_lost</code>) and this course's named delivery-semantics vocabulary are now both fully built out; a future round's fresh gap-scan should likely weigh dbt or Airflow next, since Kafka has now had three of the last four rounds' worth of attention (Days 50, 55, 58) against Airflow's one (Day 56) and dbt's one (Day 57).<br><br>
+💬 Anything unclear — why <code>on_lost</code> can't safely commit an offset, or when shrinking <code>max.poll.interval.ms</code> in real life would do more harm than good? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

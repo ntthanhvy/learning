@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 127 · np.sign(): the three-way bucket code underneath a positive/negative/zero flag column</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 127 · ~20 min · 13 Nov 2026</p>
+<h1>np.sign(): the three-way bucket code underneath a positive/negative/zero flag column</h1>
+<p class="byline">Lesson 126 closed with its own standing-candidate list fully used up, so today ran a genuinely fresh scan rather than taking a pre-committed pick (this course's own "fresh scan each round" convention). The scan surfaced a whole family of untaught elementwise math ufuncs (<code>np.abs()</code>, <code>np.sqrt()</code>, <code>np.floor()</code>/<code>np.ceil()</code>, <code>np.sign()</code>) — <code>np.sign()</code> won because it collapses a verbose <code>np.where()</code>/<code>np.select()</code> chain (Lesson 24) into one call, a genuinely common "flag the direction of a delta" interview task.</p>
+
+<h2>1 · One call instead of a nested np.where() chain</h2>
+<p>Lesson 24 taught <code>np.where()</code> for a single yes/no split and <code>np.select()</code> for several named conditions. A three-way "negative / zero / positive" bucket is exactly the kind of thing that tempts a nested <code>np.where()</code> inside another <code>np.where()</code>. <dfn data-en="a NumPy function that returns -1 for a negative input, 0 for a zero input, and 1 for a positive input, applied elementwise to an entire array or Series at once -- a fixed three-way bucket code, not a configurable threshold function" data-vn="giữ nguyên 'np.sign()' — hàm trả về -1 nếu giá trị âm, 0 nếu giá trị bằng 0, 1 nếu giá trị dương, áp dụng elementwise lên cả mảng/Series một lần; đây là mã 3 nhóm CỐ ĐỊNH (-1/0/1), không có ngưỡng (threshold) tùy chỉnh được như np.where()">np.sign(x)</dfn> replaces that whole chain with one call, confirmed directly (numpy 2.5.4, pandas 3.1.1):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+delta = pd.Series([-<span class="kw">5</span>, <span class="kw">0</span>, <span class="kw">3</span>, -<span class="kw">2</span>, <span class="kw">7</span>])
+
+<span class="cm"># The verbose way, chaining Lesson 24's np.where():</span>
+np.where(delta > <span class="kw">0</span>, <span class="kw">1</span>, np.where(delta < <span class="kw">0</span>, -<span class="kw">1</span>, <span class="kw">0</span>))
+<span class="cm"># array([-1,  0,  1, -1,  1])</span>
+
+<span class="cm"># The direct way:</span>
+np.sign(delta)
+<span class="cm"># 0   -1</span>
+<span class="cm"># 1    0</span>
+<span class="cm"># 2    1</span>
+<span class="cm"># 3   -1</span>
+<span class="cm"># 4    1</span>
+<span class="cm"># dtype: int64</span></code></pre>
+<p>Confirmed directly: called on a <code>Series</code>, <code>np.sign()</code> returns a <code>Series</code> with the original index kept intact, not a bare <code>ndarray</code> — assigning it straight to a new column, <code>df["sign_code"] = np.sign(df["delta"])</code>, lines up row-for-row with no reindexing needed. The result dtype follows the input: an integer <code>Series</code> in produces <code>int64</code> out, a float <code>Series</code> in produces <code>float64</code> out (confirmed directly) — unlike <code>Series.shift()</code> (Lesson 23), <code>np.sign()</code> never upcasts int to float on its own.</p>
+
+<h2>2 · The trap: NaN passes straight through, it is not bucketed</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4), and confirmed exactly matching the official docs' own wording</strong> ("nan is returned for nan inputs"): a <code>NaN</code> in the input is <strong>not</strong> coerced into any of the three buckets — it comes back as <code>NaN</code>, untouched:</p>
+<pre><code>arrf = np.array([-<span class="kw">5.0</span>, <span class="kw">0.0</span>, <span class="kw">3.0</span>, np.nan])
+
+np.sign(arrf)
+<span class="cm"># array([-1.,  0.,  1., nan])  -- the NaN survives, it is not bucketed as 0 or any other code</span></code></pre>
+<p>This is the opposite failure mode from Lesson 123's <code>np.nan_to_num()</code>, which replaces NaN with a chosen finite value by design. Here, a downstream <code>groupby("sign_code")</code> or <code>value_counts()</code> on the result silently gets a real <code>NaN</code> key mixed in with the <code>-1</code>/<code>0</code>/<code>1</code> codes — plausible-looking output, no error, but a bucketing bug if the NaN rows were supposed to be excluded or filled first. Also confirmed directly, a detail the official docs page does not mention at all: a signed zero, <code>-0.0</code>, returns plain <code>0.0</code> — not <code>-1</code> — so the sign bit on a float zero is not what decides the bucket.</p>
+</div>
+
+<h2>3 · No Series.sign() — and complex input means something else entirely</h2>
+<p>Confirmed directly: pandas defines no <code>Series.sign()</code> or <code>DataFrame.sign()</code> method at all — calling <code>.sign()</code> on a <code>Series</code> raises <code>AttributeError</code> immediately, the same naming gap Lesson 126 found for <code>np.roll()</code>. <code>np.sign()</code> stays a NumPy-only function; the pandas-idiomatic spelling is calling it directly on the Series' own values, as in Section 1, not reaching for a method that does not exist.</p>
+<pre><code>pd.Series([-<span class="kw">5</span>, <span class="kw">0</span>, <span class="kw">3</span>]).sign()
+<span class="cm"># AttributeError: 'Series' object has no attribute 'sign'</span>
+
+<span class="cm"># Confirmed directly from the official docs: complex input means something unrelated --</span>
+<span class="cm"># x / abs(x) (the "unit direction" of the complex number), not a -1/0/1 code at all.</span>
+np.sign(np.array([<span class="kw">3</span> + <span class="kw">4j</span>]))
+<span class="cm"># array([0.6+0.8j])  -- out of scope for this lesson's wrangling use case, mentioned only to avoid the trap</span></code></pre>
+<p>Confirmed directly via <code>np.shares_memory()</code>: <code>np.sign()</code> always returns a new array, never a view into the input — mutating the result never touches the original column. Confirmed directly, it also runs without error on an <code>object</code>-dtype array of plain Python ints, unlike Lesson 123's <code>np.nan_to_num()</code>, which silently no-ops on <code>object</code> dtype.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.sign()</code>'s confirmed -1/0/1 bucketing of real numbers versus a nested <code>np.where()</code> chain; the confirmed NaN-passes-through behavior (not bucketed, not an error) and the confirmed-absent-from-docs <code>-0.0 → 0.0</code> detail; and the confirmed absence of any pandas <code>.sign()</code> method. It does not cover the complex-number form in any depth, or <code>np.copysign()</code>/<code>np.signbit()</code>, both legitimate but out-of-scope siblings per <code>MISSION.md</code>'s "no deep NumPy" line — named only in passing.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/127_np_sign.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/127_np_sign.py</code></pre>
+<p>Exercise 1 confirms the Section 1 contrast: <code>np.sign()</code> matches a nested <code>np.where()</code> chain exactly, and keeps a Series' original index when called on a Series rather than returning a bare array. Exercise 2 confirms the Section 2 trap: a NaN input passes straight through as NaN rather than being bucketed into -1/0/1, and a signed zero (<code>-0.0</code>) returns plain <code>0.0</code>. Exercise 3 confirms the Section 3 behavior: there is no <code>Series.sign()</code> method at all — calling it raises <code>AttributeError</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly and confirmed matching the official docs' own wording: np.sign(x) returns -1 if x is negative, 0 if x equals zero, and 1 if x is positive, elementwise across the whole array -- a direct replacement for a nested np.where() chain checking the same three conditions by hand.">
+    <p class="stem">What does <code>np.sign(x)</code> return for a positive, a zero, and a negative input, in that order?</p>
+    <button class="opt" data-ok>exactly 1, 0, and -1, one fixed code each</button>
+    <button class="opt">always just 1, since every input magnitude maps identically</button>
+    <button class="opt">the original value, only its own data type flipped</button>
+  </div>
+  <div class="q" data-why="Confirmed directly, matching the official docs' own wording (nan is returned for nan inputs): np.sign() does not bucket a NaN into -1, 0, or 1 at all -- the NaN passes straight through untouched, unlike np.nan_to_num() (Lesson 123), which replaces NaN with a chosen finite value by design.">
+    <p class="stem">What does <code>np.sign(np.array([1.0, np.nan, -1.0]))</code> return for the middle, NaN element?</p>
+    <button class="opt" data-ok>NaN itself, passed through untouched, never bucketed at all</button>
+    <button class="opt">zero, since NaN gets treated the same as zero</button>
+    <button class="opt">negative one, since NaN gets silently treated as negative</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pandas defines no Series.sign() or DataFrame.sign() method at all, the same naming gap Lesson 126 found for np.roll(). Calling .sign() directly on a Series object raises AttributeError immediately; the correct spelling is calling np.sign() on the Series itself, as a plain function call.">
+    <p class="stem">Calling <code>pd.Series([-1, 0, 1]).sign()</code> does what?</p>
+    <button class="opt" data-ok>raises AttributeError, pandas defines no such method</button>
+    <button class="opt">returns the identical three-code array np.sign() returns</button>
+    <button class="opt">quietly runs DataFrame.rolling()'s own unrelated averaging logic</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.sign.html"><code>numpy.sign()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) states the three-way rule directly — "-1 if x &lt; 0, 0 if x==0, 1 if x &gt; 0. nan is returned for nan inputs" — and documents the complex-number form (<code>x / abs(x)</code>) this lesson only named in passing as an out-of-scope trap.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.sign()</code> is new today, added right after Lesson 126's <code>np.roll()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan also surfaced <code>np.abs()</code>, <code>np.sqrt()</code>, and <code>np.floor()</code>/<code>np.ceil()</code> as other untaught elementwise math ufuncs — none pre-committed as THE next pick, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the NaN-passes-through trap, the nested np.where() comparison, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

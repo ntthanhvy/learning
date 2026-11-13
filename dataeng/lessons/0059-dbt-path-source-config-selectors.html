@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 59 · dbt path:, source: &amp; config: selectors: the three Day 52 left as vocabulary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 59 · ~20 min · 13 Nov 2026</p>
+<h1>dbt <code>path:</code>, <code>source:</code> &amp; <code>config:</code> selectors: the three Day 52 left as vocabulary</h1>
+<p class="byline">Today's tangible win: three more node-selection methods built hands-on against this project's own models — <code>path:models/staging</code> to target a whole folder, <code>source:raw.orders+</code> to rebuild everything downstream of one raw table by name, and <code>config.materialized:table</code> to select by a model's own config rather than its name or location — each confirmed live against a scratch project shaped like this course's real one, and each added as a named selector in <code>selectors.yml</code>.</p>
+
+<div class="callout"><strong>Before today — confirm Day 52/53 landed:</strong> today adds three new selector methods next to Day 52's <code>tag:</code> and Day 53's named <code>selectors.yml</code>; it assumes both already exist.
+<pre><code>cd food_delivery_pipeline &amp;&amp; grep -n "method: tag" selectors.yml</code></pre>
+Expected: the <code>nightly_marts</code> selector block from Day 53. If it's missing, finish <a href="0053-dbt-selectors-yml.html">Day 53</a> first — today's build edits that same file.</div>
+
+<h2>1 · The gap: three methods named, never built</h2>
+<p>Day 52's own scope line listed <code>path:</code>, <code>source:</code> and <code>config:</code> among the selection methods dbt ships, then set all three aside as "vocabulary only, same pattern as any method not hands-on this round." Day 53 named the same gap again on its way out, as one of three concrete next steps. Nothing about that was wrong to defer — Day 52's actual job was <code>+</code>/<code>@</code> and <code>tag:</code>, and three new methods in one sitting would have buried the lesson. But the gap is real, and all three answer a question <code>tag:</code> and <code>fqn</code> (a model's bare name, what Day 52 used by default) can't: <dfn data-en="a dbt node-selection method (path:<value>) that matches every node whose underlying file lives at or under a given filesystem path, relative to the dbt project root -- selecting by where a model's file physically lives, independent of that model's own name, any tag it carries, or which source it reads from" data-vn="giữ nguyên &quot;path: selector&quot; — method chọn node theo đường dẫn file thực tế (tương đối từ gốc dbt project), không liên quan tên model, tag, hay source nó đọc từ đâu">path:</dfn> selects by where a model's file <em>lives</em>, <dfn data-en="a dbt node-selection method (source:<source_name>.<table_name>) that matches a declared source node by name, and -- with a trailing + graph operator -- every model downstream of it transitively, starting from the raw table's own name rather than from any model name a person has to already know maps onto it" data-vn="giữ nguyên &quot;source: selector&quot; — method chọn 1 source node theo tên (source_name.table_name); thêm + ở cuối thì chọn luôn mọi model downstream transitively, bắt đầu từ chính tên raw table, không cần biết trước model nào build trên đó">source:</dfn> selects by which raw table a change actually starts from, and <code>config:</code> selects by a property a model was <em>configured</em> with, not by its name, folder or a tag someone remembered to add.</p>
+
+<h2>2 · Confirmed live: what each method actually resolves to</h2>
+<p>Built against a six-model scratch project shaped like this course's real one (the same <code>stg_orders</code>/<code>stg_restaurants</code>/<code>stg_couriers</code> staging layer, and <code>fct_orders</code>/<code>dim_restaurants</code>/<code>dim_couriers</code>/<code>mart_delivery_sla</code> marts, with <code>marts</code> configured <code>+materialized: table</code> and <code>+tags: ["nightly"]</code> at the folder level in <code>dbt_project.yml</code>, <code>staging</code> left at the default <code>view</code>). Every row below is a real <code>dbt list</code> result, not predicted from the docs' prose:</p>
+<table class="gloss">
+<tr><th>Expression</th><th>What it matches</th><th>Confirmed result</th></tr>
+<tr><td><code>path:models/staging</code></td><td>every node whose file lives under that folder</td><td><code>stg_couriers</code>, <code>stg_orders</code>, <code>stg_restaurants</code></td></tr>
+<tr><td><code>path:models/marts/fct_orders.sql</code></td><td>one exact file, named by its real path, not its model name</td><td>just <code>fct_orders</code></td></tr>
+<tr><td><code>source:raw.orders</code></td><td>the source node itself, no downstream</td><td><code>source:food_delivery_pipeline.raw.orders</code>, nothing else</td></tr>
+<tr><td><code>source:raw.orders+</code></td><td>that source plus every model downstream of it</td><td><code>stg_orders</code>, <code>fct_orders</code>, <code>mart_delivery_sla</code> (plus the source node itself, dropped by adding <code>--resource-type model</code>)</td></tr>
+<tr><td><code>source:raw</code></td><td>every table declared under that one <code>source:</code> block</td><td>all four — <code>orders</code>, <code>restaurants</code>, <code>couriers</code>, <code>order_events</code></td></tr>
+<tr><td><code>config.materialized:table</code></td><td>every model whose resolved <code>materialized</code> config equals that value</td><td>the four marts — <code>fct_orders</code>, <code>dim_restaurants</code>, <code>dim_couriers</code>, <code>mart_delivery_sla</code></td></tr>
+</table>
+<p><code>source:raw.orders+</code> is the one worth sitting with: it starts from the raw table itself, not from a model name, which matters because the actual trigger for a rebuild is often "the loader just dropped new rows into <code>raw.orders</code>," not "someone remembers that <code>stg_orders</code> is the model built on top of it." Day 52's <code>@stg_orders</code> needed a human to already know that mapping; <code>source:raw.orders+</code> doesn't.</p>
+
+<div class="callout"><strong>A real finding, confirmed live, not assumed:</strong> <code>config.tags:nightly</code> resolved to the exact same four marts as Day 52's own <code>tag:nightly</code> — because <code>tag:</code> is dbt's own shorthand for matching one specific list-valued config, <code>tags</code>, and <code>config.tags:</code> reaches the identical underlying field directly. They are not two unrelated mechanisms; <code>tag:</code> is just <code>config.tags:</code> with a shorter name for the one config people reach for constantly. <code>config:</code> is the general tool underneath it — any config key a model sets (<code>materialized</code>, <code>tags</code>, <code>schema</code>, a custom one) is fair game, not just the one dbt gave its own keyword.</div>
+
+<h2>3 · Build: three new named selectors, confirmed against your own project</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add three selectors to <code>food_delivery_pipeline/selectors.yml</code>, alongside Day 53's two:</p>
+<pre><code><span class="kw">selectors</span>:
+  <span class="cm"># ... build_changed_orders and nightly_marts from Day 53, unchanged ...</span>
+
+  - <span class="kw">name</span>: staging_only
+    <span class="kw">description</span>: <span class="str">"Every staging model, by folder -- not by name or tag, so a new staging model is included automatically the moment its file lands under models/staging."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">method</span>: path
+      <span class="kw">value</span>: models/staging
+
+  - <span class="kw">name</span>: changed_from_orders_source
+    <span class="kw">description</span>: <span class="str">"Start from the raw table itself, not a model name -- everything that reads raw.orders, directly or transitively, once the loader lands new rows."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">method</span>: source
+      <span class="kw">value</span>: raw.orders
+      <span class="kw">children</span>: <span class="kw">true</span>
+
+  - <span class="kw">name</span>: all_tables
+    <span class="kw">description</span>: <span class="str">"Every model materialized as a real table, regardless of folder or tag -- useful before a schema-change check that only tables can be affected by."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">method</span>: config.materialized
+      <span class="kw">value</span>: table</code></pre>
+<p>Note the shape: a graph operator still becomes its own boolean key (<code>children: true</code> for the trailing <code>+</code> on <code>source:raw.orders+</code>, same as Day 53's table), and <code>config.materialized</code> becomes a dotted <code>method</code> string — the part after the dot is the config key, confirmed live to resolve identically whether written as <code>method: config.materialized</code> or as the plain CLI string <code>config.materialized:table</code>.</p>
+<p><strong>TODO (today's actual skill):</strong> add a fourth selector, <code>restaurant_lineage</code>, that uses <code>method: source</code>, <code>value: raw.restaurants</code>, and the right boolean key to select that source plus every downstream model — write it from Day 53's table of CLI-to-YAML graph-operator keys, then confirm with <code>dbt list --selector restaurant_lineage --resource-type model</code> that the result is exactly <code>stg_restaurants</code>, <code>dim_restaurants</code>, and <code>mart_delivery_sla</code> (the three nodes that actually read <code>raw.restaurants</code>, directly or transitively, in this project's real lineage).</p>
+
+<h2>4 · Verify: run each selector against your own project</h2>
+<pre><code>cd food_delivery_pipeline
+uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector staging_only --resource-type model --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector changed_from_orders_source --resource-type model --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector all_tables --resource-type model --profiles-dir .
+</code></pre>
+<p>Expected: the parse prints no line containing <code>Error</code>; <code>staging_only</code> prints <code>stg_orders</code>, <code>stg_restaurants</code> and <code>stg_couriers</code>; <code>changed_from_orders_source</code> prints <code>stg_orders</code>, <code>fct_orders</code> and <code>mart_delivery_sla</code> (not the source node itself, filtered out by <code>--resource-type model</code>); <code>all_tables</code> prints every mart currently materialized as a table in your real project (at minimum <code>fct_orders</code>, <code>dim_restaurants</code>, <code>dim_couriers</code> and <code>mart_delivery_sla</code>, plus Day 48/49's histogram marts if they're also tables). A selector with a typo in its <code>value:</code> — try <code>value: table_typo</code> on a throwaway copy — doesn't error at all; it logs <code>No nodes selected!</code> as a plain warning and <code>dbt list</code> prints nothing, confirmed live this round, so a silently-empty selector in CI is a real risk worth a non-zero-row check, not just a clean exit code.</p>
+<pre><code>uv run --with "dbt-postgres==1.11.0" dbt build --selector changed_from_orders_source --profiles-dir .</code></pre>
+<pre><code>Done. PASS=N WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=N</code></pre>
+<p>Commit the edited <code>selectors.yml</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your loader just dropped new rows into raw.orders. What's the narrowest dbt command that rebuilds everything affected, and why not just run dbt build?"</strong> A strong answer, out loud: <em>"I'd select by the source itself, not by a model name -- source:raw.orders plus the children graph-operator key, which resolves to stg_orders and everything built on top of it transitively, fct_orders and mart_delivery_sla in this project. That's narrower and more honest than a full dbt build, because it starts from the actual trigger -- new rows in a raw table -- rather than from a model name a human has to already know maps to that table. I'd reach for path: instead if the real question were about where code lives rather than what changed -- rebuilding an entire staging folder regardless of which raw table backs each model -- and I'd reach for config: if the question were about a shared property, like every model materialized as a table, independent of both name and folder. Three different questions, three different methods, and tag: turns out to be config.tags: under a shorter name for the one config key people reach for constantly."</em> The signal: picking the method by what's actually known at trigger time (a source name, a path, a config value) instead of defaulting to <code>tag:</code> or a bare model name out of habit.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>path:</code>, <code>source:</code> and <code>config:</code> (including the <code>config.materialized:</code>/<code>config.tags:</code> dotted form), confirmed live against a scratch project shaped like this course's real one. It does not cover <code>test_type:</code>, <code>exposure:</code>, <code>group:</code>, <code>result:</code> or any other selection method dbt ships beyond the five now built across Days 52 and today (vocabulary only, same pattern Day 52 used for all of these the first time); the <code>union</code>/<code>intersection</code>/multi-block <code>exclude</code> composition keys Day 53 also named but left open; or <code>result:</code>-based reselection off a prior run's own <code>run_results.json</code>, the file Day 57's <code>dbt retry</code> already reads for a narrower, retry-specific purpose than a general selector.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round: source:raw.orders+ resolves to the source node plus every model downstream of it transitively -- stg_orders, fct_orders and mart_delivery_sla in this project -- starting from the raw table's own name, not from any model name a person has to already know maps onto that table.">
+    <p class="stem">What does <code>source:raw.orders+</code> select, and what does it start from?</p>
+    <button class="opt" data-ok>everything downstream of that raw table, starting from the table's own name</button>
+    <button class="opt">only the one staging model, starting from a bare tag name alone</button>
+    <button class="opt">every single model in the whole project, starting from the dbt_project.yml file</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: config.tags:nightly and tag:nightly resolved to the identical four marts. tag: is dbt's own shorthand for matching one specific list-valued config field, tags -- config.tags: reaches that exact same field directly, under its general dotted form rather than a dedicated keyword.">
+    <p class="stem">Why did <code>config.tags:nightly</code> resolve to the same models as Day 52's <code>tag:nightly</code>?</p>
+    <button class="opt" data-ok><code>tag:</code> is just shorthand for matching the same one config field directly</button>
+    <button class="opt">the two methods are actually just entirely coincidentally unrelated but tied today</button>
+    <button class="opt"><code>config:</code> only ever works when it's paired with a tag string first</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: a selector value with no matching node logs 'No nodes selected!' as a plain warning, not an error, and dbt list prints nothing while still exiting cleanly -- the identical through-a-pipe exit-code unreliability Day 57's dbt retry and every dbt parse check this course runs already has to work around by grepping output text instead of trusting the exit code.">
+    <p class="stem">What happens when a <code>selectors.yml</code> <code>value:</code> has a typo and matches nothing?</p>
+    <button class="opt" data-ok>a plain warning is logged and nothing prints, no error at all</button>
+    <button class="opt">dbt immediately refuses to even try parsing the whole project at all</button>
+    <button class="opt">the selector then silently falls back to just selecting every single node</button>
+  </div>
+  <div class="q" data-why="path: matches by where a model's file physically lives on disk, regardless of that model's name, its source table, or any tag someone remembered to add -- confirmed live this round: path:models/staging matched the three staging models purely by folder, and path:models/marts/fct_orders.sql matched one exact file by its real path rather than its bare model name.">
+    <p class="stem">What does <code>path:</code> select by, that <code>tag:</code> and <code>source:</code> don't?</p>
+    <button class="opt" data-ok>where a model's own file actually lives in the project's folders</button>
+    <button class="opt">which raw table a model was originally built on top of</button>
+    <button class="opt">which specific tag string a model's own YAML happens to declare</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, dbt's <a href="https://docs.getdbt.com/reference/node-selection/methods">Node selection: methods</a> doc — already cited for Days 15 and 52 — is the authoritative list of every selection method, including the three built hands-on today and the ones still left as vocabulary (<code>test_type:</code>, <code>exposure:</code>, <code>group:</code>, <code>result:</code>). Every claim above was confirmed directly against a live <code>dbt parse</code>/<code>dbt list</code> run in a scratch project, not taken from the docs' prose alone, the same discipline Days 48-49, 52 and 53 used.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 59.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now over twenty rounds, 35-58) — still worth a human granting it once. With <code>path:</code>, <code>source:</code> and <code>config:</code> now built, Day 52's full named method list is closed; the <code>union</code>/<code>intersection</code>/multi-block <code>exclude</code> composition keys and a <code>default: true</code> selector (both named by Day 53) remain the one standing, concrete dbt-selection gap if this exact thread is picked up again. Otherwise, with dbt having had the most recent attention this round (after Kafka's three of the prior four — Days 50, 55, 58), a future round's fresh gap-scan should weigh Kafka or Airflow depth next, rather than assuming dbt by default.<br><br>
+💬 Anything unclear — why <code>tag:</code> and <code>config.tags:</code> are the same mechanism under two names, or when <code>source:</code> beats a model-name selector in a real CI trigger? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

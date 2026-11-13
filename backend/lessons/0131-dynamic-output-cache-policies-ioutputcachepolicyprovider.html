@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 131 · Resolving output-cache policies dynamically</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 131 · ~20 min</p>
+<h1>Resolving output-cache policies dynamically</h1>
+<p class="byline">Lesson 130's scope line named this exact gap and deferred it: everything from Lesson 128 onward assumes every named policy is known at startup, baked into <code>AddOutputCache(options =&gt; options.AddPolicy(...))</code> in code. This lesson is about the one case that assumption can't cover — a policy that has to be looked up per request, from somewhere other than code.</p>
+
+<h2>1 · Why a compile-time policy list isn't always enough</h2>
+<p><code>options.AddPolicy("CachePost", MyCustomPolicy.Instance)</code> from Lesson 130 only works when every policy name and rule is known when the app starts. That's fine for "cache GET for 20 seconds." It breaks down for a SaaS app where each tenant has its own cache duration stored in a database row, or a feature flag that can flip a policy's behavior without a redeploy. Nothing in <code>OutputCachePolicyBuilder</code> can read a database — the builder's methods only ever see values supplied at startup. Resolving a policy per request, from outside code, means replacing the thing that resolves policies at all, not adding another one.</p>
+
+<h2>2 · The <code>IOutputCachePolicyProvider</code> interface</h2>
+<p><dfn data-en="a .NET 11+ ASP.NET Core interface (Microsoft.AspNetCore.OutputCaching) with two methods -- GetBasePolicies() returning IReadOnlyList&lt;IOutputCachePolicy&gt;, and GetPolicyAsync(string policyName) returning ValueTask&lt;IOutputCachePolicy?&gt; -- that replaces the default AddPolicy/AddBasePolicy lookup, implemented when named or base policies must be resolved dynamically from external configuration, a database, or tenant-specific rules" data-vn="IOutputCachePolicyProvider (giữ nguyên) — interface của ASP.NET Core (Microsoft.AspNetCore.OutputCaching, .NET 11+) có 2 method -- GetBasePolicies() trả IReadOnlyList&lt;IOutputCachePolicy&gt;, GetPolicyAsync(string policyName) trả ValueTask&lt;IOutputCachePolicy?&gt; -- thay cho cách tra policy mặc định bằng AddPolicy/AddBasePolicy, tự viết khi named/base policy cần tra động từ config ngoài, database, hoặc luật riêng theo tenant">IOutputCachePolicyProvider</dfn> is the interface the default policy lookup is itself built on. The default implementation is just the one backing <code>AddPolicy</code>/<code>AddBasePolicy</code> — a custom one replaces that lookup entirely:</p>
+<pre><code><span class="kw">public sealed class</span> TenantOutputCachePolicyProvider : IOutputCachePolicyProvider
+{
+    <span class="kw">private readonly</span> ITenantPolicyStore _store;
+
+    <span class="kw">public</span> TenantOutputCachePolicyProvider(ITenantPolicyStore store)
+        =&gt; _store = store;
+
+    <span class="kw">public</span> IReadOnlyList&lt;IOutputCachePolicy&gt; GetBasePolicies()
+        =&gt; Array.Empty&lt;IOutputCachePolicy&gt;();
+
+    <span class="kw">public async</span> ValueTask&lt;IOutputCachePolicy<span class="kw">?</span>&gt; GetPolicyAsync(<span class="kw">string</span> policyName)
+    {
+        <span class="kw">var</span> rule = <span class="kw">await</span> _store.FindAsync(policyName);
+        <span class="kw">return</span> rule <span class="kw">is null</span>
+            ? <span class="kw">null</span>
+            : <span class="kw">new</span> TenantPolicy(rule.Expiry, rule.VaryByTenantHeader);
+    }
+}</code></pre>
+<p><code>GetBasePolicies</code> returns the base policies applied to every request, replacing every <code>AddBasePolicy</code> call from Lesson 128 onward. <code>GetPolicyAsync</code> resolves one named policy by its string name — the same name a <code>CacheOutput("SomeName")</code> call or <code>[OutputCache(PolicyName = "SomeName")]</code> attribute already passes today, except now the lookup can await a database call instead of returning a value fixed at startup. Returning <code>null</code> from <code>GetPolicyAsync</code> means the same thing a missing dictionary key would: that policy name wasn't found.</p>
+
+<h2>3 · Registering it, and the tenant cache-key trap</h2>
+<p>A custom provider replaces the default one, registered through DI right after <code>AddOutputCache</code>:</p>
+<pre><code>builder.Services.AddOutputCache();
+builder.Services.AddTransient&lt;IOutputCachePolicyProvider, TenantOutputCachePolicyProvider&gt;();</code></pre>
+<p>Registering it this way doesn't disable <code>AddPolicy</code>/<code>AddBasePolicy</code> as a concept — it replaces <em>which code</em> answers "what's the policy for this name," so a custom provider that wants to keep serving some statically-defined policies has to hold onto and delegate to them itself. One documented trap is sharper here than anywhere else so far: for tenant-specific responses, the cache key must vary by tenant, or one tenant's cached response gets served straight to another. A dynamically resolved policy can change <em>what rule</em> applies, but Lesson 128's cache key only varies by what <code>SetVaryByHeader</code>/<code>SetVaryByQuery</code> already told it to vary by — resolving the policy dynamically and forgetting to vary the key by tenant produces a correctly-applied wrong-tenant cache hit, not an error.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like swapping a React Query <code>queryClient</code>'s static <code>defaultOptions</code> for a function that computes options per call — same shape, server-side. The gap that doesn't carry over: a frontend per-tenant query still keys its own cache by whatever the client includes in the query key by habit (a tenant ID in the URL, say). Server-side, nothing varies the output cache's key automatically just because the policy became tenant-aware — that's a second, separate thing this lesson's provider has to get right on its own.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the <code>IOutputCachePolicyProvider</code> interface's two methods, registering a custom provider via <code>AddTransient</code> after <code>AddOutputCache</code>, and the tenant-cache-key trap the docs call out by name. It does not cover the <code>SizeLimit</code>/<code>MaximumBodySize</code> cache-wide limits or <code>SetLocking(false)</code>'s resource-locking opt-out — both still named as open follow-ups from Lesson 130, deferred a third round running — nor a full worked <code>ITenantPolicyStore</code>/database-backed implementation, which would be a framework deep-dive past this lesson's one concept.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="AddPolicy and AddBasePolicy only register policies that are fully known when the app starts up. Nothing in OutputCachePolicyBuilder can read a database or external config mid-request -- that requires replacing the policy lookup itself via IOutputCachePolicyProvider.">
+    <p class="stem">Why can't AddPolicy alone serve a per-tenant cache duration stored in a database?</p>
+    <button class="opt" data-ok>AddPolicy only ever registers policies that are fixed at startup time</button>
+    <button class="opt">AddPolicy always requires a Redis connection string before accepting any policy</button>
+    <button class="opt">Database values simply change too quickly for any cache to track</button>
+    <button class="opt">OutputCachePolicyBuilder already reads every tenant row automatically today with no setup</button>
+  </div>
+  <div class="q" data-why="GetBasePolicies returns the base policies applied to every request, replacing AddBasePolicy. GetPolicyAsync resolves one named policy by its string name, the same name CacheOutput or the OutputCache attribute already passes, except the lookup can now await something like a database call.">
+    <p class="stem">What do GetBasePolicies and GetPolicyAsync each actually resolve?</p>
+    <button class="opt" data-ok>base policies applied to every request, and one named policy by name</button>
+    <button class="opt">both of them only ever resolve the exact same single base policy</button>
+    <button class="opt">GetPolicyAsync only resolves policies that were already cached from a prior call</button>
+    <button class="opt">neither method gets called at all until some cache entry has expired</button>
+  </div>
+  <div class="q" data-why="The docs state returning null from GetPolicyAsync means the named policy wasn't found, the same meaning a missing dictionary key would carry, letting the caller fall back to the default policy shape.">
+    <p class="stem">What does returning null from a custom GetPolicyAsync implementation mean?</p>
+    <button class="opt" data-ok>that one specific named policy could not be found by this provider</button>
+    <button class="opt">every single policy in the entire application is now fully disabled too</button>
+    <button class="opt">the whole output cache must immediately restart its entire backing store now</button>
+    <button class="opt">the request should be retried later with a completely different policy name</button>
+  </div>
+  <div class="q" data-why="The docs explicitly warn that for tenant-specific responses the cache key must vary by tenant, or one tenant's cached response gets served to another -- a dynamic policy provider changes which rule applies, but the cache key only varies by whatever SetVaryByHeader/SetVaryByQuery already configured.">
+    <p class="stem">Why can a correct tenant-aware policy still leak one tenant's data to another?</p>
+    <button class="opt" data-ok>the cache key itself still needs its own separate tenant-varying rule</button>
+    <button class="opt">IOutputCachePolicyProvider silently disables every single cache key check that gets made</button>
+    <button class="opt">GetBasePolicies always overwrites any custom per-tenant policy entirely all by itself</button>
+    <button class="opt">AddTransient only registers providers that run for exactly one single tenant</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/output">Microsoft Learn: Output Caching Middleware</a> ("Resolve policies dynamically with IOutputCachePolicyProvider" section, .NET 11+) is the exact source this lesson draws from: the interface's <code>GetBasePolicies</code> (returning the base policies to apply to requests) and <code>GetPolicyAsync</code> (resolving a named policy, returning <code>null</code> when not found) methods; the instruction to register a custom provider via <code>builder.Services.AddTransient&lt;IOutputCachePolicyProvider, TenantOutputCachePolicyProvider&gt;()</code> right after <code>AddOutputCache()</code>; and the explicit warning that "for tenant-specific responses, ensure the cache key varies by tenant so that one tenant's cached response isn't served to another tenant." The same page's <code>SizeLimit</code>/<code>MaximumBodySize</code>/<code>SetLocking(false)</code> sections remain this lesson's named, still-deferred follow-ups.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 130's <code>IOutputCachePolicy</code> and Lesson 128's <code>AddPolicy</code>/<code>AddBasePolicy</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu provider custom của mình muốn giữ lại vài policy khai báo tĩnh bằng AddPolicy cũ, mình phải tự code lại phần fallback đó hay ASP.NET Core tự lo?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -71,6 +71,7 @@
     { n: 56, date: "2026-11-10", title: "Airflow max_consecutive_failed_dag_runs: pausing the DAG, not just failing one run", file: "lessons/0056-airflow-max-consecutive-failed-dag-runs.html" },
     { n: 57, date: "2026-11-11", title: "dbt retry: resuming a failed build instead of rerunning it whole", file: "lessons/0057-dbt-retry.html" },
     { n: 58, date: "2026-11-12", title: "Kafka on_lost: when a slow message, not a crash, gets a consumer evicted", file: "lessons/0058-kafka-on-lost-and-max-poll-interval.html" },
+    { n: 59, date: "2026-11-13", title: "dbt path:, source: & config: selectors: the three Day 52 left as vocabulary", file: "lessons/0059-dbt-path-source-config-selectors.html" },
   ];
 
   const REFS = [

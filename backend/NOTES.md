@@ -11042,3 +11042,122 @@
   angle; Polly/.NET resilience libraries, still deliberately out of scope
   per MISSION.md's "concepts first" rule; and the backfill-missing-
   Lesson-117-NOTES-entry gap, still not investigated.
+
+## 2026-11-13 — Lesson 131: resolving output-cache policies dynamically (IOutputCachePolicyProvider)
+
+Headless 06:00 run. DB (`course_progress` via `$LEARNING_DB_URL`) confirmed
+unreachable again this round, consistent with every prior headless run:
+direct `psql` is blocked at a static-analysis layer, and both
+`bin/query-progress`/`bin/record-progress` need interactive approval with
+no user present — one attempt only, not retried in a loop, per this run's
+own standing instruction. `learning-records/` has no entry newer than
+Lesson 3 (2026-07-xx baseline), so no fresh per-lesson completion signal
+exists to size today's step against — generated conservatively, continuing
+directly off Lesson 130's own named scope-line gap rather than guessing at
+new ground, consistent with "if no very recent completion record exists,
+generate conservatively" guidance. No new `learning-records/` file added
+this round, same reasoning as Lesson 130's entry: the topic came from a
+prior lesson's own stated follow-up, not a new observation about the
+learner.
+
+Topic picked: `IOutputCachePolicyProvider` — confirmed via grep as the
+first of three candidates Lesson 130's own NOTES entry listed as "still
+worth checking fresh next time," and the one named directly in Lesson
+130's own in-lesson scope line (".NET 11+ addition... resolving policies
+dynamically from a database or per tenant"), making it the natural next
+rung in the output-caching arc that started at Lesson 128. The other two
+Lesson-130-deferred candidates (`SizeLimit`/`MaximumBodySize` cache limits,
+`SetLocking(false)`) were left deferred again — named explicitly in
+Lesson 131's own scope line as still-open, now a third round running,
+since they're one-line `OutputCacheOptions` properties better suited to a
+passing mention than a full lesson of their own, same judgment call
+Lesson 130 made.
+
+Verification: fetched the primary source twice — the "Resolve policies
+dynamically with IOutputCachePolicyProvider" prose section of
+`.../performance/caching/output` (confirms `GetBasePolicies`/
+`GetPolicyAsync`, the `AddTransient<IOutputCachePolicyProvider, T>()`
+registration right after `AddOutputCache()`, and the explicit
+tenant-cache-key-must-vary-by-tenant warning quoted verbatim in the
+lesson), then separately the actual API reference pages for the interface
+and both its methods, since the first fetch only gave prose, not a real
+method signature. That second fetch caught a real mistake before
+shipping: my first draft's hand-written `GetPolicyAsync` took a
+`CancellationToken` parameter that does not exist on the real interface —
+the reference page gives the exact signature as
+`ValueTask<IOutputCachePolicy?> GetPolicyAsync(string policyName);`, one
+parameter only. Fixed before shipping; this is exactly the kind of error
+hand-checking without a compiler is supposed to catch, and this round it
+did. `GetBasePolicies()` confirmed to return
+`IReadOnlyList<IOutputCachePolicy>` with no parameters, matching what the
+lesson's code already had. `dotnet --version`/`go version`/`command -v
+dotnet` were all attempted this round (not skipped on assumption) and the
+sandbox blocked even the bare `command -v` check as requiring interactive
+approval — the same block every round has hit since Lesson 103, now
+confirmed to extend to toolchain *detection* itself, not just invocation.
+Fell back to hand-checking against the fetched API reference pages
+instead, as above.
+
+Other verification performed via throwaway `node -e` scripts (nothing
+written to the repo besides the three intended files): (1) quiz
+word-count check per `<div class="q">` — first draft landed uneven on all
+four questions, several rewrite-and-recount passes converged to exactly
+11/11/11/11 (Q1, Q4) and 12/12/12/12 (Q2, Q3) — same method as Lesson 130,
+exactly one `data-ok` and four options per question confirmed the same
+way; (2) HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean (div 6/6, p
+15/15, code 40/40, button 16/16, script 3/3, dfn 1/1, pre 2/2, h2 6/6, h1
+1/1, em 2/2, strong 3/3, a 2/2), the one `dfn` tag confirmed to carry both
+`data-en=` and `data-vn=` with no raw unescaped `<`/`>` inside either
+attribute value (caught and fixed one instance of exactly that mistake
+mid-draft, where a first pass at the `dfn` text left `IReadOnlyList<...>`
+unescaped, which would have corrupted the tag); (3) brace/paren balance on
+both `<pre><code>` blocks after stripping tags and unescaping entities —
+both balanced (2/2 braces, 6/6 parens; 0/0 braces, 2/2 parens); (4)
+raw-unescaped-`&` scan — zero hits; (5) glossary row count and duplicate
+scan after the one-row addition — 408 rows total (407 prior + 1 new), zero
+duplicate first-column terms; (6) `node --check` against `nav.js`,
+`gloss.js`, `quiz.js` — all clean, before and after the `nav.js` edit;
+(7) basic well-formedness — one `DOCTYPE`, one `<html>`/`</html>`, three
+script tags in gloss/quiz/nav order.
+
+Registered Lesson 131 in `nav.js` (date 2026-11-13, today's actual
+generation date) right after `n: 130`. Confirmed via `git status`/`git
+diff --stat` that this round's diff touches exactly `backend/assets/nav.js`
+(+2 lines), `backend/reference/glossary.html` (+1 line), and the new
+`backend/lessons/0131-*.html` — nothing else; pre-existing unrelated
+uncommitted changes under `python/`, `data/`, and scratch directories
+belong to other courses' own concurrent work and were left untouched. No
+new `RESOURCES.md` line added — the fetched pages are `learn.microsoft.com`,
+already covered by this file's standing entries' pattern, cited inline in
+the lesson's own "Go deeper" section instead, consistent with every prior
+C#-port round. Day number used 131, matching this file's own
+day-equals-lesson-number convention, no deviation found. `bin/record-
+progress backend lesson_generated --day 131 --lesson
+0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html
+--detail '{"by":"github-actions"}'` attempted once at the end per this
+run's own instruction; outcome noted in the run's final report rather than
+retried.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: the `SizeLimit`/`MaximumBodySize` cache-wide limits and
+`SetLocking(false)`'s resource-locking opt-out (both still named in
+Lesson 130's and now Lesson 131's own scope lines, deferred a third round
+running); a worked `ITenantPolicyStore`/database-backed
+`IOutputCachePolicyProvider` sample (named this round as out of scope —
+framework-deep-dive territory past the one-concept lesson budget); Lesson
+35's upsert/ON CONFLICT, still confirmed to have no clean first-party EF
+Core angle; Go's `select`-statement arbitration rules, still deferred many
+rounds running on fetched-page-truncation grounds; Lesson 49's
+dead-letter queues, still confirmed to have no first-party ASP.NET Core
+angle; Polly/.NET resilience libraries, still deliberately out of scope
+per MISSION.md's "concepts first" rule; and the backfill-missing-
+Lesson-117-NOTES-entry gap, still not investigated.
+
+**Addendum:** `bin/record-progress` succeeded this round (`recorded:
+backend/lesson_generated day=131
+lesson=0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html`)
+— unlike this run's own stated prior-history assumption that it would be
+blocked. Noting the deviation rather than silently assuming the old
+pattern still holds; worth rechecking next round whether this was a
+one-off or the approval blocker has been lifted.

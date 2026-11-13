@@ -13016,3 +13016,89 @@ fail *gracefully* so the learner sees which task failed.
   lesson_generated --day 106 --lesson 0106-shelve-persistent-dicts.html
   --detail '{"by":"headless"}'` was run from the repo root at the end of
   this round and succeeded.
+- 2026-11-13 generation (Lesson 107, headless GitHub Actions run): idempotency
+  check first confirmed no `lessons/0107-*.html` on disk, no `n: 107` entry in
+  `nav.js`, and no 2026-11-13 entry already in this file; the DB
+  (`course_progress` via `$LEARNING_DB_URL`) was unreachable in this sandbox
+  (direct `psql` blocked at a static-analysis layer, `bin/query-progress`
+  requires interactive approval unavailable here) — accepted as a known
+  sandbox limitation on the first attempt rather than retried, per standing
+  instruction, and the idempotency check above (filesystem + nav.js + this
+  file) was treated as the authoritative signal instead. Read `MISSION.md`
+  (no-pandas/no-NumPy exclusion re-confirmed before writing a line — never
+  modified), this file's tail through Day 106's own closing note, `PLAN.md`'s
+  Phase 2 spine, `RESOURCES.md`, `assets/nav.js`'s last entry, and
+  `learning-records/` (still only the Day 1 baseline file, no later
+  quiz/kata/lesson_completed signal). Per Day 106's own cadence note, Day 106
+  was fresh day 3 of the current three-fresh-then-review cycle, so Day 107 is
+  the next review day — covering Days 104 (`types.SimpleNamespace`), 105
+  (`locale`), and 106 (`shelve`), not a fourth fresh day. Consistent with
+  every review day since Day 71: three fresh lessons, then one retrieval day
+  over exactly those three. Scope-rule check: grepped the new lesson and its
+  practice file case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` —
+  exactly one hit, on the single required "Where pandas/NumPy go from here"
+  scope-boundary callout (recalling Day 104's own pandas-`Series` contrast by
+  name only, not re-demonstrating it), zero hits in the practice file; no
+  worked pandas/NumPy example anywhere, consistent with `MISSION.md`'s
+  exclusive-to-`data/` rule. No new jargon introduced — a review day revisits
+  terms already glossed under their original days (104, 105, 106), so
+  `reference/glossary.html` was not touched this round, matching Day 103's
+  and every prior review day's own convention. Modeled the lesson
+  structurally on Day 103 (`0103-review-retrieval-day-19.html`), the most
+  recent review day: three fold-out retrieval questions in original teaching
+  order, a "why today / why not a fourth fresh day" callout re-running the
+  fresh-gap grep first, a pandas/NumPy scope-boundary callout, an
+  interleaving-rationale paragraph, and a quiz of three questions recalling
+  each day's confirmed-live claim. Verification performed mechanically, from
+  a dedicated script (`_verify107.py`, written directly under `python/` since
+  `/tmp` is not writable in this sandbox, deleted after): (1) an
+  `html.parser.HTMLParser` full-document parse of the new lesson and of
+  `glossary.html` (unchanged) — no parse errors on either; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a
+  — balanced (div 9/9, p 16/16, code 65/65, button 9/9, script 3/3, dfn 0/0
+  as expected for a review day, pre 1/1, h2 5/5, h1 1/1, em 2/2, strong 7/7, a
+  6/6), plus a raw-unescaped-`&` regex scan — zero hits; (3) a per-question
+  quiz option word-count check via regex-strip-tags extraction on the actual
+  printed word lists (not just counts) — first draft mismatched on two of
+  three questions (12/14/13 and 12/12/13), iterated option-by-option,
+  re-checking the exact word list after each edit, until all three landed on
+  equal per-question counts: 11/11/11, 12/12/12, 12/12/12; (4) `node --check`
+  against `assets/nav.js` — clean; (5) a duplicate `n:` scan across
+  `nav.js`'s `LESSONS` array — 107 entries, zero duplicates, max `n` is 107,
+  confirming the new `n: 107` entry (dated 2026-11-13, appended right after
+  `n: 106`) landed correctly. No `RESOURCES.md` line was added — a review day
+  cites each reviewed day's own already-listed source rather than adding a
+  new one, matching Day 103's convention exactly. Practice verification: the
+  shipped (unsolved) `practice/107_review_retrieval_day_20.py` was executed
+  directly from its real `practice/` location (`uv run python3
+  practice/107_review_retrieval_day_20.py`) and printed exactly 3 ✗ with no
+  raw traceback. A solved copy was built in a scratch dir inside the repo
+  (`.scratch-python-107/`, created because `/tmp` was blocked for
+  write/copy in this sandbox, deleted after) — copied from the shipped file,
+  each TODO body filled in directly, never editing the shipped file itself —
+  and printed all 3 ✓ and "All green" on two consecutive runs; one bug was
+  caught and fixed in this process (the `writeback=True` exercise initially
+  appended directly to `db[key]` instead of `db[key]["tags"]`, raising
+  `AttributeError: 'dict' object has no attribute 'append'` — fixed in both
+  the shipped TODO comment and the solved copy to match the lesson's own
+  nested-dict example). The shipped file was re-run afterward from its real
+  location and reproduced the identical all-✗ result, confirming no leakage
+  back into the baseline. Ex 2 in the practice file also guards against this
+  sandbox's locale availability (`locale -a` here lists only `C`, `C.utf8`,
+  `POSIX`, and `en_US.utf8`) by catching `locale.Error` and skipping that one
+  check gracefully rather than failing outright, in case a future run lands
+  on a host without `en_US.UTF-8` installed — same spirit as Day 105's own
+  documented environment caveat. Registered Lesson 107 in `nav.js` with
+  today's date (2026-11-13) right after the `n: 106` entry. Cadence note for
+  the next round: Day 107 closes the twentieth review cycle — Day 108 should
+  resume fresh topics, fresh day 1 of a new three-fresh-then-review cycle.
+  Standing fresh-gap candidates going into Day 108: `socket` (passing-mention
+  only, repeatedly ruled out on scope-depth grounds across many prior
+  rounds) and `queue`/`multiprocessing`/`zoneinfo` (genuinely untouched, not
+  yet strong enough to have been chosen over each other) — a fresh gap-scan
+  should still run next round rather than assuming this list is exhaustive.
+  Attempted `bin/record-progress python lesson_generated --day 107 --lesson
+  0107-review-retrieval-day-20.html --detail '{"by":"github-actions"}'` once
+  from the repo root at the end of this round; see this file's own next line
+  if it appears, or treat silence/blocking as the known sandbox limitation
+  if not.

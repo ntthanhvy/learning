@@ -6818,3 +6818,145 @@ along the Phase 2 spine, adapted to the learning records.
   or Airflow depth next, since Kafka has now had three of the last four
   rounds' worth of attention (Days 50, 55, 58) against Airflow's one (Day
   56) and dbt's one (Day 57).
+
+- 2026-11-13 (headless run, Day 59 generated): fifty-ninth lesson,
+  `0059-dbt-path-source-config-selectors.html`. The DB read/write path
+  (`course_progress` via `$LEARNING_DB_URL`) was unreachable this round —
+  direct `psql` is blocked at a static-analysis layer ("Contains
+  simple_expansion") and both `bin/query-progress`/`bin/record-progress`
+  need interactive approval nothing in this sandbox could grant; this is
+  the same standing gap named every round since Day 35, now also covering
+  the read side explicitly, not just the DB-dependent build/test paths.
+  One attempt at `bin/record-progress` was made at the end per the
+  orchestrator's own instruction, not retried in a loop. Idempotency check
+  first via the filesystem instead: confirmed no `lessons/0059-*.html` on
+  disk and no `n: 59` row in `assets/nav.js` before writing anything; Day
+  58 remained the latest prior lesson. Read `MISSION.md`, this file's tail
+  through Day 58's close, `PLAN.md`'s Phase 2 spine in full, `RESOURCES.md`
+  in full, the single baseline learning record, `assets/nav.js`'s last
+  entry, and Days 58 and 53 in full as structural templates before picking
+  anything.
+  **Topic choice:** Day 58's own closing note named Kafka as having had
+  three of the last four rounds' attention (50, 55, 58) against Airflow's
+  one (56) and dbt's one (57), suggesting dbt or Airflow next — but not by
+  default, so a fresh gap-scan ran first (delegated to a sub-agent, which
+  grepped all 58 lesson bodies against every PLAN.md Phase-2 sub-bullet
+  across 2a/2b/2c/2d). Result: every named sub-topic across all four
+  Phase-2 sections is now genuinely taught in depth or deliberately
+  deferred by design (Schema Registry/Avro vocab-only, a real secrets
+  backend vocab-only since this course has no cloud account, and Airflow
+  pools correctly blocked because the portfolio still has only one DAG,
+  re-confirmed by Days 54 and 56 both). With PLAN.md's own spine
+  exhausted, fell back to the "deepen an existing thread" pattern Days 38,
+  39, 44, 46, 47 and 57 already used: re-read Day 52's own scope line,
+  which named `path:`, `source:` and `config:` as selection methods dbt
+  ships but left unbuilt ("vocabulary only here"), and Day 53's own
+  closing note, which named the exact same gap again as one of three
+  concrete next steps. Grepped Day 52 and 53's bodies directly to confirm
+  neither ever built any of the three hands-on (confirmed: Day 52's scope
+  line and Day 53's scope line both explicitly defer them). Picked this
+  over Airflow pools (still blocked, same precondition) and over assuming
+  Kafka/Airflow by default. No pandas, no Python-language teaching, no
+  API/idempotency re-derivation — this is dbt CLI mechanics end to end,
+  the course's own deep thread.
+  **Content:** no new model, no new DAG task — three new node-selection
+  methods added to the exact `selectors.yml` Day 53 already created
+  (`staging_only` using `method: path`, `changed_from_orders_source` using
+  `method: source` plus `children: true`, `all_tables` using `method:
+  config.materialized`), plus a TODO asking the learner to write a fourth
+  (`restaurant_lineage`) from Day 53's own CLI-to-YAML graph-operator
+  table. Confirmed `config.tags:` and Day 52's `tag:` resolve to the
+  identical node set — not assumed, found live and written into the lesson
+  as a real, confirmed finding (Section 2's callout) rather than asserted
+  from memory.
+  **Verification:** no reachable Postgres or Kafka broker this sandbox
+  round either (the standing gap named every round since Day 35) — this
+  lesson needed neither, since `dbt parse`/`dbt list` run with no database
+  connection. Built a six-model scratch dbt project under
+  `.scratch-dataeng-59/` at the repo root (`/tmp` confirmed out of bounds
+  again this round, same as every prior round that tried it), shaped
+  exactly like this course's real project: `stg_orders`/`stg_restaurants`/
+  `stg_couriers` staging views, `fct_orders`/`dim_restaurants`/
+  `dim_couriers`/`mart_delivery_sla` marts configured `+materialized:
+  table` and `+tags: ["nightly"]` at the folder level. `dbt parse
+  --profiles-dir .` (dbt-core 1.12.7, dbt-postgres 1.11.0 via `uv run
+  --with "dbt-postgres==1.11.0"`) produced only `Running with
+  dbt=...`/`Registered adapter...`/`Performance info...` lines, grepped
+  for the literal string `Error` afterward and found none — the standing
+  "exit code is unreliable through a pipe" caveat this file has repeated
+  every round. Every table row in Section 2 is a real `dbt list` result,
+  not predicted from the docs: `path:models/staging` → the three staging
+  models by folder; `path:models/marts/fct_orders.sql` → that one file by
+  path, not model name; `source:raw.orders` → the source node alone;
+  `source:raw.orders+` with `--resource-type model` → `stg_orders`,
+  `fct_orders`, `mart_delivery_sla` (the source node itself cleanly
+  dropped by the resource-type filter); `source:raw` → all four source
+  tables; `config.materialized:table` → the four marts;
+  `config.materialized:view` → the three staging models;
+  `config.tags:nightly` → the identical four marts as `tag:nightly`. Built
+  a second scratch project specifically to verify the `selectors.yml`
+  block exactly as written in the lesson (`staging_only`,
+  `changed_from_orders_source`, `all_tables`, plus the TODO's
+  `restaurant_lineage`) — all four resolved exactly as the lesson claims,
+  including the TODO's own expected answer
+  (`stg_restaurants`/`dim_restaurants`/`mart_delivery_sla`). Also
+  confirmed live, not assumed: a `selectors.yml` entry whose `value:` typo
+  matches nothing (`config.materialized: table_typo`) logs `WARNING: No
+  nodes selected!` and exits clean, never an `Error` — the exact claim
+  Section 4 and quiz question 3 both make. Both scratch directories
+  (`.scratch-dataeng-59/` and a second one used for the `selectors.yml`
+  re-check) were deleted after; confirmed via a directory listing that
+  nothing named `scratch` remained under the repo root. No Python file was
+  part of this lesson's build step (pure dbt YAML and CLI), so `py_compile`
+  did not apply this round.
+  Quiz word counts verified with a small Python script stripping HTML tags
+  and counting whitespace-split tokens per option, the same script prior
+  rounds used. First draft was uneven across all four questions (12/12/11,
+  11/9/10, 12/10/10, 11/11/10) — rebalanced through several word-for-word
+  edit passes, re-running the script after each edit rather than trusting
+  a hand recount (the same lesson Days 57 and 58 both drew from their own
+  near-misses), to a final clean 12/12/12, 12/12/12, 12/12/12, 11/11/11
+  across the four questions. HTML structure verified via paired open/close
+  tag counts on every tag that appears (`div` 8/8, `p` 19/19, `code`
+  161/161, `button` 12/12, `script` 3/3, `dfn` 2/2, `pre` 5/5, `h2` 7/7,
+  `h1` 1/1, `em` 3/3, `strong` 6/6, `a` 3/3, `table` 1/1, `tr` 7/7, `td`
+  18/18, `th` 3/3) and a bare-`&` regex scan — caught and fixed one real
+  bare `&` in the `<title>` tag (needed `&amp;`, confirmed against Day
+  22's own title for the correct escaping convention) and one malformed
+  table cell (`<td the four marts` missing its closing `>` and opening
+  quote, a typo introduced while drafting, caught by the same tag-balance
+  script rather than a visual read) before the final check passed clean.
+  Grepped the whole glossary for `path: selector|source: selector` before
+  writing either `<dfn>` — zero hits, confirming both new terms are
+  genuinely new, not redefinitions. `reference/glossary.html` re-checked
+  after appending Day 59's section: `h2` 58/58, `table` 58/58, `tr`
+  212/212, `td` 462/462, `th` 174/174, zero bare `&`. `node --check` clean
+  on `nav.js` after today's edit.
+  Added two new glossary terms — `path: selector` and `source: selector`
+  — under a new Day 59 section (`config:` was covered in prose but not
+  given its own `<dfn>`, since it reduces to the same general mechanism
+  `tag:` already has a term for, confirmed live this round). Added no new
+  `RESOURCES.md` line: today's primary source is the Node selection:
+  methods page, already cited on line 52 for Day 15's `state:modified`:
+  extended that line's own "Use for" list to name Day 52's and Day 59's
+  angles on the same URL instead of adding a duplicate entry, the same
+  reuse pattern Day 58 used for the confluent-kafka client docs.
+  Registered Lesson 59 in `assets/nav.js` right after the `n: 58` entry,
+  dated 2026-11-13.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a fresh PLAN.md gap-scan finding the Phase-2 spine fully
+  exhausted, then Day 52/53's own named-but-deferred `path:`/`source:`/
+  `config:` gap, not a new durable fact about the learner distinct from
+  the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now over
+  twenty rounds, 35-58) — still worth a human granting it once. Today's
+  own scope line names two concrete remaining dbt-selection threads if
+  picked up again: the `union`/`intersection`/multi-block `exclude`
+  composition keys and a `default: true` selector, both named by Day 53
+  and still not built. With PLAN.md's full Phase-2 spine now confirmed
+  exhausted across all three tools (dbt, Kafka, Airflow) as of this round,
+  a future round most likely needs either one of those two named
+  composition-key threads, Airflow pools once a second DAG genuinely
+  exists, or a fresh learner-record-driven direction rather than another
+  spine-gap scan — the spine itself has nothing left unaddressed.

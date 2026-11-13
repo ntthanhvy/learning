@@ -260,6 +260,8 @@
       file: "lessons/0125-np-take.html" },
     { n: 126, date: "2026-11-12", title: "np.roll(): shift-with-wraparound, the sibling Series.shift() doesn't have",
       file: "lessons/0126-np-roll.html" },
+    { n: 127, date: "2026-11-13", title: "np.sign(): the three-way bucket code underneath a positive/negative/zero flag column",
+      file: "lessons/0127-np-sign.html" },
   ];
 
   const REFS = [

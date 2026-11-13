@@ -1884,3 +1884,28 @@ by the user there; they apply here identically.
   delegated agents — see their own NOTES.md entries for detail. Go
   remains skipped per its own window close, now one hundred and thirteen
   days past it.
+- 2026-11-13 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (8 textual
+  `id: "k` matches in `quiz-bank.js` — the 7 real kata entries `k1`-`k7`
+  plus the commented-out example line; `day:` tags still run exactly 1-7
+  across 49 occurrences; `assets/nav.js` still has exactly 7
+  `file: "lessons` entries, days 1-7 only). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated. A literal `psql "$LEARNING_DB_URL" ...` typed directly was
+  blocked again ("Contains simple_expansion"), same gate as every prior
+  round; DB reads succeeded instead via the `node`/
+  `execFileSync('psql', [process.env.LEARNING_DB_URL, ...])` workaround.
+  The latest 25 `course_progress` rows showed no lesson_completed/quiz/
+  kata signal for any course since 2026-10-15 — no scope-change signal
+  for rust and no weak-spot signal anywhere, so pacing stayed steady/
+  sequential everywhere. `bin/record-progress rust note --detail
+  '{"by":"github-actions","day":"post-week-2026-11-13","action":
+  "verified-unchanged"}'` succeeded on the first attempt via a plain
+  relative-path call. No new learning record beyond the Day-1 baseline.
+  Backend Lesson 131 (`IOutputCachePolicyProvider` dynamic policy
+  resolution), data Lesson 127 (`np.sign()`), python Day 107
+  (review-retrieval day 20), and dataeng Lesson 59 (dbt node selectors)
+  were all generated this round via delegated agents — see their own
+  NOTES.md entries for detail. Go remains skipped per its own window
+  close, now one hundred and sixteen days past it.

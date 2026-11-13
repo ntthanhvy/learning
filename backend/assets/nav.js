@@ -268,6 +268,8 @@
       file: "lessons/0129-output-cache-tag-eviction-ioutputcachestore.html" },
     { n: 130, date: "2026-11-12", title: "Writing your own output-cache policy",
       file: "lessons/0130-custom-output-cache-policy-ioutputcachepolicy.html" },
+    { n: 131, date: "2026-11-13", title: "Resolving output-cache policies dynamically",
+      file: "lessons/0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html" },
   ];
 
   const REFS = [

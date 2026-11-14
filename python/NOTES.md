@@ -13102,3 +13102,112 @@ fail *gracefully* so the learner sees which task failed.
   from the repo root at the end of this round; see this file's own next line
   if it appears, or treat silence/blocking as the known sandbox limitation
   if not.
+- 2026-11-14 generation (Lesson 108, headless GitHub Actions run): idempotency
+  check first confirmed no `lessons/0108-*.html` on disk, no `n: 108` entry in
+  `nav.js`, and no 2026-11-14 entry already in this file. The orchestrator had
+  already queried the Neon `course_progress` table directly and confirmed no
+  quiz/kata/lesson_completed signal for python since 2026-10-15 (only routine
+  `lesson_generated` rows), so this round was told not to re-attempt a DB read
+  itself; `learning-records/` still holds only the Day 1 baseline file, no
+  newer signal either. Read `MISSION.md` (no-pandas/no-NumPy exclusion
+  re-confirmed before writing a line — never modified), `PLAN.md`'s Phase 2
+  spine, this file's tail through Day 107's own closing note, `RESOURCES.md`,
+  and `assets/nav.js`'s last entry (confirmed `n: 107`, 2026-11-13, nothing
+  later — idempotency check passed). Per Day 107's own cadence note, Day 107
+  closed the twentieth review cycle, so Day 108 resumes fresh topics — fresh
+  day 1 of a new three-fresh-then-review cycle, not a review day. Ran a fresh
+  gap-scan rather than trusting the standing candidate list blindly: grepped
+  `queue`, `multiprocessing`, `zoneinfo`, and `socket` case-insensitively
+  across every lesson and `reference/glossary.html`. This turned up a real
+  correction to the standing list: `zoneinfo` is **not** actually a gap —
+  Day 14 (`0014-datetime-and-timezones.html`) already has a dedicated `## 6 ·
+  zoneinfo` section with its own quiz question, so it is retired as a
+  candidate rather than carried forward again. `socket` remains ruled out on
+  the same scope-depth grounds as every prior round (only incidental mentions
+  inside Day 21's PostgreSQL connection-pool text and Day 25's uvicorn text,
+  never the module itself; real networking still runs deeper than 20 minutes
+  and edges into Phase 2b territory). `multiprocessing` is genuinely
+  untouched (only appears inside Day 107's own gap-candidate list text) and
+  remains open for a future round. Picked **`queue`**: genuinely zero-hit as
+  a dedicated topic (confirmed: the word "queue" appeared only as plain
+  English inside Day 53's `deque` example and Day 25's sizing metaphor, never
+  this module), and it completes Day 73's own unfinished thread directly —
+  that lesson named `threading.Lock` and race conditions as the danger of
+  sharing mutable state between threads but never demonstrated the more
+  common fix of a purpose-built thread-safe structure instead. Lesson covers
+  `queue.Queue`'s `put()`/`get()` (default blocking behavior), `put_nowait()`/
+  `get_nowait()` with the `Full`/`Empty` exceptions and `maxsize`, and
+  `task_done()`/`join()` for confirming work is actually finished rather than
+  merely dequeued, plus a named-not-demonstrated callout on `LifoQueue`/
+  `PriorityQueue`/`SimpleQueue`. Primary source fetched live via WebFetch
+  (`https://docs.python.org/3/library/queue.html`) to quote the constructor
+  signature, blocking/non-blocking method pairs, and the module's own
+  "especially useful in threaded programming when information must be
+  exchanged safely between multiple threads" framing precisely, catching any
+  hallucinated API detail before writing. Checked the glossary for term
+  collisions before writing — grepped `queue.Queue`, `thread-safe queue`,
+  `task_done`, `queue.Empty`, `queue.Full`, `put_nowait`, and `get_nowait`
+  case-insensitively across the full `glossary.html`, zero existing rows for
+  any of them (the pre-existing `race condition` row from Day 73 was left
+  untouched, not duplicated). **New jargon: 3 glossary rows** (`queue.Queue`
+  as a thread-safe FIFO, the `Empty`/`Full` non-blocking exception pair, and
+  `task_done()`/`join()`), added as a new `<h2 id="day108">` section directly
+  after Day 106's (Day 107 was a review day with no new terms, so Day 106 is
+  the correct preceding section). Verification performed mechanically, from
+  dedicated scripts written directly under the repo root in
+  `.scratch-python-108/` (deleted after, since `/tmp` is not writable in this
+  sandbox): (1) an `html.parser.HTMLParser` full-document parse of the new
+  lesson and of `glossary.html` — no parse errors on either; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a
+  on the new lesson — first pass caught a stray unmatched `</p>` left over
+  from an edit (16 `<p>` opens vs. 17 closes), fixed by removing the stray
+  closing tag, re-checked balanced after the fix (div 8/8, p 16/16, code
+  92/92, button 9/9, script 3/3, dfn 2/2, pre 4/4, h2 6/6, h1 1/1, em 0/0,
+  strong 6/6, a 2/2), plus a raw-unescaped-`&` regex scan — zero hits; (3) a
+  per-question quiz option word-count check via regex-strip-tags extraction
+  on the actual printed word lists (not just counts) — first draft mismatched
+  on two of three questions (10/11/10 and 11/10/11), iterated option-by-
+  option, re-checking the exact word list after each edit, until all three
+  landed on equal per-question counts: 11/11/11, 11/11/11, 10/10/10; (4) a
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section, plus a duplicate-`id="dayNN"` scan — balanced (table 90/90, tr
+  393/393, th 270/270, td 909/909, h2 90/90) with zero duplicates among 90
+  ids, `day108` present exactly once; a case-insensitive duplicate-term scan
+  across the glossary's term column reproduced the one pre-existing collision
+  already on record (`dependency`), confirmed none of the three new terms
+  collide with it or any other existing row; (5) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all three clean;
+  (6) a duplicate `n:` scan across `nav.js`'s `LESSONS` array — 108 entries,
+  zero duplicates, max `n` is 108; (7) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 1 hit total,
+  confirmed by direct line lookup to sit inside the required "Where
+  pandas/NumPy go from here" scope-boundary callout, never a worked example,
+  and zero hits in the practice file. The shipped (unsolved)
+  `practice/108_queue_thread_safe_producer_consumer.py` was executed directly
+  from its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-108/` (copied from the
+  shipped file, then each TODO body filled in directly — never editing the
+  shipped file itself, deleted after) printed all 3 ✓ and "All green" on two
+  consecutive runs; the shipped file was re-run afterward from its real
+  location and reproduced the identical all-✗ result, confirming no leakage
+  back into the baseline. Added one new `RESOURCES.md` line for `queue`,
+  placed directly after Day 106's `shelve` line and before the PEP 8 line,
+  following the file's chronological-by-day ordering. Registered Lesson 108
+  in `nav.js` with today's date (2026-11-14) right after the `n: 107` entry.
+  `python/learning-records/` was not touched this round — the sole file there
+  is still the Day 1 baseline record with no newer quiz/kata/lesson_completed
+  signal, so a routine fresh-topic pick following the course's own settled
+  cadence was the right call. Cadence note for the next round: Day 108 is
+  fresh day 1 of the new three-fresh-then-review cycle — Day 109 should be
+  fresh day 2, Day 110 fresh day 3, and Day 111 the next review day, covering
+  Days 108-110. Standing fresh-gap candidates after today: `multiprocessing`
+  (genuinely untouched, not yet strong enough on its own to have been chosen
+  over `queue` this round) — `socket` remains ruled out on scope-depth
+  grounds, and `zoneinfo` is now explicitly retired from the candidate list
+  (already fully taught on Day 14). A fresh gap-scan should still run next
+  round rather than assuming this list is exhaustive. `bin/record-progress
+  python lesson_generated --day 108 --lesson
+  0108-queue-thread-safe-producer-consumer.html --detail
+  '{"by":"github-actions"}'` was run from the repo root at the end of this
+  round; see this file's own next line if it appears, or treat
+  silence/blocking as the known sandbox limitation if not.

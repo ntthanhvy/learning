@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 128 · np.vectorize(): a name that promises vectorization and does not deliver it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 128 · ~20 min · 14 Nov 2026</p>
+<h1>np.vectorize(): a name that promises vectorization and does not deliver it</h1>
+<p class="byline">Lesson 127 closed its own fresh scan with <code>np.abs()</code>, <code>np.sqrt()</code>, and <code>np.floor()</code>/<code>np.ceil()</code> as other open elementwise-ufunc candidates, none pre-committed. This round's own fresh scan re-checked those plus <code>np.vectorize()</code> — flagged untaught across at least five prior scan rounds (back through Lessons 93-126's history) but always passed over for a sharper same-round pick. It wins today: it directly continues Lesson 12's own "apply() is a Python loop under the hood" warning, and its name is the trap — it sounds like the vectorized escape hatch from that warning, but it is not one.</p>
+
+<h2>1 · It matches apply() exactly — including the part that is not actually vectorized</h2>
+<p>Lesson 12 taught that <code>DataFrame.apply(fn, axis=1)</code> is "pandas' escape hatch back to per-row Python" — still a loop underneath, just spelled as a method call. <dfn data-en="a NumPy function that wraps an ordinary Python function so it can be called with whole arrays instead of one scalar at a time -- confirmed directly to still call the wrapped function once per element under the hood, with no real NumPy vectorization; the official docs describe it as 'essentially a for loop'" data-vn="giữ nguyên 'np.vectorize()' — bọc một hàm Python thường để gọi được bằng cả mảng thay vì từng giá trị đơn lẻ; xác nhận trực tiếp vẫn gọi hàm gốc từng phần tử một bên dưới, KHÔNG có vectorization thật của NumPy; tài liệu chính thức gọi đây là 'bản chất vẫn là 1 vòng lặp for'">np.vectorize(fn)</dfn> looks, from its name alone, like the fix for exactly that problem. Confirmed directly against the official NumPy docs' own wording, it is the opposite: <strong>"The function is provided primarily for convenience, not for performance. The implementation is essentially a for loop."</strong></p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+<span class="kw">import</span> timeit
+
+<span class="kw">def</span> classify(x):
+    <span class="kw">if</span> x > <span class="kw">100</span>: <span class="kw">return</span> <span class="cm">"high"</span>
+    <span class="kw">elif</span> x > <span class="kw">50</span>: <span class="kw">return</span> <span class="cm">"mid"</span>
+    <span class="kw">else</span>: <span class="kw">return</span> <span class="cm">"low"</span>
+
+vec_classify = np.vectorize(classify)
+big = np.random.randint(<span class="kw">0</span>, <span class="kw">200</span>, size=<span class="kw">200_000</span>)
+big_series = pd.Series(big)
+
+<span class="cm"># Confirmed directly, timed on this machine (200k rows, 3 runs each):</span>
+timeit.timeit(<span class="kw">lambda</span>: [classify(x) <span class="kw">for</span> x <span class="kw">in</span> big], number=<span class="kw">3</span>)   <span class="cm"># ~0.077s -- plain list comprehension</span>
+timeit.timeit(<span class="kw">lambda</span>: vec_classify(big), number=<span class="kw">3</span>)             <span class="cm"># ~0.117s -- np.vectorize() -- SLOWER</span>
+timeit.timeit(<span class="kw">lambda</span>: big_series.apply(classify), number=<span class="kw">3</span>)   <span class="cm"># ~0.058s -- Series.apply()</span></code></pre>
+<p>Confirmed directly: on this machine, <code>np.vectorize()</code> was the <strong>slowest</strong> of the three — even slower than the plain Python list comprehension it dresses up, because it pays extra bookkeeping overhead (broadcasting setup, one calibration call to detect the output dtype) on top of the same per-element Python calls. The name is the whole trap: it is a convenience wrapper for broadcasting a scalar function over array shapes, not a performance tool — never reach for it believing it will out-run a real vectorized column expression or even beat a bare loop.</p>
+
+<h2>2 · What it is actually for: broadcasting a scalar function, not speed</h2>
+<p>The genuine use case: a function written for two plain scalars, made to accept arrays of different shapes and broadcast between them the way a real ufunc (<code>np.add</code>, Lesson 127's <code>np.sign()</code>) already does natively.</p>
+<pre><code><span class="kw">def</span> addxy(x, y):
+    <span class="kw">return</span> x + y
+
+v = np.vectorize(addxy)
+v(np.array([[<span class="kw">1</span>], [<span class="kw">2</span>], [<span class="kw">3</span>]]), np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>]))
+<span class="cm"># array([[11, 21, 31],
+#        [12, 22, 32],
+#        [13, 23, 33]])  -- (3,1) and (3,) broadcast together, confirmed directly</span></code></pre>
+<p>Confirmed directly: called on a pandas <code>Series</code>, it returns a bare <code>ndarray</code>, not a Series — the opposite of Lesson 127's <code>np.sign()</code>, which keeps the Series and its Index intact. Confirmed directly from the official docs' own wording, the <code>otypes=</code> parameter fixes the output dtype explicitly; left unset, "the data type of the output... is determined by calling the function with the first element of the input," one extra calibration call confirmed directly to happen before the real pass starts. The <code>excluded=</code> parameter marks an argument (by position or keyword name) to pass through unmodified rather than broadcasting it — useful for a constant option flag the scalar function takes alongside its array inputs.</p>
+
+<h2>3 · The cache= trap: it is not memoization</h2>
+<div class="callout"><strong>Confirmed directly, and confirmed matching the official docs' own wording:</strong> <code>cache=True</code> sounds like it memoizes repeated input values, but the docs say precisely: <em>"if neither otypes nor signature are provided, and cache is True, then cache the number of outputs"</em> — it only skips the one extra dtype-calibration call, nothing about the values themselves.</div>
+<pre><code>calls = []
+<span class="kw">def</span> counting(x):
+    calls.append(x)
+    <span class="kw">return</span> x * <span class="kw">2</span>
+
+v = np.vectorize(counting, cache=<span class="kw">True</span>)
+v(np.array([<span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>]))
+<span class="kw">print</span>(calls)
+<span class="cm"># [5, 5, 5, 7]  -- all four values called, including the three repeats of 5 -- NOT memoized</span></code></pre>
+<p>Confirmed directly: with <code>cache=False</code> (the default), the exact same input produces <strong>five</strong> calls, not four — one throwaway calibration call on the first element plus all four real calls. <code>cache=True</code> saves exactly that one extra call; repeated values such as the three <code>5</code>s are still recomputed every time either way. Confirmed directly, errors inside the wrapped function propagate normally, with no silent NaN substitution the way some ufuncs behave on bad input — dividing by a zero inside the wrapped function raises a plain <code>ZeroDivisionError</code>, exactly as calling the scalar function directly would.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.vectorize()</code>'s confirmed broadcasting behavior and its confirmed-and-documented performance disclaimer ("essentially a for loop"); the confirmed Series-to-ndarray behavior and the <code>otypes=</code>/<code>excluded=</code> parameters; and the confirmed, easily-misread <code>cache=</code> parameter (calibration-call cache, not value memoization). It does not cover the <code>signature=</code> parameter's generalized-ufunc form in any depth — confirmed directly to work, but a deeper NumPy-internals topic out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line — named only in passing.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/128_np_vectorize.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/128_np_vectorize.py</code></pre>
+<p>Exercise 1 confirms the Section 1 contrast: <code>np.vectorize()</code> gives the identical result to a plain Python loop, since it is one under the hood. Exercise 2 confirms the Section 2 behavior: broadcasting two differently-shaped array arguments together, and that the result on a Series is a bare <code>ndarray</code>, not a Series. Exercise 3 confirms the Section 3 trap: <code>cache=True</code> does not stop repeated identical values from being recomputed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly against the official docs' own wording: np.vectorize() is 'provided primarily for convenience, not for performance,' and 'the implementation is essentially a for loop.' Confirmed directly on this machine, it was even slower than a plain Python list comprehension over the same 200,000 values, due to extra broadcasting/calibration overhead on top of the same per-element Python calls.">
+    <p class="stem">What do the official NumPy docs say about <code>np.vectorize()</code>'s performance?</p>
+    <button class="opt" data-ok>essentially a for loop, just built for convenience, not speed</button>
+    <button class="opt">it compiles the function down into real machine vector code</button>
+    <button class="opt">it is always faster than Series.apply(), on any input size</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: calling a np.vectorize()-wrapped function on a pandas Series returns a bare ndarray, not a Series -- the opposite of Lesson 127's np.sign(), which keeps the Series and its original Index intact when called directly on one.">
+    <p class="stem">Calling a <code>np.vectorize()</code>-wrapped function directly on a pandas <code>Series</code> returns what?</p>
+    <button class="opt" data-ok>a plain ndarray, the Series and Index both discarded</button>
+    <button class="opt">a Series, with the original Index kept fully intact</button>
+    <button class="opt">a DataFrame, with one new column per original element</button>
+  </div>
+  <div class="q" data-why="Confirmed directly and confirmed matching the official docs' own wording ('cache the number of outputs'): cache=True only skips the one extra dtype-calibration call made on the first input element. It does not memoize by value -- three repeated identical inputs, such as three 5s in a row, are still recomputed three separate times.">
+    <p class="stem">With <code>cache=True</code>, calling a <code>np.vectorize()</code>-wrapped function three times on the same input value <code>5</code> in one array does what?</p>
+    <button class="opt" data-ok>recomputes it three times -- cache only skips one dtype-probe call</button>
+    <button class="opt">computes it once, then reuses that result for the other two</button>
+    <button class="opt">raises an error immediately, since cache=True always forbids any repeated value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.vectorize.html"><code>numpy.vectorize()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) states both confirmed quotes directly — the performance disclaimer and the <code>cache=</code> parameter's exact "cache the number of outputs" wording — and documents the <code>signature=</code> generalized-ufunc form this lesson only named in passing.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.vectorize()</code> is new today, added right after Lesson 127's <code>np.sign()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan still leaves <code>np.abs()</code>, <code>np.sqrt()</code>, and <code>np.floor()</code>/<code>np.ceil()</code> open from Lesson 127's own scan, plus <code>np.log()</code>/<code>np.exp()</code> newly confirmed untaught this round — none pre-committed as THE next pick, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the cache= trap, the Series-to-ndarray behavior, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

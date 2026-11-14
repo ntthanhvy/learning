@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 60 · dbt selector composition: union, intersection, exclude &amp; default: true</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 60 · ~20 min · 14 Nov 2026</p>
+<h1>dbt selector composition: <code>union</code>, <code>intersection</code>, <code>exclude</code> &amp; <code>default: true</code></h1>
+<p class="byline">Today's tangible win: <code>food_delivery_pipeline/selectors.yml</code> gains three real composed selectors — one <code>union</code>, one <code>intersection</code>, one that nests <code>exclude</code> as its own item inside a <code>union</code> list — plus a <code>default: true</code> selector so a bare <code>dbt build</code> with no flags at all runs something narrower than the whole project. Confirmed live against a scratch project: the first attempt at combining <code>union</code> and <code>exclude</code> side by side under one <code>definition:</code> failed to parse with a real error, naming the exact rule the docs state and this round rediscovered the hard way.</p>
+
+<div class="callout"><strong>Before today — confirm Day 53/59 landed:</strong> today adds to the same <code>selectors.yml</code> Day 53 created and Day 59 extended; it assumes both already exist.
+<pre><code>cd food_delivery_pipeline &amp;&amp; grep -n "method: tag" selectors.yml</code></pre>
+Expected: the <code>nightly_marts</code> selector block from Day 53. If it's missing, finish <a href="0053-dbt-selectors-yml.html">Day 53</a> and <a href="0059-dbt-path-source-config-selectors.html">Day 59</a> first — today's build edits that same file again.</div>
+
+<h2>1 · The gap: two named selectors, never actually combined</h2>
+<p>Day 53 named two composition keys as vocabulary and left them there — <code>union</code> and <code>intersection</code> — and its own TODO built exactly one <code>exclude:</code> block, nested a single level under <code>definition:</code>. Day 59 named the same gap again on its way out: "the <code>union</code>/<code>intersection</code>/multi-block <code>exclude</code> composition keys... remain the one standing, concrete dbt-selection gap." Both rounds were right to defer it — a single <code>method</code>/<code>value</code> pair, or one <code>exclude:</code> list, covers most real selectors, and piling on three new keys in one sitting would have buried either lesson. But the deferred question is real: Day 53's own <code>nightly_marts_without_sla</code> TODO excluded one node from one tag. What about excluding two, or selecting the <dfn data-en="a dbt selector composition key (union: a YAML list of selection blocks nested under definition:) that resolves to every node matched by ANY block in the list -- a logical OR across multiple method/value pairs or nested compositions, rather than the single bare node a plain method/value pair selects" data-vn="giữ nguyên &quot;union selector&quot; — composition key (union:, 1 list YAML gồm nhiều selection block, nằm trong definition:) resolve ra mọi node khớp VỚI BẤT KỲ block nào trong list đó — tức OR logic giữa nhiều cặp method/value hoặc composition lồng nhau, khác hẳn 1 cặp method/value đơn chỉ chọn đúng 1 node">union</dfn> of two unrelated tags, or the <dfn data-en="a dbt selector composition key (intersection: a YAML list of selection blocks nested under definition:) that resolves to only the nodes matched by EVERY block in the list -- a logical AND, narrower than either block alone, rather than the broader set union: would produce from the identical list" data-vn="giữ nguyên &quot;intersection selector&quot; — composition key (intersection:, 1 list YAML gồm nhiều selection block, nằm trong definition:) resolve ra CHỈ những node khớp VỚI MỌI block trong list đó — tức AND logic, hẹp hơn từng block riêng lẻ, khác hẳn tập rộng hơn mà union: sẽ cho ra từ cùng 1 list đó">intersection</dfn> of a tag and a config? Those need <code>union:</code> and <code>intersection:</code> for real, not as a vocabulary word.</p>
+
+<h2>2 · Confirmed live: a real parse failure, then the actual rule</h2>
+<p>The natural first guess — put <code>union:</code> and <code>exclude:</code> as two sibling keys directly under one <code>definition:</code>, the same way Day 53's single <code>exclude:</code> sat next to nothing else — fails at <code>dbt parse</code> with a real runtime error, confirmed this round:</p>
+<pre><code>Runtime Error
+  Could not read selector file data: Runtime Error
+    Only a single 'union' or 'intersection' key is allowed in a root level selector definition; found union,exclude.</code></pre>
+<p>That error names the actual rule directly: a <code>definition:</code> block gets exactly one root composition key. <code>exclude</code> is not a second root key sitting beside <code>union</code> or <code>intersection</code> — it has to nest <em>inside</em> the list that key already defines, as its own list item, confirmed against the live docs page and then re-confirmed by a clean parse once reshaped that way:</p>
+<pre><code><span class="kw">definition</span>:
+  <span class="kw">union</span>:
+    - <span class="kw">method</span>: tag
+      <span class="kw">value</span>: nightly
+    - <span class="kw">exclude</span>:
+        - <span class="kw">method</span>: fqn
+          <span class="kw">value</span>: mart_delivery_sla
+        - <span class="kw">method</span>: fqn
+          <span class="kw">value</span>: dim_couriers</code></pre>
+<p>Read as English, not YAML indentation: "everything tagged <code>nightly</code>, plus (then minus) whatever this nested <code>exclude</code> list removes." The docs state the rule for exactly where that removal applies: <code>exclude</code> always returns a set difference and is always applied <em>last</em> within its scope — here, last within the <code>union</code> list it sits inside, after every other item in that same list has already been combined.</p>
+<p>Every row below is a real <code>dbt list --selector &lt;name&gt;</code> result against the six-model scratch project (staging tagged <code>hourly</code>, marts tagged <code>nightly</code> and materialized <code>table</code>, the same shape Day 52 onward has used), not predicted from the docs' prose:</p>
+<table class="gloss">
+<tr><th>Selector (<code>definition:</code> shape)</th><th>Reading it</th><th>Confirmed result</th></tr>
+<tr><td><code>union:</code> of <code>tag:hourly</code> and <code>tag:nightly</code></td><td>every node carrying either tag — a logical OR</td><td>all seven models: three staging, four marts</td></tr>
+<tr><td><code>intersection:</code> of <code>tag:nightly</code> and <code>config.materialized:table</code></td><td>only nodes matching <em>both</em> — a logical AND</td><td>the four marts (every <code>nightly</code> node here already is a table)</td></tr>
+<tr><td><code>union:</code> of <code>tag:nightly</code> plus a nested <code>exclude:</code> of two <code>fqn</code> blocks</td><td>nightly marts, minus two named nodes, exclude applied last</td><td><code>dim_restaurants</code>, <code>fct_orders</code> — the other two nightly marts dropped</td></tr>
+</table>
+<div class="callout"><strong>A real finding, confirmed live, not assumed:</strong> the intersection row above doesn't narrow anything in this project, because every <code>nightly</code>-tagged model here already happens to be a table — the two sets are identical by coincidence of this project's own config, not because <code>intersection:</code> failed to narrow. <code>intersection:</code> is doing real AND logic; it just has nothing to cut in a six-model project where materialization and tag line up one-to-one. The operator earns its keep the moment that stops being true — say, a future nightly model left at the default <code>view</code> materialization on purpose.</div>
+
+<h2>3 · Confirmed live: <code>default: true</code> changes what a bare command does</h2>
+<p>Every selector so far, across Days 53, 59 and today, has needed <code>--selector &lt;name&gt;</code> typed explicitly. <code>default: true</code> on exactly one selector in the file changes that: a command with <em>no</em> <code>--select</code>, <code>--exclude</code> or <code>--selector</code> flag at all stops meaning "every node in the project" and instead resolves to whatever that one selector defines. Confirmed live this round — with a <code>default: true</code> selector pointed at <code>path:models/staging</code> added to the file, a completely bare <code>dbt list --resource-type model</code> (no flags) logged <code>Using default selector default_selection</code> and printed only the three staging models, not all seven:</p>
+<pre><code>Using default selector default_selection
+stg_couriers
+stg_orders
+stg_restaurants</code></pre>
+<div class="callout"><strong>Worth knowing before reaching for this on a real project:</strong> the docs are explicit that only one selector may set <code>default: true</code> per invocation — a second one would be a config error, not a silent override — and they show a Jinja-conditional escape hatch (<code>default: "{{ target.name == 'dev' | as_bool }}"</code>) for a project that wants a different default per target. Neither matters for this course's one-target project today, but both are worth knowing before reaching for this on a multi-target project: a careless <code>default: true</code> quietly changes what every bare <code>dbt build</code> in CI does, for everyone, the moment it's merged.</div>
+
+<h2>4 · Build: compose, don't just name — then remove the training-wheel default</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add two real selectors to <code>food_delivery_pipeline/selectors.yml</code>, alongside Days 53 and 59's five:</p>
+<pre><code><span class="kw">selectors</span>:
+  <span class="cm"># ... Day 53's build_changed_orders/nightly_marts, Day 59's three method selectors, unchanged ...</span>
+
+  - <span class="kw">name</span>: nightly_tables_only
+    <span class="kw">description</span>: <span class="str">"Intersection: tagged nightly AND materialized as a real table -- narrower than tag:nightly alone the day a nightly model is ever left at view."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">intersection</span>:
+        - <span class="kw">method</span>: tag
+          <span class="kw">value</span>: nightly
+        - <span class="kw">method</span>: config.materialized
+          <span class="kw">value</span>: table
+
+  - <span class="kw">name</span>: nightly_minus_sla
+    <span class="kw">description</span>: <span class="str">"Union with a nested exclude: every nightly mart except mart_delivery_sla, for iterating on the simpler marts without the join-heavy SLA mart -- the exact selector Day 53's own TODO asked for, built for real this round."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">union</span>:
+        - <span class="kw">method</span>: tag
+          <span class="kw">value</span>: nightly
+        - <span class="kw">exclude</span>:
+            - <span class="kw">method</span>: fqn
+              <span class="kw">value</span>: mart_delivery_sla</code></pre>
+<p><strong>TODO (today's actual skill):</strong> do <em>not</em> add <code>default: true</code> to your real project's <code>selectors.yml</code> — Section 3's demo selector was a deliberately narrow, throwaway proof, and a real food-delivery pipeline's bare <code>dbt build</code> should still mean "every model," the safe default this course has used since Day 2. Instead, confirm you understand the mechanism without shipping it: in a disposable copy of your project (not the real one, so nothing in your actual CI changes), add a <code>default: true</code> selector pointed at <code>path:models/staging</code>, run a completely bare <code>dbt list --resource-type model</code> with no flags, and confirm the log line names your selector and the result is narrower than the full project. Delete the disposable copy once confirmed — the lesson here is what the flag does, not a change your real pipeline needs today.</p>
+
+<h2>5 · Verify: run the two new selectors against your own project</h2>
+<pre><code>cd food_delivery_pipeline
+uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector nightly_tables_only --resource-type model --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector nightly_minus_sla --resource-type model --profiles-dir .
+</code></pre>
+<p>Expected: the parse prints no line containing <code>Error</code>; <code>nightly_tables_only</code> prints every <code>nightly</code>-tagged model that's also a real table in your project (at minimum <code>fct_orders</code>, <code>dim_restaurants</code>, <code>dim_couriers</code> and <code>mart_delivery_sla</code>, plus Day 48/49's histogram marts if they inherited the same folder-level config); <code>nightly_minus_sla</code> prints that exact same set minus <code>mart_delivery_sla</code> specifically. Then build with the narrower one:</p>
+<pre><code>uv run --with "dbt-postgres==1.11.0" dbt build --selector nightly_minus_sla --profiles-dir .</code></pre>
+<pre><code>Done. PASS=N WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=N</code></pre>
+<p>Commit the edited <code>selectors.yml</code>. Do not commit a <code>default: true</code> selector in the real project — Section 4's TODO was explicit that this round's proof stays in a disposable copy.</p>
+
+<div class="interview">
+<p><strong>Q: "selectors.yml supports union, intersection and exclude. Walk me through combining them, and name one trap."</strong> A strong answer, out loud: <em>"A definition: block takes exactly one root composition key -- union for OR, intersection for AND -- confirmed the hard way this round: putting union and exclude as two sibling keys under one definition failed to parse with a real error, 'only a single union or intersection key is allowed in a root level selector definition.' exclude isn't a third peer key; it nests inside the union or intersection list as its own item, and it's always applied last within whatever scope it sits in, after every other item in that same list has already been combined. The trap worth knowing is default: true -- setting it on one selector changes what a completely bare dbt build, with no flags at all, does for everyone the moment it's merged, and only one selector is allowed to claim it per invocation. I'd reach for union/intersection once a real selector needs an actual OR or AND, not by default, and I'd be deliberate about ever shipping a default: true on a shared project rather than treating it as a harmless convenience."</em> The signal: naming the real parse error as something hit, not read about, and treating default: true as an operational risk rather than pure convenience.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>union</code>, <code>intersection</code>, <code>exclude</code> nested inside either of them, and <code>default: true</code> (including the one-default-per-invocation rule and the Jinja-conditional escape hatch), confirmed live against a scratch project. It does not cover <code>exclude</code> as a per-method argument (<code>method: tag</code>, <code>value: nightly</code>, <code>exclude: ["@tag:daily"]</code> inline on the same block, a second documented shape distinct from today's nested-list-item form) or arbitrarily deep nesting of <code>union</code> inside <code>intersection</code> inside another <code>union</code> — both read as vocabulary in the primary source below, not built today. With this, every composition key Day 53 and Day 59 named as a remaining gap is now built; dbt's node-selection surface, from a bare model name through graph operators, methods, named selectors and now composition, is closed end to end across Days 15, 52, 53, 59 and today.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round: putting union and exclude as two sibling keys directly under one definition: block failed dbt parse with 'Only a single union or intersection key is allowed in a root level selector definition; found union,exclude.' A definition: block gets exactly one root composition key -- exclude has to nest inside that key's own list as an item, not sit beside it.">
+    <p class="stem">Why did putting <code>union:</code> and <code>exclude:</code> side by side under one <code>definition:</code> fail to parse?</p>
+    <button class="opt" data-ok>only a single root composition key is allowed per definition block</button>
+    <button class="opt">the word <code>exclude</code> is actually a fully reserved word everywhere now</button>
+    <button class="opt"><code>union</code> and <code>exclude</code> cannot ever both appear in one whole project</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: a union of tag:nightly plus a nested exclude list (two fqn blocks) resolved to dim_restaurants and fct_orders -- the other two nightly marts named inside that nested exclude list were removed last, after the union's own tag match already ran, matching the docs' stated rule that exclude always applies last within its scope.">
+    <p class="stem">In today's confirmed <code>union</code> example, when does the nested <code>exclude</code> list actually apply?</p>
+    <button class="opt" data-ok>last, after every other item in its enclosing list already combined</button>
+    <button class="opt">first, before the <code>union</code> even starts combining any items at all</button>
+    <button class="opt">never — a nested <code>exclude</code> list is silently just ignored always</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: adding default: true to one selector made a completely bare dbt list, with no --select/--exclude/--selector flag at all, log 'Using default selector default_selection' and resolve to that selector's own narrower node set instead of the whole project -- the exact mechanism the docs describe, reproduced directly rather than taken on faith.">
+    <p class="stem">What changes once one selector in <code>selectors.yml</code> sets <code>default: true</code>?</p>
+    <button class="opt" data-ok>a bare command with zero selection flags now resolves to it</button>
+    <button class="opt">every other named selector in that whole file stops working now</button>
+    <button class="opt">the <code>--selector</code> flag itself becomes the only one fully required now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt's <a href="https://docs.getdbt.com/reference/node-selection/yaml-selectors">YAML selectors</a> doc — already cited for Day 53 — covers the composition keys built today (<code>union</code>, <code>intersection</code>, the two documented shapes of <code>exclude</code>) and <code>default: true</code>'s one-selector-per-invocation rule plus its Jinja-conditional form, in its own "Combining methods" and "Set a default selector" sections. Every claim above was confirmed directly against a live <code>dbt parse</code>/<code>dbt list</code> run in a scratch project, including the real parse error from the first, wrongly-shaped attempt — not taken from the docs' prose alone, the same discipline Days 48-49, 52, 53 and 59 used.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 60.<br>
+<strong>Next up:</strong> with today's composition keys built, Day 53's full named gap list (<code>union</code>, <code>intersection</code>, multi-block <code>exclude</code>, <code>default: true</code>) is closed, and so is PLAN.md's entire Phase-2 dbt-selection thread opened back on Day 15. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now over twenty rounds, 35-59) — still worth a human granting it once. Airflow pools remain blocked on the same standing precondition (a second DAG genuinely existing) that Days 54 and 56 both already found unmet. With dbt's own selection thread now fully closed and dbt having had the most recent two rounds' attention (59, 60), a future round's fresh gap-scan should weigh Kafka or Airflow depth first, rather than assuming dbt by default — or a fresh learner-record-driven direction if neither resolves.<br><br>
+💬 Anything unclear — why <code>exclude</code> can't sit beside <code>union</code> as a second root key, or when a composed selector is worth the extra YAML over two separate named ones? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

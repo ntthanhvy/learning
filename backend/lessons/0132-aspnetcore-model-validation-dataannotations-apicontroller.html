@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 132 · Request validation, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 132 · ~20 min</p>
+<h1>Request validation, now in C# too</h1>
+<p class="byline">Lesson 81 drew the line between syntactic validation (is this shaped like an email) and semantic validation (does this product id actually exist), and showed the Go shape: a JSON Schema document checked by a general-purpose validator before the handler runs. The C#-port arc since Lesson 103 has covered DI, middleware, EF Core, async, resilience, auth, and caching — but never came back for this one. This lesson is that return trip: the same syntactic gate, built into the framework instead of a separate schema document.</p>
+
+<h2>1 · The rule lives on the model, not in the handler</h2>
+<p>Where Lesson 81's JSON Schema was a separate document describing <code>CreateOrderInput</code>, ASP.NET Core's <dfn data-en="attributes from System.ComponentModel.DataAnnotations (such as Required, Range, StringLength, EmailAddress) placed directly on model class properties, declaring a validation rule for that one property inline with its declaration instead of in a separate schema document or handler code" data-vn="DataAnnotations (giữ nguyên) — attribute từ System.ComponentModel.DataAnnotations (như Required, Range, StringLength, EmailAddress) gắn trực tiếp lên property của model class, khai luật validate ngay tại chỗ khai property, không phải ở tài liệu schema riêng hay code trong handler">DataAnnotations</dfn> attributes put the same rule directly on the class the request body deserializes into:</p>
+<pre><code><span class="kw">public class</span> CreateOrderInput
+{
+    [Required]
+    <span class="kw">public</span> Guid ProductId { get; set; }
+
+    [Range(<span class="dv">1</span>, <span class="dv">1000</span>)]
+    <span class="kw">public int</span> Quantity { get; set; }
+
+    [Required, EmailAddress]
+    <span class="kw">public string</span> Email { get; set; } = <span class="kw">""</span>;
+}</code></pre>
+<p>Nothing here is a handler-level <code>if</code>. The rule is declared once, on the shape itself, the same instinct Lesson 81 named — "write the rule down once, as data" — just spelled as attributes on a class instead of keys in a JSON object.</p>
+
+<h2>2 · Who actually runs the check: ModelState and ModelStateInvalidFilter</h2>
+<p>Model binding and model validation both run before a controller action executes. The result lands in <dfn data-en="an ASP.NET Core property (ModelState.IsValid) summarizing two kinds of error collected before an action runs: model-binding errors (a non-integer string sent for an int field) and model-validation errors (a DataAnnotations rule like Range failing), both read from the same ModelState dictionary" data-vn="ModelState.IsValid (giữ nguyên) — property của ASP.NET Core tổng hợp 2 loại lỗi thu thập trước khi action chạy: lỗi model-binding (gửi string không phải số cho field int) và lỗi model-validation (luật DataAnnotations như Range bị sai), cả 2 đọc từ cùng 1 dictionary ModelState">ModelState.IsValid</dfn>, checked by hand in plain MVC/Razor Pages actions:</p>
+<pre><code><span class="kw">public async</span> Task&lt;IActionResult&gt; Create(CreateOrderInput input)
+{
+    <span class="kw">if</span> (!ModelState.IsValid)
+        <span class="kw">return</span> BadRequest(ModelState);
+    <span class="cm">// ...</span>
+}</code></pre>
+<p>A controller marked with <code>[ApiController]</code> never needs that <code>if</code>. Microsoft's own docs state it plainly: "Web API controllers don't have to check <code>ModelState.IsValid</code> if they have the <code>[ApiController]</code> attribute. In that case, an automatic HTTP 400 response containing error details is returned when model state is invalid." The check itself runs as a <code>ModelStateInvalidFilter</code> action filter, wired in automatically by <code>[ApiController]</code> — and the action method body never executes at all when it trips, the same short-circuit Lesson 81's schema gate performed before auth or a query ever ran.</p>
+
+<h2>3 · The default response is a typed <code>ValidationProblemDetails</code></h2>
+<p>The automatic 400 is not a bare string. Its documented shape is <code>ValidationProblemDetails</code> — the same RFC 7807-shaped type Lesson 125's <code>ProblemDetails</code> gave a <code>Type</code>/<code>Title</code>/<code>Status</code>/<code>Detail</code>/<code>Instance</code> shape to, with one addition: an <code>errors</code> dictionary keyed by field name, each value a list of that field's failed rules:</p>
+<pre><code>{
+  <span class="kw">"type"</span>: <span class="kw">"https://tools.ietf.org/html/rfc7231#section-6.5.1"</span>,
+  <span class="kw">"title"</span>: <span class="kw">"One or more validation errors occurred."</span>,
+  <span class="kw">"status"</span>: <span class="dv">400</span>,
+  <span class="kw">"errors"</span>: { <span class="kw">"Quantity"</span>: [<span class="kw">"The field Quantity must be between 1 and 1000."</span>] }
+}</code></pre>
+<p>Building that object is itself delegated: <code>ApiBehaviorOptions.InvalidModelStateResponseFactory</code> is the delegate property responsible, and by default it "uses <code>ProblemDetailsFactory</code> to create an instance of <code>ValidationProblemDetails</code>." Overriding that factory — via <code>ConfigureApiBehaviorOptions</code> — is how a team adds logging to every automatic 400 without touching a single action, and setting <code>options.SuppressModelStateInvalidFilter = true</code> is the documented way to turn the whole automatic behavior off and go back to a hand-written <code>if (!ModelState.IsValid)</code> per action.</p>
+
+<h2>4 · What DataAnnotations still can't check: the same semantic line</h2>
+<p>Every attribute in section 1 answers "is this shaped right" — Lesson 81's syntactic validation, unchanged by the move to C#. None of them can ask "does this product id exist" or "is there enough stock," because none of them can see a database. For a rule spanning more than one property — released date must precede a discontinued date, say — a model implements <dfn data-en="an interface (System.ComponentModel.DataAnnotations) with one method, IEnumerable&lt;ValidationResult&gt; Validate(ValidationContext validationContext), implemented on a model class for cross-field validation rules a single property attribute cannot express, run after every property-level DataAnnotations attribute has already passed" data-vn="IValidatableObject (giữ nguyên) — interface (System.ComponentModel.DataAnnotations) có 1 method IEnumerable&lt;ValidationResult&gt; Validate(ValidationContext validationContext), implement trên model class cho luật validate nhiều field cùng lúc mà 1 attribute riêng lẻ không diễn tả được, chạy sau khi mọi attribute DataAnnotations ở cấp property đã qua hết">IValidatableObject</dfn> instead of adding another attribute:</p>
+<pre><code><span class="kw">public</span> IEnumerable&lt;ValidationResult&gt; Validate(ValidationContext validationContext)
+{
+    <span class="kw">if</span> (Quantity > <span class="dv">1000</span> &amp;&amp; <span class="kw">string</span>.IsNullOrEmpty(ApprovalCode))
+        <span class="kw">yield return new</span> ValidationResult(
+            <span class="kw">"orders over 1000 units need an approval code"</span>,
+            <span class="kw">new</span>[] { <span class="kw">nameof</span>(ApprovalCode) });
+}</code></pre>
+<p><code>Validate</code> runs after every property-level attribute already passed, and it still only sees the object itself — no injected <code>DbContext</code>, no query. The line Lesson 81 drew stands exactly where it stood in Go: a product id that doesn't exist, or a quantity that exceeds real stock, is still a handler-level lookup against the database, after both the attributes and <code>IValidatableObject</code> have already said yes.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like a Zod or Yup schema wired to a form's <code>onSubmit</code> — same "declare the shape once" instinct. The gap that doesn't carry over: a frontend schema only ever protects the one form that imports it. A C# model's DataAnnotations fire for every action that binds to that class, and because <code>[ApiController]</code> wires the check in automatically, a developer can forget it exists entirely and the 400 still happens — there's no missed <code>if</code> to forget, which is also why skipping it on purpose needs its own explicit opt-out.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers DataAnnotations attributes on a model class, <code>ModelState.IsValid</code> and the two kinds of error it summarizes, <code>[ApiController]</code>'s automatic 400 via <code>ModelStateInvalidFilter</code>, the default <code>ValidationProblemDetails</code> response shape, <code>InvalidModelStateResponseFactory</code>/<code>SuppressModelStateInvalidFilter</code>, and <code>IValidatableObject</code> for cross-field rules. It does not cover FluentValidation or any third-party validation library (a framework-comparison deep-dive past this lesson's one concept), nor custom <code>ValidationAttribute</code> subclasses for reusable single-property rules — a natural next step, not today's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Microsoft's own docs state that ApiController wires in an automatic HTTP 400 response when model state is invalid, via the ModelStateInvalidFilter action filter, so the if (!ModelState.IsValid) check an MVC/Razor Pages action writes by hand becomes unnecessary on an ApiController-marked class.">
+    <p class="stem">Why can an ApiController-marked action skip writing if (!ModelState.IsValid)?</p>
+    <button class="opt" data-ok>ApiController already wires that exact check in on its own</button>
+    <button class="opt">Range and Required attributes always run inside the database layer</button>
+    <button class="opt">ModelState never gets populated unless a developer calls it directly</button>
+    <button class="opt">Automatic validation only ever works for GET requests, never POST</button>
+  </div>
+  <div class="q" data-why="The docs state the default response type for an automatic HTTP 400 is ValidationProblemDetails, an RFC 7807-shaped type with an added errors dictionary keyed by field name, each value a list of that field's failed validation rules.">
+    <p class="stem">What exact type does the automatic 400 response use by default?</p>
+    <button class="opt" data-ok>ValidationProblemDetails, carrying one errors dictionary keyed by each failed field name itself</button>
+    <button class="opt">a plain string holding only the single first error that was found</button>
+    <button class="opt">ModelState itself, serialized directly with absolutely zero transformation at all today now</button>
+    <button class="opt">an empty response body carrying only the bare 400 status code alone</button>
+  </div>
+  <div class="q" data-why="IValidatableObject's Validate method still only receives the object's own property values through ValidationContext -- it has no injected DbContext and performs no query, so it cannot check whether a referenced id exists or whether stock is sufficient. That remains handler-level semantic validation after both attributes and Validate have already passed.">
+    <p class="stem">Why can't IValidatableObject.Validate check whether a product id actually exists?</p>
+    <button class="opt" data-ok>Validate never gets any database access, only the object's own fields</button>
+    <button class="opt">Validate only ever runs after the handler method has fully returned</button>
+    <button class="opt">Guid-typed properties always get rejected by DataAnnotations by default today itself</button>
+    <button class="opt">ApiController always blocks every single database call made during validation itself</button>
+  </div>
+  <div class="q" data-why="The docs name SuppressModelStateInvalidFilter, set to true inside ConfigureApiBehaviorOptions, as the documented way to turn off the automatic 400 behavior entirely, after which an action must go back to checking ModelState.IsValid by hand like a plain MVC or Razor Pages action would.">
+    <p class="stem">Which option turns off ApiController's automatic 400 behavior entirely?</p>
+    <button class="opt" data-ok>setting the SuppressModelStateInvalidFilter option to true value today right now itself</button>
+    <button class="opt">removing every single Required attribute off the model class now itself</button>
+    <button class="opt">deleting the ValidationProblemDetails type out of the project now itself today</button>
+    <button class="opt">switching the controller base class over to just ControllerBase alone itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation">Microsoft Learn: Model validation in ASP.NET Core MVC and Razor Pages</a> and <a href="https://learn.microsoft.com/en-us/aspnet/core/web-api/index">Microsoft Learn: Create web APIs with ASP.NET Core</a> are the exact sources this lesson draws from: the <code>[Required]</code>/<code>[Range]</code> DataAnnotations shape and <code>IValidatableObject.Validate(ValidationContext validationContext)</code> returning <code>IEnumerable&lt;ValidationResult&gt;</code> from the first page; and from the second, the quoted sentence on <code>[ApiController]</code>'s automatic HTTP 400 behavior, the confirmed default <code>ValidationProblemDetails</code> response type and its RFC 7807 compliance, <code>InvalidModelStateResponseFactory</code>'s documented default of using <code>ProblemDetailsFactory</code> to build that type, and <code>SuppressModelStateInvalidFilter</code> as the documented opt-out. Lesson 81's own JSON Schema and OWASP Input Validation Cheat Sheet sources still cover the syntactic-vs-semantic distinction itself in full and are cited inline there rather than duplicated here, per this run's standing single-mechanism-citation precedent.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 81's syntactic/semantic split and Lesson 125's <code>ProblemDetails</code> shape. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu muốn custom message cho riêng 1 attribute như Range, mình sửa ErrorMessage ngay trên attribute hay phải sửa qua InvalidModelStateResponseFactory?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

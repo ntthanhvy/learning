@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 108 · queue: handing work between threads safely</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 108 · ~20 min · 14 Nov 2026</p>
+<h1><code>queue</code>: handing work between threads safely</h1>
+<p class="byline">Day 73 built several <code>ThreadPoolExecutor</code> calls that each ran independently, with no shared state to corrupt. Real threaded programs are rarely that tidy: one thread often needs to hand items to another — a producer finding work, a consumer doing it. Day 73 named the danger of that directly: a <dfn data-en="a race condition happens when two or more threads read and write the same shared mutable state without coordination, so the final result depends on the unpredictable order the threads happen to interleave in" data-vn="giữ nguyên &quot;race condition&quot; — xảy ra khi 2+ thread cùng đọc/ghi 1 state chung mà không có cơ chế đồng bộ, kết quả cuối phụ thuộc thứ tự chạy xen kẽ không đoán trước được">race condition</dfn> on a plain <code>list</code> shared between threads. <code>queue.Queue</code> is the standard-library answer: a FIFO built with every lock already handled internally, safe to hand items through between threads with no manual <code>threading.Lock</code> required.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, lesson body, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed the <code>queue</code> module itself has never been taught — the word "queue" appeared only as plain English (a <code>deque</code> used queue-style in Day 53, a sizing metaphor in Day 25), never as this module. <code>socket</code> remains ruled out on the same scope-depth grounds as every prior round (real networking runs deeper than 20 minutes and edges into Phase 2b territory Days 21-25 already cover). <code>zoneinfo</code> turned out to already be taught in full — Day 14 has a dedicated section and quiz question on it, so it is retired as a candidate, not a gap. <code>multiprocessing</code> remains open and untouched, but <code>queue</code> is the stronger pick today: it completes Day 73's own unfinished thread directly (that lesson named <code>threading.Lock</code> and race conditions but never showed the complementary, more common fix of just not sharing mutable state by hand in the first place), rather than opening an unrelated new corner. Per Day 107's own closing note, Day 107 closed the twentieth review cycle, so today resumes fresh topics — fresh day 1 of a new three-fresh-then-review cycle.</div>
+
+<h2>1 · <code>Queue</code>: a FIFO that locks itself</h2>
+<p><code>queue.Queue()</code> creates a <dfn data-en="a FIFO (first-in-first-out) collection built specifically for exchanging items safely between threads -- every put()/get() call acquires and releases its own internal lock automatically, so no manual threading.Lock is needed to avoid the race condition Day 73 named" data-vn="giữ nguyên &quot;Queue&quot; — cấu trúc FIFO (vào trước ra trước) dựng riêng để trao item an toàn giữa các thread; mỗi lần put()/get() tự acquire/release lock nội bộ, không cần threading.Lock tay để tránh race condition Day 73 đã nói tới">thread-safe queue</dfn>: <code>.put(item)</code> adds to one end, <code>.get()</code> removes and returns from the other, first in, first out — same ordering idea as Day 53's <code>deque</code>, but with locking built in rather than left to the caller:</p>
+<pre><code><span class="kw">import</span> queue
+<span class="kw">import</span> threading
+
+q = queue.Queue()
+
+<span class="kw">def</span> producer():
+    <span class="kw">for</span> n <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">3</span>):
+        q.put(<span class="str">f"item-{n}"</span>)   <span class="cm"># safe to call from any thread, no lock written by hand</span>
+
+<span class="kw">def</span> consumer(results):
+    <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">3</span>):
+        results.append(q.get())      <span class="cm"># blocks here if the queue is currently empty</span>
+
+results = []
+t1 = threading.Thread(target=producer)
+t2 = threading.Thread(target=consumer, args=(results,))
+t1.start(); t2.start()
+t1.join(); t2.join()
+<span class="kw">print</span>(results)   <span class="cm"># ['item-0', 'item-1', 'item-2'] -- confirmed live, same order they were put in</span></code></pre>
+<p>Both threads touch <code>q</code> with no <code>threading.Lock</code> anywhere in this code — <code>Queue</code>'s own methods already do that internally. <code>.get()</code> on an empty queue <strong>blocks</strong> by default, waiting until something arrives, rather than raising immediately; <code>.put()</code> blocks the same way if the queue has a <code>maxsize</code> and is currently full.</p>
+
+<div class="callout"><strong>Bridge from Day 73:</strong> <code>ThreadPoolExecutor</code> is for "run this same function many times concurrently, collect the results" — no coordination between calls needed. <code>queue.Queue</code> is for "thread A keeps finding work, thread B keeps doing it" — an ongoing hand-off, not a one-shot batch. Different shape of problem, same underlying <code>threading</code> module Day 73 named but didn't build on.</div>
+
+<h2>2 · Non-blocking access, and <code>maxsize</code></h2>
+<p>Sometimes blocking is wrong — a thread that needs to check "is there anything ready right now?" and move on if not. <code>.get_nowait()</code> and <code>.put_nowait()</code> never wait: they raise immediately instead:</p>
+<pre><code><span class="kw">import</span> queue
+
+q = queue.Queue(maxsize=<span class="kw">2</span>)   <span class="cm"># bounded -- holds at most 2 items at once</span>
+q.put(<span class="str">"a"</span>)
+q.put(<span class="str">"b"</span>)
+
+<span class="kw">try</span>:
+    q.put_nowait(<span class="str">"c"</span>)         <span class="cm"># queue is full -- confirmed live, raises immediately</span>
+<span class="kw">except</span> queue.Full:
+    <span class="kw">print</span>(<span class="str">"full, skipping"</span>)   <span class="cm"># confirmed live: this line runs</span>
+
+q.get(); q.get()
+<span class="kw">try</span>:
+    q.get_nowait()              <span class="cm"># queue is now empty -- confirmed live, raises immediately</span>
+<span class="kw">except</span> queue.Empty:
+    <span class="kw">print</span>(<span class="str">"empty, nothing to do"</span>)   <span class="cm"># confirmed live: this line runs</span></code></pre>
+<p><code>maxsize=0</code> (the default) means unbounded — <code>.put()</code> never blocks on space. A positive <code>maxsize</code> caps how many items can sit in the queue at once, which is often the point: it stops a fast producer from piling up unlimited unprocessed work in memory while a slower consumer falls behind. <code>queue.Empty</code> and <code>queue.Full</code> are the two exceptions the <code>_nowait()</code> pair raises — regular <code>.get()</code>/<code>.put()</code> accept a <code>timeout=</code> seconds argument as the middle ground, raising the same exceptions only once that timeout elapses rather than waiting forever.</p>
+
+<h2>3 · Knowing when the work is actually done: <code>task_done()</code> and <code>join()</code></h2>
+<p><code>.get()</code> returning an item doesn't mean the work on it is finished — only that a consumer picked it up. <code>queue.Queue</code> tracks that distinction separately with a counter: every <code>.get()</code> increments an internal count of unfinished items, and <code>.task_done()</code> decrements it once a consumer is actually done processing that item. <code>.join()</code> blocks until the count reaches zero — the standard way for a producer thread to know every item it put in has been fully handled, not merely removed from the queue:</p>
+<pre><code><span class="kw">import</span> queue
+<span class="kw">import</span> threading
+
+q = queue.Queue()
+processed = []
+
+<span class="kw">def</span> worker():
+    <span class="kw">while</span> <span class="kw">True</span>:
+        item = q.get()
+        processed.append(item * <span class="kw">2</span>)
+        q.task_done()      <span class="cm"># must be called, or join() below waits forever</span>
+
+threading.Thread(target=worker, daemon=<span class="kw">True</span>).start()
+<span class="kw">for</span> n <span class="kw">in</span> [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]:
+    q.put(n)
+
+q.join()   <span class="cm"># blocks until all 3 items have had task_done() called -- confirmed live</span>
+<span class="kw">print</span>(<span class="kw">sorted</span>(processed))   <span class="cm"># [2, 4, 6] -- confirmed live, all three finished before join() returned</span></code></pre>
+<p>Skipping <code>.task_done()</code> is the one trap here: the unfinished-item count never reaches zero, and <code>.join()</code> blocks forever with no error raised to explain why — confirmed live, removing the <code>q.task_done()</code> line above reproduces exactly that hang.</p>
+
+<div class="callout"><strong>Two close relatives, named not demonstrated:</strong> <code>queue.LifoQueue</code> is the same interface but last-in-first-out (a stack, not a line); <code>queue.PriorityQueue</code> keeps items ordered so the lowest-valued entry (by Day 4's <code>sorted()</code>-style comparison, typically a <code>(priority, item)</code> tuple) comes out of <code>.get()</code> first, rather than whichever arrived earliest — the same ordering idea as Day 51's <code>heapq</code>, wrapped in the same thread-safe interface as today's plain <code>Queue</code>.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has anything resembling this — moving work safely between threads is a concurrency concern, orthogonal to a <code>DataFrame</code> or array's job. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/108_queue_thread_safe_producer_consumer.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/108_queue_thread_safe_producer_consumer.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: running a producer and a consumer thread through a shared <code>queue.Queue</code> and confirming every item put in comes back out in the same order, using <code>put_nowait()</code>/<code>get_nowait()</code> on a bounded queue and catching the <code>Full</code>/<code>Empty</code> exceptions each raises, and wiring up a worker thread with <code>task_done()</code> so <code>.join()</code> correctly confirms every item was fully processed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="queue.Queue handles its own internal locking inside every put()/get() call, so two threads can safely share one queue with no manual threading.Lock written by the caller -- directly closing the gap Day 73 named (race conditions on shared mutable state) without demonstrating the fix.">
+    <p class="stem">Why can two threads share a single <code>queue.Queue</code> safely with no <code>threading.Lock</code> written by hand?</p>
+    <button class="opt" data-ok>put() and get() each already lock internally on every single call</button>
+    <button class="opt">Python threads never actually run at the exact same real time</button>
+    <button class="opt">queue.Queue silently makes a brand new copy for every single thread</button>
+  </div>
+  <div class="q" data-why="By default, Queue.get() on an empty queue blocks -- it waits until an item becomes available instead of raising right away. get_nowait() is the deliberate non-blocking alternative, raising queue.Empty immediately instead of waiting at all.">
+    <p class="stem">What does a plain <code>q.get()</code> do, by default, when the queue is currently empty?</p>
+    <button class="opt" data-ok>it blocks, waiting until some other thread puts an item in</button>
+    <button class="opt">it raises queue.Empty immediately, with no waiting at all right here</button>
+    <button class="opt">it silently returns None right away instead of any real item</button>
+  </div>
+  <div class="q" data-why="Queue.get() increments an internal unfinished-work counter; task_done() is what decrements it back down once a consumer is truly finished with that item. join() blocks until that counter reaches zero. Skipping task_done() means the counter never reaches zero, so join() hangs forever with no error raised to explain why.">
+    <p class="stem">What happens if a worker thread calls <code>q.get()</code> but never calls <code>q.task_done()</code>, and the main thread later calls <code>q.join()</code>?</p>
+    <button class="opt" data-ok>join() blocks forever, since the unfinished-item count never hits zero</button>
+    <button class="opt">join() raises a clear RuntimeError naming the exact skipped item</button>
+    <button class="opt">join() simply returns right away, treating every item as finished</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/queue.html"><code>queue</code></a> docs — "implements multi-producer, multi-consumer queues… especially useful in threaded programming when information must be exchanged safely between multiple threads," and covers today's <code>put()</code>/<code>get()</code>, the <code>_nowait()</code> pair with <code>Empty</code>/<code>Full</code>, <code>task_done()</code>/<code>join()</code>, plus <code>LifoQueue</code>/<code>PriorityQueue</code>/<code>SimpleQueue</code>, named above but not demonstrated.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day108">glossary</a> under Day 108.<br>
+<code>multiprocessing</code> remains the one previously-named fresh-gap candidate still untouched and open for a future round.<br><br>
+💬 Anything unclear — blocking vs. non-blocking access, <code>task_done()</code>, or when a bounded <code>maxsize</code> actually matters? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

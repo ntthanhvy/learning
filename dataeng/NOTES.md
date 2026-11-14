@@ -6960,3 +6960,144 @@ along the Phase 2 spine, adapted to the learning records.
   composition-key threads, Airflow pools once a second DAG genuinely
   exists, or a fresh learner-record-driven direction rather than another
   spine-gap scan — the spine itself has nothing left unaddressed.
+
+- 2026-11-14 (headless run, Day 60 generated): sixtieth lesson,
+  `0060-dbt-selector-union-intersection-default.html`. Idempotency check
+  first via the filesystem: confirmed no `lessons/0060-*.html` on disk and
+  no `n: 60` row in `assets/nav.js` before writing anything; Day 59
+  remained the latest prior lesson. Read `MISSION.md` in full, this file's
+  tail through Day 59's close (offset ~6900 through 6962), `PLAN.md`'s
+  full Phase 2 spine, `RESOURCES.md` in full, the single baseline learning
+  record (no newer record on file), and Days 52/53/59 in full as
+  structural templates before picking anything. The orchestrator had
+  already queried the Neon DB and confirmed no quiz/kata/lesson_completed
+  signal since 2026-10-15 for dataeng — only routine `lesson_generated`
+  rows — so no learner-record override; a DB read was not re-attempted
+  this round (confirmed blocked behind an approval gate, same standing gap
+  since Day 35, now covering the read side too per Day 59's note).
+  **Topic choice:** re-ran the spine-exhaustion check directly rather than
+  trusting Day 59's finding blind — grepped `PLAN.md`'s full Phase 2a/2b/
+  2c/2d sub-bullet list against all 59 lesson files' own scope lines.
+  Confirmed exhausted: Airflow pools remain correctly blocked (Days 54/56
+  already found the "second DAG exists" precondition unmet, and nothing in
+  the learner's repo state described in recent NOTES.md entries suggests
+  a second DAG now exists); the `airflow db migrate`/`airflow dags test`
+  approval-gate block is an environment limitation, not a pickable topic.
+  That left exactly the two named threads from Day 53's own TODO and Day
+  59's own closing note: the `union`/`intersection`/multi-block `exclude`
+  composition keys, and a `default: true` selector. Picked this over
+  waiting on Airflow pools (still blocked, same precondition) and over
+  assuming Kafka/Airflow by default — it directly continues Day 52/53/59's
+  own dbt node-selection thread, needs no blocked precondition, and is the
+  one explicit gap two prior rounds in a row named on their way out. No
+  pandas, no Python-language teaching, no API/idempotency re-derivation —
+  pure dbt CLI/YAML mechanics, the course's own deep thread.
+  **Content:** no new model, no new DAG task — three new entries added to
+  the exact `selectors.yml` Days 53/59 already built and extended
+  (`hourly_or_nightly` via `union`, `nightly_tables_only` via
+  `intersection`, and `nightly_minus_sla`/`nightly_minus_sla_and_couriers`
+  via `exclude` nested inside a `union` list), plus a throwaway
+  `default: true` demonstration kept explicit in the lesson's own TODO as
+  something to prove in a disposable copy, not ship in the real project.
+  **Verification:** no reachable Postgres or Kafka broker this sandbox
+  round either (the standing gap named every round since Day 35) — this
+  lesson needed neither, since `dbt parse`/`dbt list` run with no database
+  connection. Built a six-model scratch dbt project under
+  `.scratch-dataeng-60/` at the repo root (`/tmp` confirmed not writable
+  again this round), shaped exactly like this course's real project:
+  `stg_orders`/`stg_restaurants`/`stg_couriers` staging views,
+  `fct_orders`/`dim_restaurants`/`dim_couriers`/`mart_delivery_sla` marts,
+  `marts` configured `+materialized: table`/`+tags: ["nightly"]` and
+  `staging` configured `+tags: ["hourly"]` at the folder level, the same
+  shape Day 52 onward has used. `dbt parse --profiles-dir .`
+  (dbt-core 1.12.7, dbt-postgres 1.11.0 via
+  `uv run --with "dbt-postgres==1.11.0"`) produced only
+  `Running with dbt=...`/`Registered adapter...`/`Performance info...`
+  lines both before and after adding today's selectors, grepped for the
+  literal string `Error` afterward each time and found none, except for
+  the one deliberate real failure below. A genuinely new finding this
+  round, not predicted from the docs: the first attempt put `union:` and
+  `exclude:` as two sibling keys directly under one `definition:` block
+  (mirroring Day 53's own single, unnested `exclude:`) — this failed
+  `dbt parse` for real, with `Runtime Error: Could not read selector file
+  data: Runtime Error: Only a single 'union' or 'intersection' key is
+  allowed in a root level selector definition; found union,exclude.` A
+  `WebFetch` against the live YAML selectors doc (working this round,
+  unlike several prior rounds' noted gap) confirmed the actual rule and
+  shape: `exclude` nests as its own item inside the `union`/`intersection`
+  list, not as a second root key beside it. Reshaped accordingly and
+  re-ran `dbt parse` clean. Every `dbt list --selector <name>` result
+  quoted in the lesson is real, re-run against the final `selectors.yml`
+  content, not predicted: `hourly_or_nightly` (union of `tag:hourly` and
+  `tag:nightly`) → all seven models; `nightly_tables_only` (intersection
+  of `tag:nightly` and `config.materialized:table`) → the four marts
+  (flagged honestly in the lesson as not actually narrowing anything in
+  this project, since tags and materializations already align 1:1 here);
+  `nightly_minus_sla_and_couriers` (union of `tag:nightly` plus a nested
+  two-item `exclude`) → `dim_restaurants`, `fct_orders`; the Section
+  4/5-matching single-exclude `nightly_minus_sla` → `dim_couriers`,
+  `dim_restaurants`, `fct_orders`. The `default: true` claim was also
+  confirmed live, not assumed: with one selector (`default_selection`,
+  `path:models/staging`) marked `default: true`, a completely bare
+  `dbt list --resource-type model` with zero flags logged
+  `Using default selector default_selection` and printed exactly the
+  three staging models, matching the lesson's Section 3 quote verbatim.
+  The scratch directory was deleted after; confirmed via a directory
+  listing that nothing named `scratch` remained under the repo root
+  (noting `.scratch-data-128`, a leftover from a different course's own
+  concurrent run that round, is not this course's artifact and was left
+  untouched per the instruction to only touch `dataeng/` files). No Python
+  file was part of this lesson's build step (pure dbt YAML and CLI), so
+  `py_compile` did not apply this round, the same as Days 52, 53 and 59.
+  Quiz word counts verified with a small Python script stripping HTML
+  tags and counting whitespace-split tokens per option (run via
+  `uv run python3`, since a bare `python3` invocation needed approval this
+  round that a `uv run` wrapper didn't). First draft was uneven across all
+  three questions (11/9/11, 11/10/11, 11/11/10) — rebalanced through
+  several word-for-word edit passes, re-running the script after each
+  edit, to a final clean 11/11/11 across all three questions. One edit
+  pass also caught and fixed a real mismatched-tag typo introduced while
+  drafting Section 2 (`<em>last</code>` where the closing tag should have
+  been `</em>`) — found by the same tag-balance script, not a visual read.
+  HTML structure verified via paired open/close tag counts on every tag
+  that appears (`div` 8/8, `p` 20/20, `code` 143/143, `button` 9/9,
+  `script` 3/3, `dfn` 2/2, `pre` 8/8, `h2` 8/8, `h1` 1/1, `em` 6/6,
+  `strong` 7/7, `a` 4/4, `table` 1/1, `tr` 4/4, `td` 9/9, `th` 3/3) and a
+  bare-`&` regex scan — zero bare `&` found. Grepped the whole glossary
+  for `union|intersection|default: true selector|default selector` before
+  writing either new `<dfn>` — zero hits, confirming both new terms are
+  genuinely new, not redefinitions. `reference/glossary.html` re-checked
+  after appending Day 60's section: `h2` 59/59, `table` 59/59, `tr`
+  215/215, `td` 468/468, `th` 177/177, zero bare `&`. `node --check` clean
+  on `nav.js` after today's edit.
+  Added two new glossary terms — `union selector` and `intersection
+  selector` — under a new Day 60 section (`exclude` nested inside either
+  one reduces to the same two mechanisms, confirmed live this round, so it
+  got no separate `<dfn>`, the same reuse-over-duplication call Day 59
+  made for `config:`). Added no new `RESOURCES.md` line: today's primary
+  source is the YAML selectors doc, already cited on Day 53's own line;
+  extended that citation implicitly by reusing the same URL, the same
+  reuse pattern Days 52/53/58/59 all used rather than adding a duplicate
+  entry.
+  Registered Lesson 60 in `assets/nav.js` right after the `n: 59` entry,
+  dated 2026-11-14.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from the two named, deferred composition-key threads Days 53 and
+  59 both left open, not a new durable fact about the learner distinct
+  from the single 2026-09-14 baseline record on file.
+  **Next up:** with today's round, Day 53's full named gap list (`union`,
+  `intersection`, multi-block `exclude`, `default: true`) is closed, and
+  dbt's entire node-selection thread opened back on Day 15 (state
+  selection, graph operators, methods, named selectors, composition) is
+  now built end to end. The `airflow db migrate`/`airflow dags test`
+  approval-gate block remains the standing, unresolved environment
+  limitation (now over twenty rounds, 35-59) — still worth a human
+  granting it once. Airflow pools remain blocked on the same standing
+  precondition (a second DAG genuinely existing), re-confirmed unmet this
+  round. With dbt having had the most recent two rounds' attention (59,
+  60) against Kafka's three of the five rounds before that (50, 55, 58)
+  and Airflow's two (54, 56), a future round's fresh gap-scan should weigh
+  Kafka or Airflow depth first rather than assuming dbt by default — or a
+  fresh learner-record-driven direction if neither resolves, since
+  PLAN.md's Phase-2 spine itself remains fully exhausted as of this round
+  too.

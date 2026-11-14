@@ -12212,3 +12212,122 @@
   returning `recorded: data/lesson_generated day=127
   lesson=0127-np-sign.html` — unlike the DB-read side (`psql`/
   `bin/query-progress`), the write path was reachable this round.
+
+- 2026-11-14 generation (Lesson 128, headless run): per the orchestrator's
+  own prior Neon DB query (`course_progress`, last 25 rows), no quiz/kata/
+  lesson_completed signal for `data` since 2026-10-15 — only routine
+  `lesson_generated` rows — so no weak-spot signal to target this round
+  either; did not re-attempt a DB read directly (confirmed blocked behind
+  an approval gate again, matching essentially every prior round). Read
+  `MISSION.md` (unmodified), this file's own tail, `RESOURCES.md`, the one
+  `data/learning-records/` baseline file, confirmed via `nav.js`'s own tail
+  that 127 (`0127-np-sign.html`, dated 2026-11-13) was genuinely the latest
+  entry with no `n: 128` or `0128-*` file already present. Lesson 127's own
+  fresh scan closed with `np.abs()`, `np.sqrt()`, and `np.floor()`/
+  `np.ceil()` as open elementwise-ufunc candidates, none pre-committed, per
+  this course's "fresh scan each round" convention — so this round re-ran
+  its own fresh scan rather than taking any of those as a given. Grepped
+  every lesson body case-insensitively for a wide candidate set
+  (`np.abs(`, `np.sqrt(`, `np.floor(`, `np.ceil(`, `np.trunc(`, `np.mod(`,
+  `np.remainder(`, `np.log(`, `np.exp(`, `np.cumsum(`, `np.cumprod(`,
+  `np.diff(`, `np.clip(`, `np.vectorize(`, `np.apply_along_axis(`,
+  `np.searchsorted(`, `np.tile(`, `np.repeat(`, `np.array_split(`,
+  `np.stack(`, `np.concatenate(`, `np.vstack(`, `np.hstack(`, `np.unique(`,
+  `np.setdiff1d(`, `np.intersect1d(`, `np.union1d(`, `np.in1d(`,
+  `np.percentile(`, `np.quantile(`, `np.ptp(`, `np.argsort(`, `np.argmax(`,
+  `np.argmin(`, `np.ravel(`, `np.reshape(`, `np.squeeze(`,
+  `np.expand_dims(`, `np.broadcast_to(`, `np.full_like(`, `np.zeros_like(`,
+  `np.ones_like(`, `np.linspace(`, `np.interp(`, `np.copysign(`,
+  `np.signbit(`, `np.select(`) and cross-checked this file's own scan
+  history. Confirmed `np.abs()`, `np.sqrt()`, `np.floor()`/`np.ceil()`,
+  `np.log()`/`np.exp()` all still genuinely untaught (only named in passing
+  inside Lesson 127's own scope line, never taught as a lesson's own
+  topic). Confirmed `np.vectorize()` still genuinely untaught too — this
+  file's own history shows it flagged across at least five separate prior
+  scan rounds (back through Lessons 93-126) but always passed over for a
+  sharper same-round alternative. Picked `np.vectorize()` over the
+  elementwise-ufunc family this time: it directly continues Lesson 12's own
+  "apply() is a Python loop under the hood" warning, and its own name is
+  the trap — it sounds like the fix for that exact problem but, confirmed
+  directly against the official docs, is not one; a long-overdue pick
+  beats yet another close-sibling ufunc pick. Verified directly in a
+  scratch sandbox (numpy 2.5.4, pandas 3.1.1, `uv run --with pandas`)
+  rather than trusting memory: confirmed `np.vectorize()` matches a plain
+  per-element Python loop/list-comprehension exactly in output; confirmed,
+  timed on this machine over 200,000 values across 3 runs, it was the
+  *slowest* of a plain list comprehension (~0.077s), `np.vectorize()`
+  (~0.117s), and `Series.apply()` (~0.058s) — slower than the bare loop it
+  wraps, from extra broadcasting/dtype-calibration overhead stacked on top
+  of the same per-element Python calls. Confirmed directly, called on a
+  pandas Series it returns a bare `ndarray`, not a Series — the opposite of
+  Lesson 127's `np.sign()`, which keeps the Series and its Index. Fetched
+  the official NumPy docs page for `numpy.vectorize()` via WebFetch
+  specifically to quote its own wording precisely: "The function is
+  provided primarily for convenience, not for performance. The
+  implementation is essentially a for loop" — confirmed this exact line
+  holds. Confirmed directly the `otypes=` parameter avoids one extra
+  dtype-calibration call on the first input element (confirmed this extra
+  call happens by default); confirmed `excluded=` passes a named/positional
+  argument through unbroadcast. The sharpest trap, confirmed directly and
+  confirmed matching the official docs' own wording ("cache the number of
+  outputs"): `cache=True` is **not** value memoization — a scratch probe
+  calling a counting function on `[5, 5, 5, 7]` with `cache=True` logged
+  all four calls (three separate calls for the repeated `5`), only one
+  fewer call than `cache=False`'s five (the one skipped call being the
+  dtype-probe, not a repeated value) — confirmed directly this is a
+  genuine, easy-to-misread naming trap distinct from memoization. Added
+  exactly one new glossary row, "np.vectorize()", directly after Lesson
+  127's "np.sign()" entry — confirmed via a case-insensitive scan of every
+  first-column term that no prior row already covered this name.
+  Verification performed mechanically via a scratch directory
+  `.scratch-data-128/` created at the repo root (deleted after, never
+  tracked by git, matching every prior round's own precedent for this
+  sandbox's lack of `/tmp` access): (1) a quiz-word-count script, after a
+  few rounds of wording tweaks (first draft came out 11/10/10, 11/8/7,
+  12/11/8), confirmed exactly 10/10/10, 9/9/9, and 11/11/11 option words
+  across the three questions, one `data-ok` per question throughout; (2) an
+  HTML tag-balance check (via `uv run python3 <script>`, plain Bash
+  `grep`/`sed` blocked by this sandbox's "requires approval" filter,
+  consistent with every prior round) first surfaced a genuine authoring
+  slip — the lesson's own single `.callout` div was closed with a stray
+  `</p>` instead of `</div>` (div 5/4, p 16/17 mismatched) — fixed directly
+  in the lesson file by closing it with `</div>` instead, after which every
+  tag came back balanced: html/head/body 1/1, div 5/5, p 16/16, code 52/52,
+  pre 4/4, h1 1/1, h2 7/7, strong 6/6, button 9/9, script 3/3, dfn 1/1, span
+  51/51, em 1/1, a 2/2, title 1/1, zero raw unescaped `&` outside the
+  lesson's own `cd ~/learning/data && uv run ...` shell command inside its
+  own `<pre><code>` block (matching Lesson 127's own precedent for that
+  exact exception); (3) exactly 1 `<dfn>`-carrying tag with both
+  `data-en`/`data-vn`, matching the one new glossary row added. A separate
+  tr/td-balance check on `glossary.html` after its one-row addition —
+  balanced (tr 201/201, matching 200 data rows plus the header row; td
+  600/600; th 3/3; zero raw `&`), plus a duplicate-term scan across all 200
+  first-column entries — zero duplicates, confirmed the new row's exact
+  term string, "np.vectorize()", appears exactly once. `node --check`
+  confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid
+  JavaScript, with exactly one `n: 128` entry and one `0128-np-vectorize`
+  file reference in `nav.js`. The shipped (unsolved)
+  `practice/128_np_vectorize.py` was run directly from its real
+  `practice/` location (via `uv run --with pandas python3`) and printed
+  exactly 3 ✗ with no raw traceback. Built a solved copy inside
+  `.scratch-data-128/` (deleted after, never tracked by git); it printed
+  all 3 ✓ and "All green" on the first run, no further fixes needed. Re-ran
+  the shipped file directly from `practice/` again afterward and
+  reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. This round's own
+  fresh scan still leaves `np.abs()`, `np.sqrt()`, `np.floor()`/`np.ceil()`
+  open from Lesson 127's own scan, plus `np.log()`/`np.exp()` newly
+  confirmed untaught this round — tomorrow's round is due its own fresh
+  scan rather than a pre-committed pick, continuing this course's standing
+  convention; `np.vectorize()`'s own `signature=` generalized-ufunc
+  parameter, confirmed to work directly but out of scope per `MISSION.md`'s
+  "no deep NumPy internals" line, was named only in passing and is not a
+  standing candidate. `git status --short` after all edits confirmed only
+  the intended `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0128-np-vectorize.html`,
+  new `data/practice/128_np_vectorize.py`, and this file) plus unrelated
+  concurrent changes in other course directories from other runs and a
+  leftover scratch directory from another course's prior/concurrent run
+  (`.scratch-dataeng-60/`), not touched by this round. The scratch
+  directory `.scratch-data-128/` was deleted after verification, at the
+  repo root but never tracked by git.

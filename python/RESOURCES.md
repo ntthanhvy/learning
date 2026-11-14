@@ -97,6 +97,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 105 — `locale.setlocale()` as process-wide global state (not scoped to a function or module), `locale.format_string()`/`locale.currency()` for locale-aware number/currency formatting with `grouping=True`, `locale.atof()` for parsing a locale-grouped string back to `float`, and the contrast with f-string `{n:,}` grouping, which is a fixed English-style convention unaffected by the active locale.
 - [Docs: `shelve`](https://docs.python.org/3/library/shelve.html)
   Use for: Day 106 — `shelve.open()` for a persistent, dict-like object store keyed by `str`, built on Day 72's `pickle` for serializing values with no schema or SQL required (unlike Day 93's `sqlite3`), the restriction that keys (not values) must be strings, and the `writeback=True` fix for the trap where mutating a stored mutable value in place silently fails to persist.
+- [Docs: `queue`](https://docs.python.org/3/library/queue.html)
+  Use for: Day 108 — `queue.Queue` for exchanging items safely between threads with no manual `threading.Lock` (Day 73), `put()`/`get()`'s default blocking behavior vs. `put_nowait()`/`get_nowait()`'s immediate `Full`/`Empty` exceptions, `task_done()`/`join()` for confirming every item was fully processed rather than merely removed, and `LifoQueue`/`PriorityQueue`/`SimpleQueue` as named-but-undemonstrated next steps.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

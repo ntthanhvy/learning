@@ -11161,3 +11161,136 @@ lesson=0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html`)
 blocked. Noting the deviation rather than silently assuming the old
 pattern still holds; worth rechecking next round whether this was a
 one-off or the approval blocker has been lifted.
+
+## 2026-11-14 — Lesson 132: request validation, now in C# too (DataAnnotations, [ApiController], IValidatableObject)
+
+Headless run. DB (`course_progress`) read was pre-checked by the
+orchestrator this round rather than re-attempted directly — latest 25
+rows showed no quiz/kata/lesson_completed signal for backend since
+2026-10-15, only routine lesson_generated rows, so no weak-spot signal to
+target; generated conservatively, continuing the natural next rung in the
+arc rather than guessing at new ground. `learning-records/` still has no
+entry newer than Lesson 3, same standing reasoning as every round since:
+no fresh per-lesson completion signal exists to size today's step
+against. No new `learning-records/` file added — the topic came from a
+gap-scan against existing lessons, not a new observation about the
+learner.
+
+Topic picked: a gap-scan (grep across `backend/lessons/`) was run before
+committing to anything, specifically re-checking the three candidates
+named "still worth checking fresh next time" at the end of Lesson 131's
+own entry. `SizeLimit`/`MaximumBodySize`/`SetLocking(false)` (output-cache
+knobs) were looked at again and deferred a fourth round running — still
+judged too thin for a full lesson on their own, the same call three prior
+rounds made, rather than forcing a fourth round of the same deferral
+without picking something else. Lesson 35's upsert/ON CONFLICT and Lesson
+49's dead-letter queues were re-confirmed (grep across
+`backend/lessons/`) to still have no first-party ASP.NET Core angle, so
+both stayed out of scope. Instead, a broader grep across the C#-port arc
+(Lessons 103-131: DI, middleware, EF Core, async, structured concurrency,
+resilience patterns, idempotency, auth, problem details, caching headers,
+output caching) turned up one real gap: Lesson 81 (Go, JSON Schema
+request validation, syntactic-vs-semantic split) has never had a C#
+companion lesson, unlike nearly every other Go concept the port arc has
+revisited. `grep -i` for `ModelState`/`DataAnnotations`/
+`ValidationProblemDetails`/`IValidatableObject` across the whole
+`backend/` tree (lessons and glossary) came back empty, confirming the
+gap is real and the terms are free of collisions. This is a concrete,
+well-scoped, undertaught concept distinct from the thin cache-knob
+candidates, and it ties directly to this course's own stated mission
+goal of reading backend PRs with substance — picked over the cache knobs
+for exactly that reason.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/mvc/models/
+validation` first, which confirmed the `[Required]`/`[Range]` DataAnnotations
+shape and gave the exact `IValidatableObject` signature —
+`IEnumerable<ValidationResult> Validate(ValidationContext validationContext)`
+— used verbatim in the lesson's code block. A second, separate fetch of
+`learn.microsoft.com/en-us/aspnet/core/web-api/index` was needed for the
+`[ApiController]` automatic-400 mechanism specifically, since the first
+page didn't cover it: confirmed the exact quoted sentence ("Web API
+controllers don't have to check `ModelState.IsValid` if they have the
+`[ApiController]` attribute...an automatic HTTP 400 response containing
+error details is returned"), the `ModelStateInvalidFilter` action filter
+name, the default response type stated explicitly as `ValidationProblemDetails`
+(RFC 7807-compliant, with an `errors` dictionary keyed by field name),
+`ApiBehaviorOptions.InvalidModelStateResponseFactory`'s documented default
+behavior of using `ProblemDetailsFactory` to build that type, and
+`SuppressModelStateInvalidFilter` as the documented property to disable
+the automatic behavior entirely. This second fetch mattered: the first
+fetch alone would have left the `[ApiController]`-specific mechanism
+(the actual subject of this lesson's sections 2-3) resting on a vaguer,
+unsourced description instead of the docs' own exact wording and type
+names. `dotnet --version`/`go version`/`command -v dotnet`/`command -v go`
+were attempted this round (not skipped on assumption) and the sandbox
+blocked even the bare `command -v` checks as requiring interactive
+approval with no user present — the same block every round has hit since
+Lesson 103, one attempt only per this run's own standing instruction.
+Fell back to hand-checking the lesson's two C# code blocks against the
+fetched docs' own exact signatures and quoted sentences instead, as
+above; both blocks match the docs verbatim where not intentionally
+trimmed (the `CreateOrderInput` class and `IValidatableObject.Validate`
+example condense the docs' own longer `Movie`/`ValidatableMovie` samples
+down to this lesson's own three-field running example).
+
+Other verification performed via throwaway `node` scripts in a scratch
+`/tmp` directory (nothing written to the repo besides the three intended
+files; scratch directory deleted after): (1) a quiz word-count check per
+`<div class="q">` block, both `.split(/\s+/)` and `.split(" ")` methods
+agreeing — first draft landed uneven on all four questions (Q1 8/10/10/10,
+Q2 7/10/7/11, Q3 11/11/9/9, Q4 6/9/7/9), converged after several
+rewrite-and-recount passes to exactly 10/10/10/10 (Q1), 12/12/12/12 (Q2),
+11/11/11/11 (Q3), and 11/11/11/11 (Q4), exactly one `data-ok` and four
+options per question confirmed the same way; (2) an HTML tag-balance
+check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean
+(div 6/6, p 18/18, code 51/51, button 16/16, script 3/3, dfn 3/3, pre
+4/4, h2 7/7, h1 1/1, em 0/0, strong 3/3, a 3/3), all three `dfn` tags
+confirmed to carry both `data-en=` and `data-vn=`; (3) a brace/paren
+balance check on all four `<pre><code>` blocks after stripping tags and
+unescaping HTML entities — all balanced (4/4 braces 1/1 parens; 1/1
+braces 3/3 parens; 2/2 braces 0/0 parens; 2/2 braces 5/5 parens); (4) a
+raw-unescaped-`&` scan across the lesson — zero hits; (5) a table/tr/td
+balance check on `glossary.html` after its three-row addition — balanced
+(tr 411/411, td 1230/1230, 410 term rows total = 407 prior + 3 new), plus
+a duplicate-term scan across all first-column entries — zero duplicates;
+(6) `node --check` against `nav.js`, `gloss.js`, `quiz.js` — all clean,
+before and after the `nav.js` edit; (7) a basic HTML well-formedness
+check (one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+in gloss/quiz/nav order) — clean.
+
+Registered Lesson 132 in `nav.js` (date 2026-11-14, today's actual
+generation date) right after `n: 131`. Confirmed via `git status
+--short` from the repo root that this round's own diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, and
+the new `backend/lessons/0132-*.html` — pre-existing unrelated
+uncommitted changes under `data/`, `python/`, `rust/`, and two scratch
+directories belong to other courses' own concurrent work and were left
+untouched, consistent with every prior round's own observation of the
+same pattern. Day number used 132, matching this file's own
+day-equals-lesson-number convention, no deviation found. No new
+`RESOURCES.md` line added — both fetched pages are `learn.microsoft.com`,
+already covered by this file's standing entries' pattern, cited inline
+in the lesson's own "Go deeper" section instead, consistent with every
+prior C#-port round. `bin/record-progress backend lesson_generated --day
+132 --lesson
+0132-aspnetcore-model-validation-dataannotations-apicontroller.html
+--detail '{"by":"github-actions"}'` attempted once at the end per this
+run's own instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: the `SizeLimit`/`MaximumBodySize` cache-wide limits and
+`SetLocking(false)`'s resource-locking opt-out (still named in Lessons
+130-131's own scope lines, deferred a fourth round running now — still
+judged too thin alone; worth either finally giving them one combined
+short lesson next time or formally dropping them from this list);
+custom `ValidationAttribute` subclasses for reusable single-property
+rules (named this round as this lesson's own natural next step);
+FluentValidation as a deliberate non-topic (framework-comparison
+territory past MISSION.md's "concepts first" rule, same reasoning as
+Polly below); Go's `select`-statement arbitration rules, still deferred
+many rounds running on fetched-page-truncation grounds; Lesson 49's
+dead-letter queues, re-confirmed this round to still have no first-party
+ASP.NET Core angle; Lesson 35's upsert/ON CONFLICT, re-confirmed the same
+way; Polly/.NET resilience libraries, still deliberately out of scope per
+MISSION.md's "concepts first" rule; and the backfill-missing-
+Lesson-117-NOTES-entry gap, still not investigated.

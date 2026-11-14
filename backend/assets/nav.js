@@ -270,6 +270,8 @@
       file: "lessons/0130-custom-output-cache-policy-ioutputcachepolicy.html" },
     { n: 131, date: "2026-11-13", title: "Resolving output-cache policies dynamically",
       file: "lessons/0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html" },
+    { n: 132, date: "2026-11-14", title: "Request validation, now in C# too",
+      file: "lessons/0132-aspnetcore-model-validation-dataannotations-apicontroller.html" },
   ];
 
   const REFS = [

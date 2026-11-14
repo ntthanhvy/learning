@@ -262,6 +262,8 @@
       file: "lessons/0126-np-roll.html" },
     { n: 127, date: "2026-11-13", title: "np.sign(): the three-way bucket code underneath a positive/negative/zero flag column",
       file: "lessons/0127-np-sign.html" },
+    { n: 128, date: "2026-11-14", title: "np.vectorize(): a name that promises vectorization and does not deliver it",
+      file: "lessons/0128-np-vectorize.html" },
   ];
 
   const REFS = [

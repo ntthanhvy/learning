@@ -896,3 +896,30 @@
   touched only its own course directory (see their own NOTES.md entries
   for detail); rust's post-week daily quiz+kata infra was re-verified
   unchanged and logged via a `note` row.
+- 2026-11-14 (headless run): skipped again per the same rule — the course
+  window closed 2026-07-20, now one hundred and seventeen days past it.
+  All 14 lessons (`0001`-`0014`) re-confirmed present on disk and
+  registered in `assets/nav.js`, unchanged. This round, a direct `psql`
+  read of `course_progress` via a `node`/`execFileSync('psql',
+  [process.env.LEARNING_DB_URL, ...])` script (the documented workaround)
+  worked on the first attempt — no approval gate hit this time. The
+  latest 25 rows showed no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15, only routine `lesson_generated`/`note` rows —
+  moot for this course either way, and no weak-spot or scope-change
+  signal for any other course. Logged via `bin/record-progress go note`,
+  which also worked directly (writes have been reliable every round;
+  this round the reads were too). Backend Lesson 132 (ASP.NET Core model
+  validation via DataAnnotations/`[ApiController]`, the C#-port
+  companion to Go Lesson 81's JSON Schema validation lesson), data
+  Lesson 128 (`np.vectorize()` — a name that promises vectorization and
+  doesn't deliver it), python Day 108 (`queue.Queue` for thread-safe
+  producer/consumer handoff, fresh day 1 of a new three-fresh-then-review
+  cycle; also corrected a stale candidate note — `zoneinfo` turned out to
+  already be taught on Day 14, not actually an open gap), and dataeng
+  Lesson 60 (dbt selector composition: `union`/`intersection`/`exclude`
+  nesting and `default: true`, the thread Days 53 and 59 both deferred,
+  now that PLAN.md's Phase-2 spine is confirmed exhausted) were all
+  generated this round via delegated agents, each confirmed via `git
+  status --short` to have touched only its own course directory; rust's
+  post-week daily quiz+kata infra was re-verified unchanged and logged
+  via a `note` row.

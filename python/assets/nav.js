@@ -222,6 +222,8 @@
       file: "lessons/0106-shelve-persistent-dicts.html" },
     { n: 107, date: "2026-11-13", title: "Review day 20: retrieval across Days 104-106",
       file: "lessons/0107-review-retrieval-day-20.html" },
+    { n: 108, date: "2026-11-14", title: "queue: handing work between threads safely",
+      file: "lessons/0108-queue-thread-safe-producer-consumer.html" },
   ];
 
   const REFS = [

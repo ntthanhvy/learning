@@ -1909,3 +1909,18 @@ by the user there; they apply here identically.
   were all generated this round via delegated agents — see their own
   NOTES.md entries for detail. Go remains skipped per its own window
   close, now one hundred and sixteen days past it.
+- 2026-11-14 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (8 textual
+  `id: "k` matches in `quiz-bank.js` — the 7 real kata entries `k1`-`k7`
+  plus the commented-out example line; `day:` tags still run exactly 1-7;
+  `assets/nav.js` still has exactly 7 `file: "lessons` entries, days 1-7
+  only). Still the correct "daily quiz+kata" for this post-week phase per
+  PLAN.md, so nothing new was generated. DB was checked by the
+  orchestrator this round (not blocked) — the latest 25 `course_progress`
+  rows showed no lesson_completed/quiz/kata signal for rust, only routine
+  lesson_generated/note rows from other courses, so no scope-change
+  signal for rust. `bin/record-progress rust note --detail
+  '{"by":"github-actions","day":"post-week-2026-11-14","action":
+  "verified-unchanged"}'` was run from the repo root. No new learning
+  record beyond the Day-1 baseline.

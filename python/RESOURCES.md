@@ -99,6 +99,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 106 — `shelve.open()` for a persistent, dict-like object store keyed by `str`, built on Day 72's `pickle` for serializing values with no schema or SQL required (unlike Day 93's `sqlite3`), the restriction that keys (not values) must be strings, and the `writeback=True` fix for the trap where mutating a stored mutable value in place silently fails to persist.
 - [Docs: `queue`](https://docs.python.org/3/library/queue.html)
   Use for: Day 108 — `queue.Queue` for exchanging items safely between threads with no manual `threading.Lock` (Day 73), `put()`/`get()`'s default blocking behavior vs. `put_nowait()`/`get_nowait()`'s immediate `Full`/`Empty` exceptions, `task_done()`/`join()` for confirming every item was fully processed rather than merely removed, and `LifoQueue`/`PriorityQueue`/`SimpleQueue` as named-but-undemonstrated next steps.
+- [Docs: `multiprocessing`](https://docs.python.org/3/library/multiprocessing.html)
+  Use for: Day 109 — `Process`'s `target=`/`args=` plus `start()`/`join()` for running real parallel CPU work across separate processes instead of Day 73's GIL-bound threads, `multiprocessing.Queue` for passing picklable results back across the process boundary, `Pool.map()`/`apply_async()` for the batch-shaped equivalent of `ThreadPoolExecutor`, and the documented `if __name__ == "__main__":` guard requirement tied to the `spawn`/`fork`/`forkserver` start methods.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

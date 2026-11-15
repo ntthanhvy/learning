@@ -224,6 +224,8 @@
       file: "lessons/0107-review-retrieval-day-20.html" },
     { n: 108, date: "2026-11-14", title: "queue: handing work between threads safely",
       file: "lessons/0108-queue-thread-safe-producer-consumer.html" },
+    { n: 109, date: "2026-11-15", title: "multiprocessing: sidestepping the GIL for real CPU work",
+      file: "lessons/0109-multiprocessing-sidestepping-the-gil.html" },
   ];
 
   const REFS = [

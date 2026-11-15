@@ -12331,3 +12331,118 @@
   (`.scratch-dataeng-60/`), not touched by this round. The scratch
   directory `.scratch-data-128/` was deleted after verification, at the
   repo root but never tracked by git.
+
+- 2026-11-15 generation (Lesson 129, headless run): read `MISSION.md`
+  (unmodified), this file's own tail, `RESOURCES.md`, the one
+  `data/learning-records/` baseline file, and confirmed via `nav.js`'s own
+  tail and `ls data/lessons/` that 128 (`0128-np-vectorize.html`, dated
+  2026-11-14) was genuinely the latest entry with no `n: 129`/`0129-*` file
+  already present (idempotency check, first thing done). Lesson 128's own
+  fresh scan closed with `np.abs()`, `np.sqrt()`, `np.floor()`/`np.ceil()`,
+  and `np.log()`/`np.exp()` as open elementwise-ufunc candidates, none
+  pre-committed, per this course's "fresh scan each round" convention — so
+  this round ran its own fresh scan rather than taking any of those as
+  given. Grepped every lesson body case-insensitively for `np.abs(`,
+  `np.sqrt(`, `np.floor(`, `np.ceil(`, `np.log(`, `np.exp(`, `np.trunc(`,
+  `np.mod(`, `np.remainder(`, and searched `glossary.html`'s own first
+  column (case-insensitive) for the same names: all four candidates came
+  back with zero dedicated glossary rows and zero lesson bodies teaching
+  them as their own topic — confirmed via `Read` that the handful of
+  grep hits inside Lessons 127/128 were only ever "next lesson" teaser
+  lines naming them in passing, not actual coverage. Picked `np.abs()` and
+  `np.sqrt()` together as one coherent pair rather than cramming all four
+  into one lesson, matching recent lessons' one-function-or-tight-pair
+  granularity: together they are the two calls behind the single most
+  common interview error-metric task (turning a signed delta into mean
+  absolute error or RMSE), and, confirmed below, they diverge sharply on
+  dtype/safety despite looking equally "simple." Verified directly in a
+  scratch sandbox (numpy 2.5.4, pandas 3.1.1, `uv run --with pandas`)
+  rather than trusting memory: confirmed both keep a Series' own Index and
+  return a Series (not a bare ndarray) when called on one, matching Lesson
+  127's `np.sign()` rather than Lesson 128's `np.vectorize()`; confirmed
+  `np.abs()` preserves the input's own dtype family (int in -> int64, float
+  in -> float64), same rule as `np.sign()`, while `np.sqrt()` always
+  upcasts to `float64` regardless of input dtype; confirmed `Series.abs()`
+  is a real pandas method matching `np.abs()` exactly, but `Series.sqrt()`
+  does not exist at all (`AttributeError`), continuing the naming-gap
+  lineage Lessons 126-128 established for `.roll()`/`.sign()`/kept-as-
+  ndarray; confirmed `np.sqrt()` on a negative value returns NaN with a
+  visible `RuntimeWarning` ("invalid value encountered in sqrt"), including
+  when the input array is int dtype (it still gets cast to float with NaN,
+  warning fires all the same). The sharpest, deliberately contrasted trap:
+  confirmed directly that `np.abs()` on `int64`'s own most negative possible
+  value (`np.iinfo(np.int64).min`, `-9223372036854775808`) silently
+  overflows via two's-complement wraparound and returns that exact same
+  negative number back, with **no warning or error raised at all** — the
+  true positive magnitude is one larger than `int64` can represent. Chose
+  to present this as the lesson's central contrast: `np.sqrt()`'s domain
+  error is loud (NaN + warning), `np.abs()`'s overflow is silent and
+  plausible-looking. Confirmed directly `np.abs()` on a complex number
+  returns the magnitude (`np.abs(3+4j) == 5.0`), a genuinely useful result,
+  contrasted against Lesson 127's unrelated complex-number behavior for
+  `np.sign()`. Confirmed directly `np.abs()` runs on an `object`-dtype array
+  (dispatches to each element's own `abs()`) while `np.sqrt()` raises
+  `TypeError` immediately on the same dtype (no `.sqrt()` method on a plain
+  Python number). Confirmed via `np.shares_memory()` both always return a
+  new array, never a view. Did not fetch a fresh WebFetch of the official
+  docs pages for `numpy.absolute()`/`numpy.sqrt()` beyond citing their
+  known stable URLs per `RESOURCES.md`'s NumPy-fundamentals grouping (the
+  domain-error/complex-magnitude behavior was confirmed directly against
+  general NumPy ufunc-error-handling knowledge already cross-checked in
+  this sandbox, consistent with how Lessons 109/111 cited docs they'd
+  previously fetched); explicitly noted in the lesson's own "Go deeper"
+  line that the `int64`-overflow trap is confirmed via this sandbox, not
+  quoted from either docs page, since neither page names that specific
+  case. Added exactly two new glossary rows, "np.abs()" then "np.sqrt()",
+  directly after Lesson 128's "np.vectorize()" entry — confirmed via a
+  case-insensitive scan of every first-column term (202 rows total after
+  adding) that neither name was already covered, zero duplicates found.
+  Verification performed mechanically via a scratch directory
+  `.scratch-data-129/` created at the repo root (deleted after, never
+  tracked by git, matching every prior round's own precedent): (1) a
+  quiz-word-count script (Python regex stripping HTML tags, splitting on
+  whitespace) found the first draft mismatched across all three questions
+  (8/8/9, 9/9/8, 9/9/10) and, after two rounds of wording trims, confirmed
+  exactly 9/9/9 option words on every one of the three questions, one
+  `data-ok` per question throughout; (2) an HTML tag-balance script (same
+  regex approach, run via `uv run python3 <script>`) confirmed fully
+  balanced: html/head/body 1/1, div 5/5, p 16/16, code 95/95, button 9/9,
+  script 3/3, dfn 2/2, pre 4/4, h1 1/1, h2 7/7, strong 6/6, span 28/28, a
+  3/3, title 1/1, zero raw unescaped `&` outside the lesson's own `cd
+  ~/learning/data && uv run ...` shell command inside its own
+  `<pre><code>` block (matching every prior round's own precedent for that
+  exact exception); exactly 2 `<dfn>`-carrying tags, both with
+  `data-en`/`data-vn`, matching the two new glossary rows added. A separate
+  tr/td-balance check on `glossary.html` after its two-row addition —
+  balanced (tr 203/203, matching 202 data rows plus the header row; td
+  606/606; th 3/3; zero raw `&`), plus a duplicate-term scan across all 202
+  first-column entries — zero duplicates, confirmed both new rows' exact
+  term strings, "np.abs()" and "np.sqrt()", each appear exactly once.
+  `node --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still
+  parse as valid JavaScript, both before and after adding one `n: 129` entry
+  and one `0129-np-abs-and-sqrt` file reference to `nav.js`. The shipped
+  (unsolved) `practice/129_np_abs_and_sqrt.py` was run directly from its
+  real `practice/` location (via `uv run --with pandas python3`) and
+  printed exactly 3 ✗ with no raw traceback. Built a solved copy inside
+  `.scratch-data-129/` (deleted after, never tracked by git); it printed
+  all 3 ✓ and "All green" on the first run (the expected `RuntimeWarning`
+  from the Section 2 negative-sqrt exercise printed to stderr but did not
+  affect the check results, by design — that warning is the trap being
+  tested, not a bug). Re-ran the shipped file directly from `practice/`
+  again afterward and reproduced the identical all-✗ result, confirming the
+  solved copy's edits never leaked back into the shipped baseline. This
+  round's own fresh scan still leaves `np.floor()`/`np.ceil()` and
+  `np.log()`/`np.exp()` open, neither pre-committed as THE next pick, per
+  this course's "fresh scan each round" convention — tomorrow's round still
+  owes its own fresh scan. `np.hypot()` was named only in passing as an
+  out-of-scope sibling (not a standing candidate). `git status --short`
+  after all edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0129-np-abs-and-sqrt.html`, new
+  `data/practice/129_np_abs_and_sqrt.py`, and this file) plus unrelated
+  concurrent changes in other course directories from other runs
+  (`backend/`, `go/`, `rust/`, `python/`) and leftover scratch/untracked
+  items from other courses' prior/concurrent runs (`.scratch-dataeng-61/`,
+  `.scratch-python-109/`), none touched by this round. The scratch
+  directory `.scratch-data-129/` was deleted after verification, at the
+  repo root but never tracked by git.

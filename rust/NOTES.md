@@ -1924,3 +1924,18 @@ by the user there; they apply here identically.
   '{"by":"github-actions","day":"post-week-2026-11-14","action":
   "verified-unchanged"}'` was run from the repo root. No new learning
   record beyond the Day-1 baseline.
+- 2026-11-15 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are
+  all present and untouched (8 textual `id: "k` matches — the 7 real
+  kata entries `k1`-`k7` plus the commented-out example line; `day:`
+  tags still run exactly 1-7, 49 total; `assets/nav.js` still has
+  exactly 7 `file: "lessons` entries, days 1-7 only). Still the correct
+  "daily quiz+kata" for this post-week phase per PLAN.md, so nothing new
+  was generated. DB reads were blocked this round (both a direct `psql
+  "$LEARNING_DB_URL"` call and the `bin/query-progress` helper hit "This
+  command requires approval" with no user present), so this round
+  relied on learning-records alone per the standing fallback rule;
+  writes still worked fine — `bin/record-progress rust note --detail
+  '{"by":"claude-sonnet-5","day":"post-week-2026-11-15","action":
+  "verified-unchanged"}'` succeeded via a plain relative-path call. No
+  new learning record beyond the Day-1 baseline.

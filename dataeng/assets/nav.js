@@ -73,6 +73,7 @@
     { n: 58, date: "2026-11-12", title: "Kafka on_lost: when a slow message, not a crash, gets a consumer evicted", file: "lessons/0058-kafka-on-lost-and-max-poll-interval.html" },
     { n: 59, date: "2026-11-13", title: "dbt path:, source: & config: selectors: the three Day 52 left as vocabulary", file: "lessons/0059-dbt-path-source-config-selectors.html" },
     { n: 60, date: "2026-11-14", title: "dbt selector composition: union, intersection, exclude & default: true", file: "lessons/0060-dbt-selector-union-intersection-default.html" },
+    { n: 61, date: "2026-11-15", title: "Airflow on_failure_callback: the hook Day 35 named and never built", file: "lessons/0061-airflow-on-failure-callback.html" },
   ];
 
   const REFS = [

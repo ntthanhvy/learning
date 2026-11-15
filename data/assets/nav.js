@@ -264,6 +264,8 @@
       file: "lessons/0127-np-sign.html" },
     { n: 128, date: "2026-11-14", title: "np.vectorize(): a name that promises vectorization and does not deliver it",
       file: "lessons/0128-np-vectorize.html" },
+    { n: 129, date: "2026-11-15", title: "np.abs() and np.sqrt(): the two building blocks under every error-metric column",
+      file: "lessons/0129-np-abs-and-sqrt.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 129 · np.abs() and np.sqrt(): the two building blocks under every error-metric column</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 129 · ~20 min · 15 Nov 2026</p>
+<h1>np.abs() and np.sqrt(): the two building blocks under every error-metric column</h1>
+<p class="byline">Lesson 128 closed its own fresh scan with <code>np.abs()</code>, <code>np.sqrt()</code>, and <code>np.floor()</code>/<code>np.ceil()</code> open from Lesson 127's scan, plus <code>np.log()</code>/<code>np.exp()</code> newly confirmed untaught. Today's own fresh scan re-confirmed all four candidates are still genuinely untaught (grepped every lesson body and glossary row; the names only ever appeared in passing inside two prior "next lesson" teaser lines, never as a lesson's own topic). <code>np.abs()</code> and <code>np.sqrt()</code> win as one coherent pair: together they are the two calls behind the single most common interview error-metric task — turning a signed delta column into mean absolute error or RMSE — and, confirmed directly below, they disagree sharply on dtype handling and overflow safety despite looking like two equally "simple" math functions.</p>
+
+<h2>1 · Both keep the Series and its Index — but handle dtype differently</h2>
+<p><dfn data-en="a NumPy function that returns the absolute value of each element, elementwise across a whole array or Series at once -- the magnitude, with the sign stripped" data-vn="giữ nguyên 'np.abs()' — hàm trả về giá trị tuyệt đối của từng phần tử, áp dụng elementwise lên cả mảng/Series một lần; chỉ bỏ dấu, giữ nguyên độ lớn">np.abs(x)</dfn> and <dfn data-en="a NumPy function that returns the (non-negative) square root of each element, elementwise across a whole array or Series at once" data-vn="giữ nguyên 'np.sqrt()' — hàm trả về căn bậc hai (không âm) của từng phần tử, áp dụng elementwise lên cả mảng/Series một lần">np.sqrt(x)</dfn> both return a <code>Series</code> with the original <code>Index</code> intact when called directly on one — confirmed directly (numpy 2.5.4, pandas 3.1.1), neither one flattens to a bare <code>ndarray</code> the way Lesson 128's <code>np.vectorize()</code> does. They part ways on dtype, though:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s_int = pd.Series([-<span class="kw">5</span>, <span class="kw">3</span>, -<span class="kw">2</span>], index=[<span class="cm">"a"</span>, <span class="cm">"b"</span>, <span class="cm">"c"</span>])
+
+np.abs(s_int).dtype    <span class="cm"># int64  -- stays in the input's own dtype family</span>
+np.sqrt(s_int).dtype   <span class="cm"># float64 -- ALWAYS upcasts to float, even on a clean int input</span></code></pre>
+<p>Confirmed directly: <code>np.abs()</code> follows the same dtype-preserving rule as Lesson 127's <code>np.sign()</code> — int in, <code>int64</code> out; float in, <code>float64</code> out. <code>np.sqrt()</code> never preserves an integer dtype at all, because a square root is almost never a whole number; it always returns <code>float64</code>, confirmed directly, even when every input value happens to be a perfect square. Also confirmed directly: pandas defines <code>Series.abs()</code> as a real method — <code>s_int.abs()</code> works and matches <code>np.abs(s_int)</code> exactly — but there is <strong>no</strong> <code>Series.sqrt()</code> at all; calling it raises <code>AttributeError</code> immediately, the same naming gap Lessons 126 and 127 found for <code>np.roll()</code> and <code>np.sign()</code>. The pandas-idiomatic square root is <code>Series.pow(0.5)</code> or calling <code>np.sqrt()</code> directly on the Series, confirmed directly to produce identical results.</p>
+
+<h2>2 · The trap: np.sqrt() on a negative warns and returns NaN — np.abs() on INT64_MIN silently returns the wrong sign</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.4):</strong> <code>np.sqrt()</code> on a negative real number returns <code>NaN</code> and raises a <code>RuntimeWarning</code> — loud and visible. <code>np.abs()</code> on the single most negative possible <code>int64</code> value returns <strong>the same negative number back, unchanged, with no warning at all</strong> — silent and wrong.</div>
+<pre><code><span class="cm"># np.sqrt() on a negative: NaN, with a visible warning</span>
+np.sqrt(np.array([-<span class="kw">4.0</span>, <span class="kw">9.0</span>]))
+<span class="cm"># RuntimeWarning: invalid value encountered in sqrt</span>
+<span class="cm"># array([nan,  3.])</span>
+
+<span class="cm"># np.abs() on INT64_MIN: silently wrong, no warning at all</span>
+minval = np.iinfo(np.int64).<span class="kw">min</span>   <span class="cm"># -9223372036854775808</span>
+np.abs(np.array([minval], dtype=np.int64))
+<span class="cm"># array([-9223372036854775808])  -- still negative! the true magnitude doesn't fit in int64</span></code></pre>
+<p>Confirmed directly: that second result is two's-complement integer overflow, not a bug report — the positive magnitude of <code>int64</code>'s most negative value is one larger than <code>int64</code>'s own maximum, so it wraps straight back around to the original negative number, and NumPy raises nothing. <code>Series.abs()</code> reproduces the identical silent wraparound on the same value. <code>np.sqrt()</code>'s NaN-plus-warning on a negative input is the safer failure mode of the two — it is visible in a test run or a notebook's own warning output; the <code>np.abs()</code> overflow produces a plausible-looking negative number that passes every downstream check silently. This specific input (<code>int64</code>'s absolute minimum) is rare in real data, but any column read in as a narrower signed int dtype near its own floor carries the same risk.</p>
+
+<h2>3 · Complex input, object dtype, and no views</h2>
+<p>Confirmed directly from the official docs: <code>np.abs()</code> on a complex number returns its <strong>magnitude</strong> — <code>np.abs(3 + 4j)</code> is <code>5.0</code> (Pythagorean distance from zero), a genuinely useful result, unlike Lesson 127's <code>np.sign()</code> on complex input, which returns a unit-direction value that is a trap to misread as a -1/0/1 code. Confirmed directly, both functions run on an <code>object</code>-dtype array of plain Python numbers without error — <code>np.abs()</code> dispatches to each element's own <code>abs()</code>, and <code>Series.abs()</code> does the same — but <code>np.sqrt()</code> raises a <code>TypeError</code> immediately on <code>object</code> dtype, since a plain Python <code>int</code>/<code>float</code> has no <code>.sqrt()</code> method for the ufunc to call. Confirmed directly via <code>np.shares_memory()</code>: both functions always return an independent new array, never a view into the input, regardless of dtype.</p>
+<pre><code>np.abs(<span class="kw">3</span> + <span class="kw">4j</span>)       <span class="cm"># 5.0  -- magnitude, a real / useful answer</span>
+np.sqrt(np.array([-<span class="kw">1</span>, <span class="kw">4</span>, <span class="kw">9</span>], dtype=object))
+<span class="cm"># TypeError: loop of ufunc does not support argument 0 of type int
+# which has no callable sqrt method</span></code></pre>
+<p>Put together, this is the real building block behind an error-metric column: <code>abs_err = np.abs(actual - predicted)</code> for mean absolute error, and <code>rmse = np.sqrt((err ** 2).mean())</code> for root-mean-squared error — confirmed directly to run clean end to end, no loop, no <code>apply()</code>.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.abs()</code>'s and <code>np.sqrt()</code>'s confirmed Series/Index-preserving behavior; the confirmed dtype divergence (int-preserving vs. always-float); the confirmed negative-sqrt NaN-plus-warning versus the confirmed silent <code>INT64_MIN</code> overflow trap in <code>np.abs()</code>; and the confirmed complex-magnitude and object-dtype behaviors. It does not cover <code>np.floor()</code>/<code>np.ceil()</code> or <code>np.log()</code>/<code>np.exp()</code>, both still open candidates from this round's own fresh scan, or <code>np.hypot()</code> (a legitimate but out-of-scope sibling per <code>MISSION.md</code>'s "no deep NumPy internals" line), named only in passing.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/129_np_abs_and_sqrt.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/129_np_abs_and_sqrt.py</code></pre>
+<p>Exercise 1 confirms the Section 1 contrast: <code>np.abs()</code> preserves an int Series' own dtype while <code>np.sqrt()</code> always upcasts to float, and <code>Series.sqrt()</code> does not exist. Exercise 2 confirms the Section 2 traps: a negative input to <code>np.sqrt()</code> returns NaN, and <code>np.abs()</code> on <code>int64</code>'s most negative value overflows back to the same negative number. Exercise 3 confirms the Section 3 behavior: an end-to-end mean-absolute-error and RMSE calculation built from the two functions together.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.abs() preserves the input Series' own dtype family (int in, int64 out; float in, float64 out), the same rule Lesson 127's np.sign() follows. np.sqrt() always returns float64 regardless of the input dtype, since a square root is almost never a whole number, even when every value happens to be a perfect square.">
+    <p class="stem">Calling <code>np.abs()</code> and <code>np.sqrt()</code> on the same <code>int64</code> Series returns what dtypes, respectively?</p>
+    <button class="opt" data-ok>int64 stays int64, but sqrt always becomes float64 too</button>
+    <button class="opt">both always become float64, no matter the input dtype</button>
+    <button class="opt">both stay int64, rounding the square root to fit</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.iinfo(np.int64).min is -9223372036854775808, whose true positive magnitude is one larger than int64's own maximum representable value, so np.abs() silently wraps it straight back around to the same negative number via two's-complement overflow, with no warning or error raised at all -- unlike np.sqrt() on a negative input, which raises a visible RuntimeWarning and returns NaN instead.">
+    <p class="stem">What does <code>np.abs()</code> return for <code>int64</code>'s own most negative possible value, and does it warn?</p>
+    <button class="opt" data-ok>the same negative value back, silently, from integer overflow</button>
+    <button class="opt">the correct positive magnitude value, no warning at all</button>
+    <button class="opt">NaN, with the identical RuntimeWarning that np.sqrt() itself raises</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official docs: np.abs() on a complex number returns its magnitude (Pythagorean distance from zero), e.g. np.abs(3 + 4j) is 5.0, a genuinely useful real-number result -- unlike Lesson 127's np.sign() on complex input, which returns a unit-direction value that is a trap to misread as a -1/0/1 bucket code.">
+    <p class="stem">What does <code>np.abs(3 + 4j)</code> return for this complex number input?</p>
+    <button class="opt" data-ok>5.0, the magnitude -- the Pythagorean distance from zero</button>
+    <button class="opt">a -1/0/1 bucket code, the same convention np.sign() uses</button>
+    <button class="opt">an unchanged complex number, since abs() only handles reals</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.absolute.html"><code>numpy.absolute()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.sqrt.html"><code>numpy.sqrt()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) document the complex-magnitude behavior and the domain-error (negative-input) NaN-plus-warning behavior directly; neither page mentions the <code>int64</code> overflow case by name — confirmed directly in this lesson's own scratch sandbox instead, not quoted from the docs.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.abs()</code> and <code>np.sqrt()</code> are new today, added right after Lesson 128's <code>np.vectorize()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan still leaves <code>np.floor()</code>/<code>np.ceil()</code> and <code>np.log()</code>/<code>np.exp()</code> open — none pre-committed as THE next pick, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the dtype divergence, the INT64_MIN overflow trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

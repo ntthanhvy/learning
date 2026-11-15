@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 109 · multiprocessing: sidestepping the GIL for real CPU work</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 109 · ~20 min · 15 Nov 2026</p>
+<h1><code>multiprocessing</code>: sidestepping the GIL for real CPU work</h1>
+<p class="byline">Day 73 named the boundary and stopped there: CPython's <dfn data-en="the Global Interpreter Lock (GIL) is a CPython-specific lock that lets only one thread execute Python bytecode at a time, even on a multi-core machine; it releases automatically during a blocking I/O wait, which is why threading speeds up I/O-bound work but gives no speedup for pure CPU computation" data-vn="giữ nguyên &quot;GIL&quot; — khóa riêng của CPython, chỉ cho 1 thread chạy bytecode Python tại 1 thời điểm dù máy nhiều core; tự nhả ra khi đang chờ I/O, đó là lý do threading giúp I/O nhanh hơn nhưng không giúp gì cho tính toán CPU thuần">GIL</dfn> lets only one thread run Python bytecode at a time, so threads never speed up pure number-crunching — only I/O waits. <code>multiprocessing</code> is the module Day 73 pointed at but never opened: instead of several threads inside one interpreter sharing one GIL, it runs several <em>separate</em> Python interpreters as separate OS processes, each with its own GIL, actually running Python bytecode at the same time on different CPU cores.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, lesson body, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>multiprocessing</code> itself has never been taught — the word appeared only inside Day 107's and Day 108's own gap-candidate commentary text, naming it as open, never as a demonstrated topic. <code>socket</code> remains ruled out on the same scope-depth grounds as every prior round; <code>zoneinfo</code> stays retired (already fully taught Day 14). Per Day 108's own cadence note, Day 108 was fresh day 1 of the current three-fresh-then-review cycle, so today is fresh day 2 — Day 110 is fresh day 3, Day 111 the next review, covering Days 108-110. This topic also closes Day 73's own named-not-demonstrated thread directly: that lesson pointed at <code>ProcessPoolExecutor</code> as the CPU-bound answer and stopped, since its own pipelines were all I/O-bound.</div>
+
+<h2>1 · <code>Process</code>: a whole separate interpreter, not another thread</h2>
+<p><code>multiprocessing.Process</code> looks almost identical to Day 73's thread-pool shape — <code>target=</code>, <code>args=</code>, <code>.start()</code>, <code>.join()</code> — but <code>.start()</code> here launches an entire new OS process, with its own memory and its own Python interpreter, rather than another thread inside the current one:</p>
+<pre><code><span class="kw">from</span> multiprocessing <span class="kw">import</span> Process
+<span class="kw">import</span> os
+
+<span class="kw">def</span> f(name):
+    <span class="kw">print</span>(<span class="str">f"hello {name}, pid={os.getpid()}"</span>)
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    <span class="kw">print</span>(<span class="str">f"parent pid={os.getpid()}"</span>)
+    p = Process(target=f, args=(<span class="str">"bob"</span>,))
+    p.start()
+    p.join()
+    <span class="kw">print</span>(<span class="str">"joined, exitcode ="</span>, p.exitcode)
+<span class="cm"># confirmed live:
+# parent pid=34503
+# hello bob, pid=34504   -- a genuinely different process ID
+# joined, exitcode = 0</span></code></pre>
+<p><code>.start()</code> launches the child and returns immediately; <code>.join()</code> blocks until it finishes, same as Day 73's threads. The difference that matters is underneath: a thread shares the same memory as every other thread in its process, but a <code>Process</code> gets its own separate memory entirely, confirmed live below.</p>
+
+<div class="callout"><strong>The <code>if __name__ == "__main__":</code> guard is not optional style.</strong> The official docs state it directly: starting a child process needs the <code>__main__</code> module to be safely importable by that child. On this sandbox's Linux default (the <code>fork</code> start method, confirmed live via <code>multiprocessing.get_start_method()</code>), the child inherits the parent's already-loaded code, so skipping the guard happens not to break anything here — but on Windows and macOS, where <code>spawn</code> is the default, the child starts a brand-new interpreter that re-imports <code>__main__</code> from scratch. Without the guard, that re-import re-runs the <code>Process(...)</code>/<code>.start()</code> call itself, which spawns another child, which re-imports again — runaway recursion. The guard is what makes the same script correct everywhere, not just on whichever platform happens to run it first.</div>
+
+<h2>2 · No shared memory: confirmed live</h2>
+<p>A thread mutating a shared list is visible to every other thread immediately — that was the whole race-condition risk Day 73 named. A child process mutating what looks like the same variable is not visible to the parent at all, because <code>fork</code>/<code>spawn</code> gives the child its own private copy of the parent's memory at the moment it starts:</p>
+<pre><code><span class="kw">from</span> multiprocessing <span class="kw">import</span> Process
+
+counter = []
+
+<span class="kw">def</span> bump():
+    counter.append(<span class="kw">1</span>)
+    <span class="kw">print</span>(<span class="str">"inside child, counter ="</span>, counter)
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    p = Process(target=bump)
+    p.start()
+    p.join()
+    <span class="kw">print</span>(<span class="str">"in parent after join, counter ="</span>, counter)
+<span class="cm"># confirmed live:
+# inside child, counter = [1]
+# in parent after join, counter = []   -- parent's list never changed</span></code></pre>
+<p>This is the opposite trap from Day 73's: threads risk a race condition on shared state nobody meant to share; processes have zero shared state by default, so code that assumes a child's changes land back in the parent silently loses that data. Getting a result back out requires deliberately passing it through something built for that, like the <code>Queue</code> below — never a plain shared variable.</p>
+
+<h2>3 · <code>multiprocessing.Queue</code>: handing results back across the process boundary</h2>
+<p>Day 108's <code>queue.Queue</code> only works between threads in the same process — it relies on memory they already share. <code>multiprocessing.Queue</code> has the same <code>.put()</code>/<code>.get()</code> interface but works across the process boundary: every item placed on it is <dfn data-en="pickling here means multiprocessing.Queue serializes (pickles, Day 72) every item with .put() and deserializes it with .get(), since a child process cannot read the parent's memory directly -- so anything put on this queue must be picklable, the same rule Day 72's pickle module itself always had" data-vn="giữ nguyên &quot;pickle&quot; — multiprocessing.Queue tự serialize (pickle, Day 72) từng item khi .put() và deserialize lại khi .get(), vì process con không đọc trực tiếp memory của process cha được; nên item đưa vào queue này phải pickle được, đúng luật pickle (Day 72) vốn đã có từ trước">pickled</dfn> (serialized, Day 72's module) on the way out and unpickled on the way in, since the two processes cannot see each other's memory directly:</p>
+<pre><code><span class="kw">from</span> multiprocessing <span class="kw">import</span> Process, Queue
+
+<span class="kw">def</span> worker(q):
+    q.put([<span class="kw">42</span>, <span class="kw">None</span>, <span class="str">"hello"</span>])
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    q = Queue()
+    p = Process(target=worker, args=(q,))
+    p.start()
+    <span class="kw">print</span>(<span class="str">"got:"</span>, q.get())   <span class="cm"># [42, None, 'hello'] -- confirmed live, round-tripped intact</span>
+    p.join()</code></pre>
+<p>Because every item goes through <code>pickle</code>, the same restriction applies: whatever is <code>put()</code> onto a <code>multiprocessing.Queue</code>, and every argument passed via <code>args=</code> to a <code>Process</code>, must be picklable. A plain function defined at module level qualifies; a <code>lambda</code> or a function defined inside another function generally does not — <code>pickle</code> needs to be able to look the function up by name in an importable module to reconstruct it in the other process.</p>
+
+<h2>4 · <code>Pool</code>: running one function across many inputs, and the measured payoff</h2>
+<p><code>Pool</code> is the batch-shaped tool, the <code>Process</code>-based equivalent of Day 73's thread pool: <code>.map()</code> applies a function to every item of an iterable across a fixed number of worker processes, collecting results in input order:</p>
+<pre><code><span class="kw">from</span> multiprocessing <span class="kw">import</span> Pool
+
+<span class="kw">def</span> square(x):
+    <span class="kw">return</span> x * x
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    <span class="kw">with</span> Pool(<span class="kw">4</span>) <span class="kw">as</span> p:
+        <span class="kw">print</span>(p.map(square, [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>]))   <span class="cm"># [1, 4, 9, 16, 25]</span>
+        res = p.apply_async(square, (<span class="kw">20</span>,))
+        <span class="kw">print</span>(res.get(timeout=<span class="kw">1</span>))                   <span class="cm"># 400 -- confirmed live</span></code></pre>
+<p><code>apply_async()</code> is <code>Pool</code>'s one-call-at-a-time equivalent of Day 73's <code>submit()</code> — it returns immediately, and <code>.get()</code> (not <code>.result()</code> this time) blocks until that one call finishes. Measured live on this sandbox (4 CPU cores, via <code>os.cpu_count()</code>), running the same CPU-bound loop four times through Day 73's <code>ThreadPoolExecutor</code> took 2.85s; the identical work through <code>multiprocessing.Pool</code> took 1.50s — a 1.9× speedup, because four real processes genuinely ran Python bytecode at the same time on four separate cores, instead of four threads taking turns behind one shared GIL.</p>
+
+<div class="callout"><strong>Bridge from Day 73:</strong> same mental model, opposite trade-off. Threads are cheap to start and share memory freely, which is exactly right for I/O waits and exactly wrong for CPU-bound work under the GIL. Processes are heavier to start (a whole interpreter each) and share nothing by default, which is exactly wrong for a quick I/O-bound fetch and exactly right for CPU-bound work that needs more than one core actually computing at once.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> NumPy's own array operations already release the GIL internally for many calls and often use multiple cores through its own C code, without needing this module at all — a different mechanism for a similar goal. Not covered further here, per <code>MISSION.md</code>; this course teaches the standard-library mechanism, not NumPy's internals.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/109_multiprocessing_sidestepping_the_gil.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/109_multiprocessing_sidestepping_the_gil.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: starting a <code>Process</code> with <code>args=</code>, joining it, and confirming its <code>pid</code> differs from the parent's; passing a result back through a <code>multiprocessing.Queue</code> instead of a shared variable; and using <code>Pool.map()</code> to run a function across several inputs and confirming the results come back in input order.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Each multiprocessing.Process is a genuinely separate OS process with its own Python interpreter and its own GIL, so several of them can run Python bytecode at the same real time on different cores -- unlike threads, which all run inside one interpreter and take turns behind one shared GIL.">
+    <p class="stem">Why can several <code>multiprocessing.Process</code> instances speed up pure CPU computation, when threads under the GIL cannot?</p>
+    <button class="opt" data-ok>each process has its own separate interpreter and its own real GIL</button>
+    <button class="opt">multiprocessing quietly turns the GIL completely off for all running worker threads</button>
+    <button class="opt">a Process is simply a renamed thread with a slightly faster start</button>
+  </div>
+  <div class="q" data-why="Confirmed live: a child process gets its own private copy of memory at the moment it starts, so mutating what looks like a shared variable inside the child never changes the parent's copy. Getting a value back out requires something built for crossing that boundary, like a multiprocessing.Queue, not a plain shared variable.">
+    <p class="stem">After a child process appends to what looks like a shared list, what does the parent see in that same list once the child finishes?</p>
+    <button class="opt" data-ok>no change at all, since the child only mutated its own copy</button>
+    <button class="opt">the exact same appended item, visible the instant the child appends it</button>
+    <button class="opt">a confusing partial merge of only some of the items appended there</button>
+  </div>
+  <div class="q" data-why="The multiprocessing docs state that starting a child process needs __main__ to be safely importable by that child. On spawn (the default on Windows and macOS), the child re-imports __main__ from scratch, so without the guard the Process(...)/.start() call itself re-runs inside the child, spawning another child, recursing without end.">
+    <p class="stem">Why does the official documentation require an <code>if __name__ == "__main__":</code> guard around code that starts a <code>Process</code>?</p>
+    <button class="opt" data-ok>without it, a child process using spawn can re-run the start call forever</button>
+    <button class="opt">it is purely a style convention with genuinely zero effect on any behavior</button>
+    <button class="opt">multiprocessing simply refuses to ever import any module lacking that one single guard</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/multiprocessing.html"><code>multiprocessing</code></a> docs — "offers both local and remote concurrency, effectively side-stepping the Global Interpreter Lock by using subprocesses instead of threads," and covers today's <code>Process</code>/<code>Queue</code>/<code>Pool</code>, the picklability requirement on arguments and queue items, and the <code>fork</code>/<code>spawn</code>/<code>forkserver</code> start methods named above but not all demonstrated.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day109">glossary</a> under Day 109.<br>
+No further standing fresh-gap candidate is currently named beyond today's pick; <code>socket</code> remains ruled out on scope-depth grounds, and a fresh gap-scan should still run before Day 110 rather than assuming none remain.<br><br>
+💬 Anything unclear — processes vs. threads, the <code>__main__</code> guard, or why <code>Pool</code> beat <code>ThreadPoolExecutor</code> on that timing? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

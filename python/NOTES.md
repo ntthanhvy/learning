@@ -13211,3 +13211,99 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"github-actions"}'` was run from the repo root at the end of this
   round; see this file's own next line if it appears, or treat
   silence/blocking as the known sandbox limitation if not.
+- 2026-11-15 generation (Lesson 109, headless run): idempotency check first
+  confirmed no `lessons/0109-*.html` on disk and no `n: 109`/2026-11-15 entry
+  in `nav.js` or this file — proceeded. Read `MISSION.md` (no-pandas/no-NumPy
+  exclusion re-confirmed, never modified), `PLAN.md`, this file's tail through
+  Day 108's own closing note, `RESOURCES.md`, `assets/nav.js`'s last entry
+  (`n: 108`, 2026-11-14), and `learning-records/` (still only the Day 1
+  baseline file, no newer signal). Per Day 108's cadence note, Day 108 was
+  fresh day 1 of the current cycle, so Day 109 is fresh day 2 — Day 110
+  should be fresh day 3, Day 111 the review covering Days 108-110. Fresh-gap
+  re-confirmation: grepped `multiprocessing` case-insensitively across every
+  lesson and `glossary.html` — the only hits were inside Day 107's and Day
+  108's own gap-candidate commentary text, never a taught topic, confirming
+  it genuinely open exactly as the standing note claimed. Picked
+  `multiprocessing`: it completes Day 73's own named-not-demonstrated
+  boundary directly (that lesson pointed at `ProcessPoolExecutor`/the
+  GIL's CPU-bound limit and stopped there). Fetched the primary source live
+  via WebFetch (`docs.python.org/3/library/multiprocessing.html`) for the
+  module's own GIL-sidestepping framing, the `Process`/`Queue`/`Pool`
+  examples, the picklability requirement, and the `fork`/`spawn`/`forkserver`
+  start-method defaults, rather than trusting memory. Probed every claim live
+  in `.scratch-python-109/` (created at repo root, deleted after; `uv run
+  python3 probeN.py`, since `/tmp` is not writable here): confirmed this
+  sandbox is Python 3.12.3 with `fork` as the default start method (not
+  3.14's `forkserver` default) and 4 CPUs via `os.cpu_count()`; confirmed a
+  `Process` child has a genuinely different `os.getpid()` than the parent and
+  `.join()` waits for it; confirmed `multiprocessing.Queue` round-trips a
+  list intact between parent and child; confirmed `Pool.map()`/
+  `apply_async()` match the documented examples exactly (`[1,4,9,16,25]` and
+  `400`); confirmed a child mutating a module-level list is invisible to the
+  parent after `.join()` (separate memory, the direct contrast with Day 73's
+  shared-memory threads); measured the same CPU-bound loop four times
+  through Day 73's `ThreadPoolExecutor` (2.85s) against `multiprocessing.Pool`
+  (1.50s) — a real 1.9x speedup, confirming the GIL-sidestepping claim rather
+  than asserting it; and confirmed that skipping the `if __name__ ==
+  "__main__":` guard happens not to break anything on this sandbox's `fork`
+  default (documented honestly in the lesson as a `fork`-specific mask, with
+  the `spawn`-default Windows/macOS recursion failure cited from the docs
+  rather than reproduced, since this sandbox can't exercise `spawn`).
+  Checked the glossary for term collisions before writing — grepped
+  `multiprocessing`, `Process`, `fork`, `spawn`, and `picklable`
+  case-insensitively across `glossary.html`, zero existing rows matching any
+  of the 5 new terms planned. **New jargon: 5 glossary rows** (`GIL`,
+  `multiprocessing.Process`, `multiprocessing.Queue`, the `__main__` guard,
+  `Pool`/`Pool.map()`), added as a new `<h2 id="day109">` section directly
+  after Day 108's. Verification performed mechanically from dedicated
+  scripts in `.scratch-python-109/` (deleted after): (1) an
+  `html.parser.HTMLParser` full-document parse of the new lesson and of
+  `glossary.html` — no parse errors on either; (2) an HTML tag-balance check
+  on the new lesson — first pass caught a stray unmatched `</p>` inside a
+  callout div (18 opens vs. 19 closes), fixed by removing it, re-checked
+  balanced after the fix (div 8/8, p 18/18, code 80/80, button 9/9, script
+  3/3, dfn 2/2, pre 5/5, h2 7/7, h1 1/1, em 1/1, strong 5/5, a 2/2), plus a
+  raw-unescaped-`&` scan — zero hits; (3) a per-question quiz option
+  word-count check via regex-strip-tags extraction on the actual printed
+  word lists — first draft mismatched on all three questions (11/10/13,
+  14/12/11, 14/12/11), iterated option-by-option, re-checking the exact word
+  list after each edit, until all three landed on equal per-question counts:
+  12/12/12, 12/12/12, 13/13/13; (4) a table/tr/th/td/h2/p/div balance check
+  on `glossary.html` after its new section, plus a duplicate-`id="dayNN"`
+  scan — balanced (table 91/91, tr 399/399, th 273/273, td 924/924, h2
+  91/91) with zero duplicates among 91 ids, `day109` present exactly once; a
+  case-insensitive duplicate-term scan across the glossary's term column
+  reproduced only the one pre-existing collision already on record
+  (`dependency`), confirmed none of the 5 new terms collide with it or any
+  other row; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all three clean, both before and after the `nav.js`
+  edit; (6) a duplicate `n:` scan across `nav.js`'s `LESSONS` array — 109
+  entries, zero duplicates, max `n` is 109; (7) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — all 4 hits
+  (`pandas` once, `NumPy` three times) confirmed by direct line lookup to
+  sit inside the single required "Where pandas/NumPy go from here"
+  scope-boundary callout, never a worked example, and zero hits in the
+  practice file. The shipped (unsolved)
+  `practice/109_multiprocessing_sidestepping_the_gil.py` was executed
+  directly from its real `practice/` location and printed exactly 3 ✗ with
+  no raw traceback. A solved copy built in `.scratch-python-109/` (copied
+  from the shipped file, each TODO body filled in directly — never editing
+  the shipped file itself, deleted after) printed all 3 ✓ and "All green" on
+  two consecutive runs; the shipped file was re-run afterward from its real
+  location and reproduced the identical all-✗ result, confirming no leakage
+  back into the baseline. Added one new `RESOURCES.md` line for
+  `multiprocessing`, placed directly after Day 108's `queue` line and before
+  the PEP 8 line. Registered Lesson 109 in `nav.js` with today's date
+  (2026-11-15) right after the `n: 108` entry. `python/learning-records/`
+  was not touched this round — still only the Day 1 baseline record with no
+  newer quiz/kata/lesson_completed signal, so a routine fresh-topic pick was
+  the right call. Cadence note for the next round: Day 109 is fresh day 2 of
+  the current three-fresh-then-review cycle — Day 110 should be fresh day 3,
+  Day 111 the next review day, covering Days 108-110. No standing fresh-gap
+  candidate remains explicitly named after today beyond the routine `socket`
+  ruled-out status (scope-depth) — a fresh gap-scan should still run next
+  round rather than assuming none remain. `bin/record-progress python
+  lesson_generated --day 109 --lesson
+  0109-multiprocessing-sidestepping-the-gil.html --detail
+  '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
+  round and succeeded.

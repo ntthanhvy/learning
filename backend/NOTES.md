@@ -11294,3 +11294,123 @@ ASP.NET Core angle; Lesson 35's upsert/ON CONFLICT, re-confirmed the same
 way; Polly/.NET resilience libraries, still deliberately out of scope per
 MISSION.md's "concepts first" rule; and the backfill-missing-
 Lesson-117-NOTES-entry gap, still not investigated.
+
+## 2026-11-15 — Lesson 133: writing a reusable validation rule once (custom ValidationAttribute)
+
+Headless run. Idempotency checked first: `nav.js`'s last entry was `n:
+132, date: "2026-11-14"` and no `lessons/0133-*.html` file existed on
+disk — safe to proceed, no DB re-check attempted beyond that (consistent
+with recent rounds' own reasoning that a clean on-disk/nav.js check is
+sufficient when no fresher signal is available). `learning-records/`
+still has no entry newer than Lesson 3 — no fresh per-lesson completion
+signal to size today's step against, so generated conservatively,
+continuing the named next rung rather than guessing at new ground.
+
+Topic picked: custom `ValidationAttribute` subclasses for reusable
+single-property rules — named explicitly in Lesson 132's own scope line
+as "this lesson's own natural next step." Re-checked the two standing
+alternatives first: `SizeLimit`/`MaximumBodySize`/`SetLocking(false)`
+(output-cache knobs, deferred four rounds running as of Lesson 132) were
+considered again for a combined lesson, but judged a weaker pick than the
+named validation follow-up — they remain one-line `OutputCacheOptions`
+properties with little to connect them to this course's stated mission
+goal of reading backend PRs with substance, whereas custom
+`ValidationAttribute` is a concrete, reusable pattern grep confirmed (via
+`grep -i` for `ValidationAttribute` across `backend/lessons/` and
+`glossary.html`) had zero prior coverage outside Lesson 132's own
+scope-line mention. FluentValidation stayed explicitly out of scope per
+this round's own instruction (framework-comparison territory, violates
+MISSION.md's "concepts first" rule) — not taught, not even named as a
+library in the lesson body beyond one scope-line mention ruling it out,
+consistent with how Lesson 132 handled the same exclusion.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/mvc/models/
+validation` again (the same page Lesson 132 cited), this time for its
+"Custom attributes" section specifically. Confirmed verbatim: the base
+class `System.ComponentModel.DataAnnotations.ValidationAttribute`; the
+exact method signature `protected override ValidationResult? IsValid(
+object? value, ValidationContext validationContext)`; `ValidationResult.
+Success` as the pass return value; `ValidationContext.ObjectInstance` as
+the documented way to reach sibling properties; the `ErrorMessage`
+property and `FormatErrorMessage(string name)` method; and the full
+`ClassicMovieAttribute`/`Movie` worked example, which the lesson's own
+code block draws from directly (trimmed to drop the `Display`/`DataType`
+attributes on the unrelated `Movie.ReleaseDate` property, since they are
+not part of this lesson's own three-section scope). `command -v dotnet`
+and `command -v go` were both attempted this round (not skipped on
+assumption) and the sandbox blocked both as requiring interactive
+approval with no user present — the same block every round has hit since
+Lesson 103, now including bare detection commands too, consistent with
+Lesson 131's own observation that the block extends to detection itself.
+Fell back to hand-checking the lesson's one C# code block against the
+fetched docs' own exact signature and worked example instead, as above;
+the block matches the docs verbatim except for the intentional trim just
+described.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson133/`, not `/tmp` per this
+run's own instruction that `/tmp` is not writable in this sandbox;
+nothing written to the repo besides the three intended files; scratch
+directory deleted after): (1) a quiz word-count check per `<div
+class="q">` block, both `.split(/\s+/)` and `.split(" ")` methods
+agreeing — first draft landed uneven on three of four questions (Q1
+14/9/11/10, Q3 8/10/9/10, Q4 8/12/9/10; Q2's code-signature options
+happened to land even at 7/7/7/7 on the first pass), converged after
+several rewrite-and-recount passes to exactly 9/9/9/9 (Q1), 7/7/7/7 (Q2),
+10/10/10/10 (Q3), and 10/10/10/10 (Q4), exactly one `data-ok` and four
+options per question confirmed the same way; (2) an HTML tag-balance
+check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean
+(div 6/6, p 15/15, code 49/49, button 16/16, script 3/3, dfn 1/1, pre
+1/1, h2 7/7, h1 1/1, em 1/1, strong 3/3, a 2/2), the one `dfn` tag
+confirmed to carry both `data-en=` and `data-vn=`; (3) a brace/paren
+balance check on the lesson's one `<pre><code>` block after stripping
+tags and unescaping HTML entities — balanced (4/4 braces, 7/7 parens);
+(4) a raw-unescaped-`&` scan across the lesson — zero hits; (5) a
+duplicate-term scan on `glossary.html`'s first column before adding the
+new row — zero collisions for `ValidationAttribute` (or the method/
+property names it exposes); a table/tr/td balance check on `glossary.
+html` after the one-row addition — balanced (tr 412/412, td 1233/1233,
+411 term rows total = 410 prior + 1 new), plus a second duplicate-term
+scan afterward — zero duplicates; (6) `node --check` against `nav.js`,
+`gloss.js`, `quiz.js` — all clean, before and after the `nav.js` edit;
+(7) a basic HTML well-formedness check (one `<!DOCTYPE html>`, one
+`<html>`/`</html>`, three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 133 in `nav.js` (date 2026-11-15, today's actual
+generation date) right after `n: 132`. Confirmed via `git status
+--short` from the repo root that this round's own diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, and
+the new `backend/lessons/0133-custom-validationattribute-reusable-
+rules.html` — pre-existing unrelated uncommitted changes under `go/`,
+`rust/`, `data/`, `python/`, and several scratch directories belong to
+other courses' own concurrent work and were left untouched, consistent
+with every prior round's own observation of the same pattern. Day number
+used 133, matching this file's own day-equals-lesson-number convention,
+no deviation found. No new `RESOURCES.md` line added — the one fetched
+page is `learn.microsoft.com`, already covered by this file's standing
+entries' pattern (and the same exact page Lesson 132 cited), cited inline
+in the lesson's own "Go deeper" section instead. No new
+`learning-records/` file added — the topic came from Lesson 132's own
+named scope-line gap, not a new observation about the learner.
+`bin/record-progress backend lesson_generated --day 133 --lesson
+0133-custom-validationattribute-reusable-rules.html --detail
+'{"by":"claude-sonnet-5"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: the `SizeLimit`/`MaximumBodySize` cache-wide limits and
+`SetLocking(false)`'s resource-locking opt-out (still named in Lessons
+130-132's own scope lines, deferred a fifth round running now — strongly
+consider either giving them one combined short lesson next time or
+formally dropping them from this list, since five deferrals on the same
+thin candidate is a long run); a client-side validation adapter
+(`IClientModelValidator`, jQuery-validation/unobtrusive-validation
+wiring) for a custom `ValidationAttribute` to also run in the browser
+(named this round as this lesson's own out-of-scope next step); Go's
+`select`-statement arbitration rules, still deferred many rounds running
+on fetched-page-truncation grounds; Lesson 49's dead-letter queues, still
+confirmed to have no first-party ASP.NET Core angle; Lesson 35's
+upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
+Polly/.NET resilience libraries, both still deliberately out of scope per
+MISSION.md's "concepts first" rule; and the backfill-missing-
+Lesson-117-NOTES-entry gap, still not investigated.

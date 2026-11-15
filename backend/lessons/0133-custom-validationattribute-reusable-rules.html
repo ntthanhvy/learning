@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 133 · Writing a reusable validation rule once</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 133 · ~20 min</p>
+<h1>Writing a reusable validation rule once</h1>
+<p class="byline">Lesson 132 closed by naming its own gap: <code>[Required]</code>, <code>[Range]</code>, and the rest are rules Microsoft already wrote, and <code>IValidatableObject.Validate</code> only ever lives on one model class, so it can't be reused across different classes. This lesson writes the missing piece — a custom, reusable single-property rule, as its own attribute class, the same shape as <code>[Range]</code> itself.</p>
+
+<h2>1 · A rule becomes reusable by becoming a class</h2>
+<p><code>IValidatableObject.Validate</code> (Lesson 132) is tied to the one model class that implements it: copy the rule to a second class and the copy drifts the moment one gets fixed and the other doesn't. A <dfn data-en="an abstract base class (System.ComponentModel.DataAnnotations.ValidationAttribute) that every built-in DataAnnotations attribute -- Required, Range, StringLength -- already subclasses; writing a custom subclass gives a single-property rule its own reusable attribute, usable on any property of any class, the same way the built-in ones are" data-vn="ValidationAttribute (giữ nguyên) — abstract base class (System.ComponentModel.DataAnnotations.ValidationAttribute) mà mọi attribute DataAnnotations có sẵn -- Required, Range, StringLength -- đều kế thừa từ đây; tự viết subclass cho ra 1 luật validate cho 1 property riêng, tái dùng được trên property bất kỳ của class bất kỳ, giống cách attribute có sẵn hoạt động">ValidationAttribute</dfn> subclass is a rule declared exactly once, as a class, usable on any property of any class from then on — the same leverage Lesson 81's shared JSON Schema document had over copy-pasted handler checks, just spelled as a C# class instead of a schema file.</p>
+
+<pre><code><span class="kw">public class</span> ClassicMovieAttribute : ValidationAttribute
+{
+    <span class="kw">public</span> ClassicMovieAttribute(<span class="kw">int</span> year) =&gt; Year = year;
+
+    <span class="kw">public int</span> Year { get; }
+
+    <span class="kw">protected override</span> ValidationResult? IsValid(
+        <span class="kw">object</span>? value, ValidationContext validationContext)
+    {
+        <span class="kw">var</span> movie = (Movie)validationContext.ObjectInstance;
+        <span class="kw">var</span> releaseYear = ((DateTime)value!).Year;
+
+        <span class="kw">if</span> (movie.Genre == Genre.Classic &amp;&amp; releaseYear &gt; Year)
+            <span class="kw">return new</span> ValidationResult(
+                <span class="kw">$"Classic movies must have a release year no later than {Year}."</span>);
+
+        <span class="kw">return</span> ValidationResult.Success;
+    }
+}</code></pre>
+<p>Applied exactly like a built-in attribute: <code>[ClassicMovie(1960)] public DateTime ReleaseDate { get; set; }</code>.</p>
+
+<h2>2 · The method every subclass must override: IsValid</h2>
+<p>The one method a <code>ValidationAttribute</code> subclass overrides is <code>protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)</code>. <code>value</code> is the decorated property's own current value, boxed as <code>object?</code> — the attribute has no idea at compile time whether it is sitting on a <code>DateTime</code>, a <code>string</code>, or an <code>int</code>, which is exactly why the body casts it. Returning <code>ValidationResult.Success</code> means the rule passed; returning a <code>new ValidationResult(message)</code> means it failed, with <code>message</code> becoming that property's reported error text, read the same way <code>[Range]</code>'s own failure message is.</p>
+
+<h2>3 · Seeing the rest of the object: ValidationContext.ObjectInstance</h2>
+<p>A built-in attribute like <code>[Range]</code> only ever sees the one property it decorates. <code>ClassicMovieAttribute</code> needs more: whether <em>this same object's</em> <code>Genre</code> is <code>Classic</code>. <code>ValidationContext</code> carries that wider view — its <code>ObjectInstance</code> property is the whole model object currently being validated, cast back to the concrete class to reach any other property on it. This is the one way a single-property attribute class can still read a sibling property, without becoming a full <code>IValidatableObject.Validate</code> override tied to one class.</p>
+
+<h2>4 · Where the error message text actually comes from</h2>
+<p>The worked example above builds its own message inline with <code>$"Classic movies must have a release year no later than {Year}."</code>. <code>ValidationAttribute</code> also exposes an <code>ErrorMessage</code> property, settable from the attribute usage site itself (<code>[ClassicMovie(1960, ErrorMessage = "...")]</code>) the same way every built-in attribute accepts one, plus a <code>FormatErrorMessage(string name)</code> method a subclass can override to weave the failing property's display name into a templated message rather than hand-building the string inside <code>IsValid</code> every time.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like writing a custom Zod <code>.refine()</code> or Yup <code>.test()</code> function — same "one reusable predicate, parameterized" instinct. The gap that doesn't carry over: a Zod <code>refine</code> callback gets the whole parsed object handed to it directly as an argument. A C# <code>ValidationAttribute</code> only receives the one decorated property's <code>value</code> directly — reaching any other property requires the extra step through <code>validationContext.ObjectInstance</code>, because the attribute class itself is written once, generically, with no compile-time knowledge of which model it will eventually decorate.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers subclassing <code>ValidationAttribute</code>, the <code>IsValid(object? value, ValidationContext validationContext)</code> signature, reading a sibling property through <code>ValidationContext.ObjectInstance</code>, and the <code>ErrorMessage</code>/<code>FormatErrorMessage</code> message path. It does not cover client-side validation adapters (<code>IClientModelValidator</code>, the jQuery-validation/unobtrusive-validation wiring a custom attribute needs to also run in the browser) — a reasonable next step, not today's — nor FluentValidation or any other third-party validation library, which stays out of scope for the same framework-comparison reason Lesson 132 named.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A ValidationAttribute subclass is declared exactly once as a class and can then be applied to any property on any model class, unlike IValidatableObject.Validate, which is implemented on one specific class and has to be copy-pasted (and kept in sync by hand) to reuse the same rule on a second class.">
+    <p class="stem">Why does a custom ValidationAttribute reuse better than an IValidatableObject.Validate rule?</p>
+    <button class="opt" data-ok>It is declared once, as a class, reusable everywhere</button>
+    <button class="opt">It always runs before any other DataAnnotations attribute runs</button>
+    <button class="opt">It can only ever be placed on one property</button>
+    <button class="opt">It skips ModelState and writes the final response itself</button>
+  </div>
+  <div class="q" data-why="The documented method signature a ValidationAttribute subclass overrides is protected override ValidationResult? IsValid(object? value, ValidationContext validationContext) -- value is the decorated property's own current value, boxed as object, and validationContext carries the wider ValidationContext information.">
+    <p class="stem">What is the exact signature of the method a ValidationAttribute subclass overrides?</p>
+    <button class="opt" data-ok>protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)</button>
+    <button class="opt">public override bool IsValid(object value, ModelStateDictionary state)</button>
+    <button class="opt">protected override Task IsValidAsync(object value, HttpContext context)</button>
+    <button class="opt">public override ValidationResult Validate(object value, string propertyName)</button>
+  </div>
+  <div class="q" data-why="ValidationContext.ObjectInstance is documented as the whole model object currently being validated, so a single-property ValidationAttribute can cast it back to the concrete class and read a sibling property -- the one way it reaches beyond the one decorated property's own value.">
+    <p class="stem">How does a custom ValidationAttribute read a sibling property on the same object?</p>
+    <button class="opt" data-ok>by casting ValidationContext.ObjectInstance back to the real model class itself</button>
+    <button class="opt">by injecting a full DbContext into the attribute constructor itself</button>
+    <button class="opt">by calling ModelState.IsValid a second time from right inside IsValid</button>
+    <button class="opt">every sibling property just gets auto-passed in as one value</button>
+  </div>
+  <div class="q" data-why="ValidationAttribute exposes an ErrorMessage property settable from the attribute usage site itself, plus a FormatErrorMessage(string name) method a subclass can override to weave the failing property's display name into a templated message, as alternatives to hand-building the string inline inside IsValid.">
+    <p class="stem">Besides building a message string by hand inside IsValid, what else can supply the error text?</p>
+    <button class="opt" data-ok>the ErrorMessage property, or an overridden FormatErrorMessage method right there</button>
+    <button class="opt">only a brand new ProblemDetails object, built fresh from nothing</button>
+    <button class="opt">a second, separate ValidationAttribute class, chained in right after it</button>
+    <button class="opt">the compiler always just substitutes in one fixed built-in message</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation">Microsoft Learn: Model validation in ASP.NET Core MVC and Razor Pages</a> — the same page Lesson 132 cited, read again specifically for its "Custom attributes" section, which gives the exact <code>IsValid(object? value, ValidationContext validationContext)</code> signature used verbatim above, the full <code>ClassicMovieAttribute</code>/<code>Movie</code> worked example this lesson's own example is drawn from, and the <code>ValidationContext.ObjectInstance</code>, <code>ErrorMessage</code>, and <code>FormatErrorMessage</code> members. Recommended as the one page to read in full: it also covers the client-side validation adapter this lesson named out of scope, for whoever wants that next step.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 132's DataAnnotations/IValidatableObject split. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu custom attribute này cần gọi database để check, ví dụ unique email, thì nên làm ở IsValid hay bắt buộc phải đẩy xuống handler?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

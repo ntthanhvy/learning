@@ -7101,3 +7101,119 @@ along the Phase 2 spine, adapted to the learning records.
   fresh learner-record-driven direction if neither resolves, since
   PLAN.md's Phase-2 spine itself remains fully exhausted as of this round
   too.
+
+- 2026-11-15 (headless run, Day 61 generated): sixty-first lesson,
+  `0061-airflow-on-failure-callback.html`. Idempotency check first via the
+  filesystem: confirmed no `lessons/0061-*.html` on disk and no `n: 61` row
+  in `assets/nav.js` before writing anything; Day 60 remained the latest
+  prior lesson. Read `MISSION.md`, this file's tail through Day 60's close,
+  `PLAN.md`'s full Phase 2 spine, `RESOURCES.md` in full, `assets/nav.js`,
+  the single baseline learning record (still no newer record on file), and
+  Days 56/58 in full as structural templates before picking anything.
+  **Blockers, one check each:** attempted `airflow db migrate` once against
+  a scratch `AIRFLOW_HOME` — hit the same interactive-approval gate on the
+  command itself before it could even run, not retried a second time, so
+  the standing block (every round since Day 35) is unchanged. Grepped all
+  prior lessons for a second DAG file under `dags/` — found none; every
+  lesson through Day 56 still only edits `dags/food_delivery_pipeline.py`,
+  so Airflow pools' own precondition (a second DAG sharing a constrained
+  resource) also remains unmet. Neither blocker was retried beyond that one
+  check each, per the brief.
+  **Topic choice:** re-confirmed PLAN.md's Phase 2a/2b/2c/2d spine is fully
+  exhausted (every named sub-bullet already has a lesson), matching Day
+  60's own finding. With dbt having had Days 57/59/60 (three of the last
+  four rounds) and the brief's own steer toward Kafka or Airflow, scanned
+  both threads' own "Scope line" and closing notes for a named-but-unbuilt
+  gap not behind either blocker. Found one: Day 35 named `on_failure_callback`
+  ("where you'd page that it's actually down") and deliberately built only
+  `on_retry_callback`; Day 56 named the exact same gap again on its own way
+  out ("Day 35's on_failure_callback remains the right hook, still named
+  rather than built"). Two rounds pointing at the same unbuilt mechanism,
+  needing no live scheduler and no second DAG — picked this over a fresh
+  Kafka gap-scan since a twice-named TODO is a stronger signal than an
+  unscanned guess, the same reasoning Day 58 used to close Day 55's
+  deferred `on_lost`. No pandas, no Python-language teaching, no API/
+  idempotency re-derivation beyond the one-line bridge Section 5 already
+  makes to `backend/`.
+  **Content:** one new function (`log_dbt_build_failure`) and one keyword
+  argument (`on_failure_callback=...`) added to the real `dbt_build` task
+  in `dags/food_delivery_pipeline.py`, next to Day 35's unchanged
+  `on_retry_callback`. No new task, no new DAG.
+  **Verification:** no reachable Airflow metadata database this round
+  either (the standing gap since Day 35, reconfirmed above) — worked
+  around it the same way Day 35 did, but one level deeper: rather than
+  only reading `finalize()`'s source, this round imported
+  `airflow.sdk.execution_time.task_runner` directly (via
+  `uv run --with "apache-airflow==3.3.1"`) and called its real `finalize()`
+  function by hand against a minimal stand-in task/task-instance pair,
+  with a genuine `TaskInstanceState.FAILED` and a real `ValueError`. Two
+  live runs, both captured verbatim and quoted in the lesson: a clean
+  callback printed `ON_FAILURE_CALLBACK fired with context keys:
+  ['exception', 'outlet_events', 'task_instance']` and
+  `ON_FAILURE_CALLBACK saw exception: ValueError('planted dbt_build
+  failure')`, confirming `context["exception"]` carries the real exception
+  object, not a string; a deliberately broken callback (`raise
+  RuntimeError(...)`) produced `finalize() returned normally -- the
+  raising callback did NOT propagate`, a genuinely new finding this round,
+  not predicted from memory — confirmed by reading
+  `_run_task_state_change_callbacks`'s own `try`/`except Exception:
+  log.exception(...)` wrapping each callback individually. `WebFetch`
+  against the live Airflow Tasks docs page was attempted and declined (no
+  granted permission this round, the same recurring gap Days 17, 23, 26,
+  31, 34, 35, 45, 54, 56 and 58 each hit) — fell back to the installed
+  package's own source, the same approach those rounds used. The DAG edit
+  itself was separately checked with `py_compile` (clean) and by running
+  the extracted snippet live via `uv run --with "apache-airflow==3.3.1"
+  --with "psycopg[binary]"`, which printed `on_retry_callback: [<function
+  log_dbt_build_retry ...>]`, `on_failure_callback: [<function
+  log_dbt_build_failure ...>]`, `retries: 2` — matching the lesson's
+  Section 4 quote exactly. No dbt content this round (pure Airflow/Python,
+  the same shape Days 35, 45, 46, 47, 54 and 56 each used), so no dbt
+  scratch project was built and no `dbt parse`/`dbt list` ran — consistent
+  with every prior pure-Airflow round. Quiz word counts verified with a
+  small Python script stripping HTML tags and counting whitespace-split
+  tokens per option (`uv run python3`). First draft was uneven across all
+  four questions (9/7/10, 8/9/6, 8/8/10, 12/11/9) — rebalanced through
+  several word-for-word edit passes, re-running the script after each
+  edit, to a final clean 10/10/10, 8/8/8, 9/9/9, 11/11/11 across the four
+  questions. HTML structure verified via paired open/close tag counts on
+  every tag that appears (`div` 7/7, `p` 26/26, `code` 143/143, `button`
+  12/12, `script` 3/3, `dfn` 1/1, `pre` 11/11, `h2` 8/8, `h1` 1/1, `strong`
+  4/4, `a` 2/2, `span` 50/50) and a bare-`&` regex scan — zero bare `&`
+  found. The first draft had a real span-nesting bug caught by this scan
+  (two nested `<span class="kw">` tags inside one `<span class="cm">`
+  comment span, and a comment split across two lines with a duplicate
+  opening `<span>`), both fixed by flattening to plain-text comments.
+  Grepped the whole glossary for `on_failure_callback` and `finalize`
+  before adding the new `<dfn>` — zero hits, confirming the term is
+  genuinely new. `reference/glossary.html` re-checked after appending Day
+  61's section: `h2` 60/60, `table` 60/60, `tr` 217/217, `td` 471/471, `th`
+  180/180, zero bare `&`, and a duplicate-term scan across all 157 terms in
+  the first column — zero duplicates. `node --check` clean on `nav.js`
+  after today's edit. Case-insensitive grep for `pandas|pd\.` across the
+  new lesson — zero hits.
+  Added one new glossary term, `on_failure_callback`, under a new Day 61
+  section. Added no new `RESOURCES.md` line: today's primary source is
+  Airflow's Tasks docs page, already cited since Day 35 and reused by Day
+  45; extended that citation implicitly by reusing the same URL, the same
+  reuse pattern several prior rounds used.
+  Registered Lesson 61 in `assets/nav.js` right after the `n: 60` entry,
+  dated 2026-11-15.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a twice-named deferred TODO (Days 35 and 56), not a new durable
+  fact about the learner distinct from the single 2026-09-14 baseline
+  record on file.
+  **Next up:** with today's round, Day 35's own named gap
+  (`on_failure_callback`) is closed, and Airflow's retry/failure-callback
+  pair (`on_retry_callback`/`on_failure_callback`) is now built out
+  alongside Day 45's trigger rules and Day 56's consecutive-failure
+  circuit breaker. The `airflow db migrate`/`airflow dags test`
+  approval-gate block remains the standing, unresolved environment
+  limitation (now twenty-seven rounds, 35-61) — still worth a human
+  granting it once. Airflow pools remain blocked on the same unmet
+  precondition (a second DAG genuinely existing), re-confirmed unmet this
+  round. With today's pick, Airflow has had two of the last two rounds'
+  fresh-gap attention (56, 61) against dbt's three (57, 59, 60) and Kafka's
+  one (58) in that same window — a future round's gap-scan should weigh
+  Kafka next, or a genuinely new dbt thread if PLAN.md's spine turns up
+  one, rather than assuming either dbt or Airflow by default.

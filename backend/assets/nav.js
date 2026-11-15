@@ -272,6 +272,8 @@
       file: "lessons/0131-dynamic-output-cache-policies-ioutputcachepolicyprovider.html" },
     { n: 132, date: "2026-11-14", title: "Request validation, now in C# too",
       file: "lessons/0132-aspnetcore-model-validation-dataannotations-apicontroller.html" },
+    { n: 133, date: "2026-11-15", title: "Writing a reusable validation rule once",
+      file: "lessons/0133-custom-validationattribute-reusable-rules.html" },
   ];
 
   const REFS = [

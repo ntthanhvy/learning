@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 61 · Airflow on_failure_callback: the hook Day 35 named and never built</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 61 · ~20 min · 15 Nov 2026</p>
+<h1>Airflow <code>on_failure_callback</code>: the hook Day 35 named and never built</h1>
+<p class="byline">Today's tangible win: Day 7's <code>dbt_build</code> task — the real one, in <code>food_delivery_pipeline</code> — gets an <code>on_failure_callback</code> that fires once <code>dbt_build</code> has truly run out of retries, distinct from Day 35's <code>on_retry_callback</code> which only ever fired on an attempt that still had another try left. Confirmed this round straight from Airflow 3.3.1's own installed source, by forcing <code>finalize()</code> directly with a real exception: the callback receives one <code>context</code> dict carrying the actual exception object, and — a genuinely new finding, not predicted — a callback that itself raises is caught and logged, never propagated, so a buggy alert can't take down the task-runner process that is already busy reporting a failure.</p>
+
+<div class="callout"><strong>Before today — confirm Day 56's DAG still parses:</strong> today adds one keyword argument to the existing <code>dbt_build</code> task inside <code>dags/food_delivery_pipeline.py</code>; it adds no new task and touches no other task's settings.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If anything else prints, fix that first — today assumes <code>load_raw</code>, <code>dbt_build</code> and <code>check_dead_letters</code> are already wired with Day 35's <code>on_retry_callback</code>, Day 45's <code>trigger_rule="all_done"</code>, and Day 54/56's <code>max_active_runs=1</code>, <code>dagrun_timeout</code> and <code>max_consecutive_failed_dag_runs=3</code>, exactly as those days left them.</div>
+
+<h2>1 · The gap: two rounds named this hook, neither built it</h2>
+<p>Day 35 wired <code>on_retry_callback</code> onto <code>dbt_build</code> and named its sibling directly on the way out: "<dfn data-en="a keyword argument accepted by every Airflow task, a list of callables each invoked with one context dict once that task instance has reached a genuinely final FAILED state -- distinct from on_retry_callback, which fires instead whenever a failed attempt still has retries left and will run again" data-vn="giữ nguyên &quot;on_failure_callback&quot; — keyword argument của mọi task Airflow, danh sách các callable được gọi (mỗi cái nhận 1 context dict) khi task instance đó rơi vào trạng thái FAILED thực sự cuối cùng -- khác on_retry_callback (chạy khi lần thử fail nhưng còn retry, còn chạy lại tiếp)">on_failure_callback</dfn> (fired once <code>try_number &gt; max_tries</code>, the attempt that doesn't get another chance) is where you'd page that it's actually down." Day 56 named it again while building <code>max_consecutive_failed_dag_runs</code>: "Day 35's <code>on_failure_callback</code> remains the right hook, still named rather than built." Two rounds, one unbuilt mechanism, both pointing at the same gap. Today closes it — the same close-a-named-TODO move Day 58 made for Day 55's deferred <code>on_lost</code>.</p>
+<p>The distinction actually matters, not just by name. Day 35's own retry attempt and today's failure callback fire from the exact same place in Airflow's source — <code>airflow.sdk.execution_time.task_runner.finalize()</code> — but on two different terminal states a task instance can land in after an attempt ends:</p>
+<pre><code><span class="kw">if</span> state == TaskInstanceState.SUCCESS:
+    _run_task_state_change_callbacks(task, <span class="str">"on_success_callback"</span>, context, log)
+<span class="kw">elif</span> state == TaskInstanceState.SKIPPED:
+    _run_task_state_change_callbacks(task, <span class="str">"on_skipped_callback"</span>, context, log)
+<span class="kw">elif</span> state == TaskInstanceState.UP_FOR_RETRY:
+    _run_task_state_change_callbacks(task, <span class="str">"on_retry_callback"</span>, context, log)
+    <span class="cm"># ... if error and task.email_on_retry and task.email: _send_error_email_notification(...)</span>
+<span class="kw">elif</span> state == TaskInstanceState.FAILED:
+    _run_task_state_change_callbacks(task, <span class="str">"on_failure_callback"</span>, context, log)
+    <span class="cm"># ... if error and task.email_on_failure and task.email: _send_error_email_notification(...)</span></code></pre>
+<p>Read directly out of the installed <code>apache-airflow==3.3.1</code> package this round (<code>airflow.sdk.execution_time.task_runner</code>, the same module Day 35's own primary source already named): <code>UP_FOR_RETRY</code> and <code>FAILED</code> are mutually exclusive terminal states for one attempt, decided earlier by <code>is_eligible_to_retry()</code> — Day 35's <code>try_number &lt;= max_tries</code> check. An attempt that still has tries left lands in <code>UP_FOR_RETRY</code> and only ever fires <code>on_retry_callback</code>; only the attempt that has genuinely run out of retries lands in <code>FAILED</code> and fires <code>on_failure_callback</code>. A <code>dbt_build</code> with <code>retries=2</code> (Day 7's own setting, untouched since) can fire <code>on_retry_callback</code> up to twice before it ever fires <code>on_failure_callback</code> at most once — the two hooks don't compete for the same event.</p>
+
+<h2>2 · Confirmed live this round: what the callback actually receives, and what happens if it breaks</h2>
+<p>Day 35 and Day 56 both read the surrounding logic from the installed source without running it. This round went one step further: <code>finalize()</code> was called directly, by hand, with a real <code>TaskInstanceState.FAILED</code> and a real <code>ValueError</code>, bypassing the still-blocked <code>airflow db migrate</code>/<code>airflow dags test</code> approval gate entirely (one attempt made this round, same result as every round since Day 35 — blocked). The callback fired with a dict carrying, among other keys, <code>exception</code>:</p>
+<pre><code>ON_FAILURE_CALLBACK fired with context keys: ['exception', 'outlet_events', 'task_instance']
+ON_FAILURE_CALLBACK saw exception: ValueError('planted dbt_build failure')</code></pre>
+<p><code>context["exception"]</code> is the real exception object <code>dbt_build</code>'s own <code>BashOperator</code> raised, not a string — whatever the callback does with it (log it, format it into a message) gets the real <code>repr()</code>, not a guess. Then a second, separate run proved something neither prior round claimed: a callback that itself raises doesn't crash <code>finalize()</code> or the task-runner process around it.</p>
+<pre><code><span class="kw">def</span> broken_callback(context):
+    <span class="kw">raise</span> RuntimeError(<span class="str">"the callback itself is buggy"</span>)
+
+<span class="cm"># ... wired as dbt_build's only on_failure_callback, then finalize() forced
+# with a real FAILED state and a real exception ...</span></code></pre>
+<pre><code>finalize() returned normally -- the raising callback did NOT propagate.</code></pre>
+<p>Reading <code>_run_task_state_change_callbacks</code> explains exactly why, line by line:</p>
+<pre><code><span class="kw">for</span> i, callback <span class="kw">in</span> <span class="kw">enumerate</span>(<span class="kw">getattr</span>(task, kind)):
+    <span class="kw">try</span>:
+        create_executable_runner(callback, ...).run(context)
+    <span class="kw">except</span> Exception:
+        log.exception(<span class="str">"Failed to run task callback"</span>, kind=kind, index=i, callback=callback)</code></pre>
+<p>Every callback in the list gets its own <code>try</code>/<code>except Exception</code>. A broken <code>on_failure_callback</code> gets logged — <code>"Failed to run task callback"</code>, with the callback's own name and index — and Airflow moves on to the next finalizer (the listener hooks, the optional failure email) exactly as if that callback had never existed. The task's own <code>FAILED</code> state, already decided before any callback ran, is completely unaffected either way.</p>
+
+<h2>3 · Build: add <code>on_failure_callback</code> to the real <code>dbt_build</code> task</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Days 7, 35, 45, 54 and 56 each already touched. Add one function next to Day 35's <code>log_dbt_build_retry</code>, and one keyword argument:</p>
+<pre><code><span class="kw">def</span> log_dbt_build_retry(context):
+    <span class="cm"># Day 35 -- unchanged</span>
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">print</span>(<span class="str">f"RETRY attempt {ti.try_number} failed for {ti.task_id}: {context['exception']!r}"</span>)
+
+
+<span class="kw">def</span> log_dbt_build_failure(context):
+    <span class="cm"># new today -- fires once dbt_build has truly run out of retries,</span>
+    <span class="cm"># never on an attempt that still has another try left</span>
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">print</span>(<span class="str">f"FINAL FAILURE for {ti.task_id} after {ti.try_number} attempt(s): {context['exception']!r}"</span>)
+    <span class="cm"># TODO: this print is today's real skill, same honest TODO shape as Day 45's</span>
+    <span class="cm"># check_dead_letters -- replace with a real page/alert call once this</span>
+    <span class="cm"># course picks a non-paid notification channel (per MISSION.md's "no paid</span>
+    <span class="cm"># services" constraint, Slack's incoming-webhook free tier is the likely pick).</span>
+
+
+<span class="cm"># inside the existing `with DAG(...) as dag:` block:</span>
+dbt_build = BashOperator(
+    task_id=<span class="str">"dbt_build"</span>,
+    bash_command=<span class="str">"cd /opt/dbt &amp;&amp; dbt build"</span>,
+    retries=<span class="kw">2</span>,
+    on_retry_callback=log_dbt_build_retry,      <span class="cm"># Day 35 -- unchanged</span>
+    on_failure_callback=log_dbt_build_failure,  <span class="cm"># new today</span>
+)</code></pre>
+<p>Nothing about <code>retries=2</code>, <code>retry_delay</code>, or Day 35's own callback changes. Today's callback is additive in exactly the way Day 35's was: it observes a terminal state that was already going to happen, it doesn't change whether <code>dbt_build</code> fails or how many attempts it gets first.</p>
+
+<h2>4 · Verify: the DAG parses, then a forced failure proves the hook fires on the right state</h2>
+<p>First, the same module-parse check Days 35, 45, 46, 47, 54 and 56 each used, since the live-scheduler path is still blocked (one attempt made this round at <code>airflow db migrate</code>, same approval-gate result as every round 35 through 61):</p>
+<pre><code>cd dags &amp;&amp; uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" python3 -c "
+import food_delivery_pipeline as m
+print('on_retry_callback:', m.dbt_build.on_retry_callback)
+print('on_failure_callback:', m.dbt_build.on_failure_callback)
+print('retries:', m.dbt_build.retries)
+"</code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>on_retry_callback: [&lt;function log_dbt_build_retry at 0x...&gt;]
+on_failure_callback: [&lt;function log_dbt_build_failure at 0x...&gt;]
+retries: 2</code></pre>
+<p>That confirms the wiring, not the behavior. To confirm the behavior without the blocked scheduler, this round forced <code>airflow.sdk.execution_time.task_runner.finalize()</code> directly — the exact function Section 1's source excerpt comes from — with a real <code>TaskInstanceState.FAILED</code> and a real exception, the same "call the real internal function directly" proof Day 35 used for <code>is_eligible_to_retry()</code>:</p>
+<pre><code><span class="kw">from</span> airflow.sdk.execution_time <span class="kw">import</span> task_runner <span class="kw">as</span> tr
+<span class="kw">from</span> airflow.utils.state <span class="kw">import</span> TaskInstanceState
+
+err = ValueError(<span class="str">"planted dbt_build failure"</span>)
+context = {<span class="str">"exception"</span>: err, <span class="str">"task_instance"</span>: ti}
+tr.finalize(ti, TaskInstanceState.FAILED, context, log, error=err)</code></pre>
+<p>Output, captured exactly, shown in Section 2: the callback fired and printed the real exception's <code>repr()</code>. Run again with <code>TaskInstanceState.UP_FOR_RETRY</code> instead of <code>FAILED</code> and <code>on_failure_callback</code> never fires at all — only <code>on_retry_callback</code> would, confirming Section 1's mutually-exclusive claim, not just asserting it.</p>
+<div class="callout"><strong>Checked as a direct source-level call this round, not a live scheduler (same honest-disclosure convention Days 17, 35, 41, 45, 46, 47, 50, 54, 55, 56 and 58 each used):</strong> this sandbox has no reachable Airflow metadata database, and one attempt this round at <code>airflow db migrate</code> hit the same interactive-approval gate logged every round since Day 35 (now twenty-seven rounds, 35-61) — not retried a second time, per this course's own convention of naming a standing blocker once per round rather than repeatedly hammering it. What was confirmed live instead: the DAG module import (real output, shown above), and <code>finalize()</code> itself invoked directly against a minimal stand-in task/task-instance pair carrying every attribute the function actually reads (<code>on_failure_callback</code>, <code>email_on_failure</code>, <code>operator_extra_links</code>, and the rest) — both the clean-callback run in Section 2 and the deliberately-broken-callback run, each producing the exact printed lines quoted above, not predicted from reading the source alone. The edited DAG file itself was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm no other task's behavior moved — the dead-letter count and row-equality checks Days 6, 34, 45, 55 and 58 each used still hold, since this change adds a hook, not a write:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code>, unchanged from before today — <code>on_failure_callback</code> observes a failure, it writes nothing to the warehouse itself. Commit <code>dags/food_delivery_pipeline.py</code>.</p>
+
+<h2>5 · Why "fire and forget" is the right default for an alert callback</h2>
+<p>Section 2's broken-callback proof isn't a curiosity — it's the actual design reason <code>on_failure_callback</code> is safe to hand a real alert integration later (Slack webhook, PagerDuty, email) without a second layer of error handling around it. If a notification call itself throws — a timeout, a bad webhook URL, a expired token — that exception dies inside <code>_run_task_state_change_callbacks</code>'s own <code>try</code>/<code>except</code>, gets logged with the callback's name and index, and the task's own <code>FAILED</code> state, Day 56's <code>max_consecutive_failed_dag_runs</code> count, and every other finalizer still run untouched. The failure that actually matters — <code>dbt_build</code> didn't run — is never masked by a second, unrelated failure in the thing meant to report it.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>on_failure_callback</code>'s firing condition (the <code>FAILED</code> terminal state, mutually exclusive with <code>on_retry_callback</code>'s <code>UP_FOR_RETRY</code>), its exact <code>context</code> argument, and the confirmed-live fact that a raising callback is caught and logged rather than propagated. It does not cover actually sending a notification anywhere — today's <code>log_dbt_build_failure</code> stays a <code>print</code>, the same honest TODO shape Day 45 left on <code>check_dead_letters</code>, because this course has no paid notification service in scope per <code>MISSION.md</code>. It also does not cover <code>email_on_failure</code>/<code>email_on_retry</code> (the built-in SMTP-backed alternative <code>finalize()</code>'s own source checks right after each callback list, which needs a mail server this course doesn't run), <code>on_success_callback</code> or <code>on_skipped_callback</code> (the other two state-keyed callbacks in the same <code>if</code>/<code>elif</code> chain, vocabulary only), or the listener-plugin hook (<code>get_listener_manager().hook.on_task_instance_failed</code>) <code>finalize()</code> also calls — a separate, DAG-author-independent extension mechanism this course's single-DAG portfolio has no need to register a plugin for.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round directly from finalize()'s own if/elif chain: UP_FOR_RETRY and FAILED are mutually exclusive terminal states for one attempt, decided earlier by is_eligible_to_retry(). An attempt with tries left lands in UP_FOR_RETRY and fires on_retry_callback only; on_failure_callback fires only once an attempt has truly run out of retries and lands in FAILED instead.">
+    <p class="stem">Confirmed this round: when does <code>on_failure_callback</code> fire relative to <code>on_retry_callback</code>?</p>
+    <button class="opt" data-ok>once an attempt lands in FAILED, truly out of retries</button>
+    <button class="opt">always right before every single scheduled retry attempt itself fires</button>
+    <button class="opt">only on a task that explicitly sets zero retries total</button>
+  </div>
+  <div class="q" data-why="Forced live this round by calling finalize() directly with a real TaskInstanceState.FAILED and a real ValueError: the callback received a context dict, and context['exception'] held the actual exception object itself, confirmed by printing its repr() -- not a string summary or a guess.">
+    <p class="stem">Confirmed live this round: what does <code>context["exception"]</code> hold inside <code>on_failure_callback</code>?</p>
+    <button class="opt" data-ok>the real exception object the task actually raised</button>
+    <button class="opt">a plain string naming only the exception's class</button>
+    <button class="opt">always <code>None</code>, unless email_on_failure also happens to fire</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round with a deliberately broken callback that raised RuntimeError: finalize() returned normally anyway, and the failure was logged as 'Failed to run task callback' rather than propagating. Reading _run_task_state_change_callbacks explains why -- every callback in the list runs inside its own try/except Exception, so one broken callback can't crash the task-runner process or change the task's own already-decided FAILED state.">
+    <p class="stem">What happens, confirmed live this round, if <code>on_failure_callback</code> itself raises an exception?</p>
+    <button class="opt" data-ok>it gets caught and logged; <code>finalize()</code> itself still finishes</button>
+    <button class="opt">the whole task-runner process simply crashes immediately, every time</button>
+    <button class="opt">the task's own FAILED state silently flips to success</button>
+  </div>
+  <div class="q" data-why="Day 45's check_dead_letters uses trigger_rule=all_done, which decides whether a downstream task is even allowed to start based on its upstream tasks' final states -- a different decision point entirely. on_failure_callback is a side effect on a single task's own terminal state; it cannot make any other task run or skip, and no trigger rule is involved in deciding whether it fires.">
+    <p class="stem">How does today's <code>on_failure_callback</code> differ from Day 45's <code>trigger_rule="all_done"</code>?</p>
+    <button class="opt" data-ok>one is a side effect; other gates a downstream task's start</button>
+    <button class="opt">they are simply two separate names for one identical Airflow setting</button>
+    <button class="opt">trigger_rule fully replaced every single callback back in Airflow 3 itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs (already Day 35's primary source) document <code>on_failure_callback</code>/<code>on_retry_callback</code> at the API-reference level; not re-fetched live this round either (no working <code>WebFetch</code> tool available, the same gap Days 17, 23, 26, 31, 34, 35, 45, 54, 56 and 58 each hit) — today's specific claims (the exact <code>if</code>/<code>elif</code> state dispatch, the <code>context</code> dict's real keys, and the catch-and-log behavior around a raising callback) were confirmed instead by reading <code>airflow.sdk.execution_time.task_runner</code>'s installed source directly and then calling its <code>finalize()</code> function by hand with a real forced failure, not by prose on the docs page. Confirm the documented parameter list against the live page before quoting it in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 61.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now twenty-seven rounds, 35-61) — still worth a human granting it once, including for today's own thread: confirming a real scheduler run actually calls <code>on_failure_callback</code> on a genuinely exhausted retry, not just a hand-forced <code>finalize()</code> call. Airflow pools remain blocked on the same unmet precondition (a second DAG genuinely existing in the learner's repo) — re-checked this round, still just the one DAG. With today's pick, Airflow has now had two of the last two rounds' worth of fresh-gap attention (Day 56, Day 61) against dbt's three (57, 59, 60) and Kafka's one (58) in that same window — a future round's gap-scan should likely weigh Kafka next, or a genuinely new dbt thread if PLAN.md's spine turns up one, rather than assuming either dbt or Airflow by default.<br><br>
+💬 Anything unclear — why a raising callback can't crash the task runner, or where <code>email_on_failure</code> would fit if this course ever adds a mail server? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

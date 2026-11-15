@@ -464,6 +464,12 @@
   <tr><td>intersection selector</td><td>giữ nguyên "intersection selector" — composition key (intersection:, 1 list YAML gồm nhiều selection block, nằm trong definition:) resolve ra CHỈ những node khớp VỚI MỌI block trong list đó — tức AND logic, hẹp hơn từng block riêng lẻ, khác hẳn tập rộng hơn mà union: sẽ cho ra từ cùng 1 list đó</td><td>A dbt selector composition key (<code>intersection:</code>, a YAML list of selection blocks nested under <code>definition:</code>) that resolves to only the nodes matched by <em>every</em> block in the list — a logical AND, narrower than either block alone, rather than the broader set <code>union:</code> would produce from the identical list. Confirmed live this round: an intersection of <code>tag:nightly</code> and <code>config.materialized:table</code> resolved to the four marts — narrowing had nothing to cut only because this project's tags and materializations already line up one-to-one.</td></tr>
 </table>
 
+<h2 id="day61">Day 61 — Airflow on_failure_callback: the hook Day 35 named and never built</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>on_failure_callback</td><td>giữ nguyên "on_failure_callback" — keyword argument của mọi task Airflow, danh sách các callable được gọi (mỗi cái nhận 1 context dict) khi task instance đó rơi vào trạng thái FAILED thực sự cuối cùng — khác on_retry_callback (chạy khi lần thử fail nhưng còn retry, còn chạy lại tiếp)</td><td>A keyword argument accepted by every Airflow task — a list of callables, each invoked with one <code>context</code> dict, once that task instance has reached a genuinely final <code>FAILED</code> state. Distinct from <code>on_retry_callback</code>, which fires instead whenever a failed attempt still has retries left and will run again. Confirmed live this round by forcing <code>airflow.sdk.execution_time.task_runner.finalize()</code> directly with a real <code>TaskInstanceState.FAILED</code> and a real exception: the callback fired with <code>context["exception"]</code> holding the actual exception object, and a deliberately broken callback was caught and logged by <code>_run_task_state_change_callbacks</code>'s own <code>try</code>/<code>except</code> rather than propagating.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

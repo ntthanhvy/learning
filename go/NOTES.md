@@ -923,3 +923,17 @@
   status --short` to have touched only its own course directory; rust's
   post-week daily quiz+kata infra was re-verified unchanged and logged
   via a `note` row.
+- 2026-11-15 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now one hundred and eighteen days
+  past it. All 14 lessons (`0001`-`0014`) re-confirmed present on disk
+  and registered in `assets/nav.js`, unchanged. A direct `psql
+  "$LEARNING_DB_URL" ...` call typed in the Bash tool was blocked again
+  ("Contains simple_expansion"), and this round the `bin/query-progress`
+  read helper was also blocked ("This command requires approval", no
+  user present to grant it) — DB reads were unreachable this round, so
+  per the standing fallback rule this round relied on learning-records
+  and NOTES.md alone. Writes were unaffected: `bin/record-progress go
+  note --detail '{"by":"claude-sonnet-5","day":"skip-2026-11-15",
+  "action":"verified-unchanged"}'` succeeded via a plain relative-path
+  call, consistent with every prior round's observation that writes are
+  reliable even when reads get gated.

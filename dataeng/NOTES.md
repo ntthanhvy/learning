@@ -7217,3 +7217,120 @@ along the Phase 2 spine, adapted to the learning records.
   one (58) in that same window — a future round's gap-scan should weigh
   Kafka next, or a genuinely new dbt thread if PLAN.md's spine turns up
   one, rather than assuming either dbt or Airflow by default.
+
+- 2026-11-16 (headless 06:00 run, Day 62 generated): sixty-second lesson,
+  `0062-kafka-dead-letter-replay.html`. Idempotency check first via the DB:
+  queried `course_progress` for `dataeng`/`lesson_generated` rows — the top
+  row was Day 61, dated 2026-11-15, not today, so proceeded. Also confirmed
+  via the filesystem: no `lessons/0062-*.html` on disk and no `n: 62` row in
+  `assets/nav.js` before writing anything. Read `MISSION.md` in full,
+  `NOTES.md`'s conventions section and its tail through Day 61's close,
+  `PLAN.md`'s full Phase 2 spine, `RESOURCES.md` in full, `assets/nav.js`,
+  the single baseline learning record (still no newer record on file), and
+  Days 41/58 in full as structural templates before picking anything. No
+  quiz/kata/lesson_completed signal recorded for any course since 2026-10-15,
+  confirmed via the same DB query's absence of such rows, so no learner-record
+  override — picked from PLAN.md's spine state and prior rounds' own closing
+  notes instead.
+  **Topic choice:** re-confirmed PLAN.md's Phase 2a/2b/2c/2d spine is fully
+  exhausted (every named sub-bullet already has a lesson), matching Days
+  59-61's own finding. Day 61's own closing note steered toward Kafka next
+  (Airflow had had two of the last two rounds, dbt three of the last four).
+  Scanned Kafka's own lesson scope lines for a named-but-unbuilt gap rather
+  than inventing a new one: Day 41's scope line named it directly — "it does
+  not cover replaying or reprocessing dead-lettered rows later (a real
+  follow-up workflow, not today's)." No later Kafka round (50, 55, 58) had
+  touched this; it needed no live broker and no second DAG, unlike the two
+  standing blocked threads (the `airflow db migrate` approval gate and
+  Airflow pools' second-DAG precondition, both re-confirmed unmet this round
+  by the same reasoning Day 61 used — no new DAG file found under `dags/`).
+  Picked this over a fresh Kafka gap-scan since a named, explicit TODO is a
+  stronger signal than an unscanned guess, the same reasoning Days 58 and 61
+  both used for their own picks. No pandas (grepped the finished lesson for
+  `pandas|pd\.|DataFrame`, zero hits), no Python-language teaching, no API/
+  idempotency re-derivation beyond the one-line bridge Section 2 makes to
+  `backend/`'s idempotency-key shape, reusing Day 6's existing idempotent
+  insert rather than inventing a new concept.
+  **Content:** one new script, `scripts/replay_dead_letters.py` — reads
+  every row in `raw.dead_letter_events` (Day 41's table, unchanged schema),
+  re-attempts `json.loads()` plus Day 6's own `INSERT ... ON CONFLICT
+  (event_id) DO NOTHING` into `raw.order_events`, and on success deletes the
+  dead-letter row; on failure, rolls back and `UPDATE`s the row's `error`/
+  `failed_at` in place rather than deleting it. No new table, no schema
+  change to Day 41's `dead_letter_events`.
+  **Verification:** no reachable Postgres this sandbox round either (the
+  standing gap since Day 35) — confirmed directly, not assumed: a real
+  `psycopg.connect("postgresql://fdp:fdp@localhost:5432/fdp", connect_timeout=2)`
+  raised a genuine `OperationalError: ... Connection refused`. Worked around
+  it the way Days 41/50/55/58 did: built a standalone fake-cursor model of
+  the exact control flow (three rows — one valid-JSON-but-previously-failed,
+  two permanently broken matching Day 41's own two test cases) in a scratch
+  dir under the repo root (`.scratch-dataeng-62/`, deleted after; confirmed
+  via a directory listing that nothing named `scratch` remained under the
+  repo root). First pass replayed exactly the fixable row and left the two
+  broken rows dead with their error recorded, matching the lesson's Section 4
+  expected output. A second pass against the shrunk remaining set replayed
+  nothing further, confirming the script is safe to run on a schedule. A
+  third pass deliberately re-included the already-replayed row to prove
+  Day 6's `ON CONFLICT DO NOTHING` (modeled in the fake cursor) is what
+  actually prevents a duplicate `order_events` row even if the replay script
+  itself were buggy about bookkeeping — exactly one row landed, not two. Two
+  supporting claims were checked directly against installed packages rather
+  than assumed: `json.loads()` accepts `bytes` directly with no decode step
+  (`json.loads(b'{"a": 1}')` → `{'a': 1}`, confirmed live), and psycopg3's
+  own `ByteaLoader.load()` (read directly from the installed `psycopg==3.3.9`
+  package via `uv run --with "psycopg[binary]"`) returns `bytes` for a
+  `bytea` column already — confirming the `raw_value` column needs no extra
+  wrapping before `json.loads()`, so an earlier draft's defensive
+  `bytes(raw_value)` was removed as genuinely unnecessary once checked, not
+  kept "just in case." The real `replay_dead_letters.py` file was separately
+  checked with `uv run python3 -m py_compile`, clean. No dbt content this
+  round (pure Kafka/Postgres/Python, the same shape Days 6, 41, 50 and 58
+  each used), so no dbt scratch project was built and no `dbt parse`/
+  `dbt list` ran. `WebFetch` was not attempted this round — nothing in this
+  lesson depended on a live doc page beyond the already-cited PostgreSQL
+  transactions page and Kleppmann's book, both reused from Day 41's and
+  `RESOURCES.md`'s existing citations respectively, so no new source needed
+  fetching.
+  Quiz word counts verified with a small Python script stripping HTML tags
+  and counting whitespace-split tokens per option (`uv run python3`). First
+  draft was uneven across all four questions (8/7/8, 10/8/8, 9/8/10, 10/7/10)
+  — rebalanced through several word-for-word edit passes, re-running the
+  script after each edit rather than trusting a hand recount, to a final
+  clean 8/8/8, 8/8/8, 9/9/9, 11/11/11 across the four questions. HTML
+  structure verified via paired open/close tag counts on every tag that
+  appears (`div` 8/8, `p` 20/20, `code` 61/61, `button` 12/12, `script` 3/3,
+  `dfn` 1/1, `pre` 5/5, `h2` 7/7, `h1` 1/1, `em` 4/4, `strong` 8/8, `a` 2/2,
+  `ul` 1/1, `li` 2/2) and a bare-`&` regex scan — zero bare `&` found, clean
+  on the first pass. Grepped the whole glossary for `replay` before writing
+  the new `<dfn>` — zero hits, confirming the term is genuinely new.
+  `reference/glossary.html` re-checked after appending Day 62's section:
+  `h2` 61/61, `table` 61/61, `tr` 219/219, `td` 474/474, `th` 183/183, zero
+  bare `&`, and a duplicate-term scan across all 158 terms in the first
+  column — zero duplicates. `node --check` clean on `nav.js` after today's
+  edit.
+  Added one new glossary term, `replay`, under a new Day 62 section. Added
+  no new `RESOURCES.md` line: today's primary source is the PostgreSQL
+  transactions documentation, already cited since Day 41 for the identical
+  `rollback()`-before-the-next-statement reason; extended that reuse rather
+  than adding a duplicate entry, the same pattern several prior rounds used.
+  Registered Lesson 62 in `assets/nav.js` right after the `n: 61` entry,
+  dated 2026-11-16.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named, deferred TODO in Day 41's own scope line, not a new
+  durable fact about the learner distinct from the single 2026-09-14
+  baseline record on file.
+  **Next up:** with today's round, Day 41's own named gap (replaying
+  dead-lettered rows) is closed. The `airflow db migrate`/`airflow dags
+  test` approval-gate block remains the standing, unresolved environment
+  limitation (now twenty-eight rounds, 35-62) — still worth a human
+  granting it once. Airflow pools remain blocked on the same unmet
+  precondition (a second DAG genuinely existing), re-confirmed unmet this
+  round. With today's pick, Kafka and Airflow are both at two of the last
+  six rounds' fresh-gap attention (Kafka: 58, 62; Airflow: 56, 61) against
+  dbt's three (57, 59, 60) in that same window — all three threads are close
+  to even, so a future round's gap-scan should follow whichever named TODO
+  or learner signal turns up first rather than rotating by a fixed rule.
+  Today's own scope line names one concrete remaining idea if picked up
+  again: scheduling the replay script as a periodic Airflow task, once a
+  second DAG slot or a real data-aware trigger for it makes sense.

@@ -11414,3 +11414,146 @@ upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
 Polly/.NET resilience libraries, both still deliberately out of scope per
 MISSION.md's "concepts first" rule; and the backfill-missing-
 Lesson-117-NOTES-entry gap, still not investigated.
+
+## 2026-11-16 — Lesson 134: making a custom validation rule run in the browser too (IClientModelValidator, [Remote])
+
+Headless run. Idempotency checked first via the DB query this run's own
+instructions specify: `course_progress` rows for
+`course='backend' AND kind='lesson_generated'` ordered by id descending
+showed the top row dated 2026-11-15 (day 133), not 2026-11-16 — safe to
+proceed. `nav.js`'s last entry was also `n: 133, date: "2026-11-15"` and
+no `lessons/0134-*.html` file existed on disk, agreeing with the DB
+check. `learning-records/` still has no entry newer than Lesson 3 — no
+fresh per-lesson completion signal to size today's step against, so
+generated conservatively, continuing the named next rung rather than
+guessing at new ground.
+
+Topic picked: the client-side validation adapter for a custom
+`ValidationAttribute` — named explicitly in Lesson 133's own scope line
+as "a reasonable next step, not today's" (`IClientModelValidator`, the
+jQuery-validation/unobtrusive-validation wiring). Re-checked the standing
+alternative first: `SizeLimit`/`MaximumBodySize`/`SetLocking(false)`
+(output-cache knobs, now deferred five rounds running as of Lesson 133,
+with that lesson's own entry explicitly flagging "five deferrals on the
+same thin candidate is a long run"). Weighed both directly this round:
+the named client-validation follow-up is a concrete, well-scoped gap with
+zero prior coverage (confirmed below) and ties to this course's own
+mission goal of reading backend PRs with substance (seeing a custom
+attribute gain a second interface in a diff and knowing why); the
+output-cache knobs remain one-line `OutputCacheOptions` properties with
+thin material to build a full 20-minute lesson around on their own. Picked
+the named validation follow-up again, but flagging this as a candidate to
+finally resolve (teach combined, or formally drop) next time regardless
+of what else is pending, since deferring a fifth-plus round without ever
+revisiting the decision risks the list growing stale. `grep -i` for
+`IClientModelValidator`/`ClientModelValidationContext`/`AddValidation`/
+`[Remote]`/`RemoteAttribute` across `backend/lessons/` and
+`glossary.html` came back empty, confirming the gap is real and the terms
+are free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/mvc/models/
+validation` again (the same page Lessons 132 and 133 both cited), this
+time for its "Client-side validation" and "IClientModelValidator"
+sections specifically. Confirmed verbatim: the interface name
+`IClientModelValidator`; the exact method signature `public void
+AddValidation(ClientModelValidationContext context)`; the full
+`ClassicMovieWithClientValidatorAttribute` worked example (implementing
+both `ValidationAttribute` and `IClientModelValidator` on the same class),
+which this lesson's own code block draws from directly; the quoted
+sentence that Tag Helpers and HTML helpers "use the validation attributes
+and type metadata from model properties to render HTML 5 data- attributes
+for the form elements that need validation"; the rendered
+`data-val`/`data-val-classicmovie`/`data-val-classicmovie-year` example
+markup, used verbatim in this lesson's own markup block; the quoted
+sentence that jQuery Unobtrusive Validation "parses the data- attributes
+and passes the logic to jQuery Validation, effectively 'copying' the
+server-side validation logic to the client"; the quoted quailifying
+sentence that a hand-written client validator "might be appropriate if
+the attribute doesn't do any server-side validation and doesn't need any
+services from DI"; and the `[Remote]` attribute's own worked example
+(`[Remote(action: "VerifyEmail", controller: "Users")]`) plus the quoted
+sentence describing it as implementing "client-side validation that
+requires calling a method on the server to determine whether field input
+is valid" — both used verbatim in this lesson's own section 4.
+`command -v dotnet` and `command -v go` were both attempted this round
+(not skipped on assumption) and the sandbox blocked both as requiring
+interactive approval with no user present — the same block every round
+has hit since Lesson 103, consistent with Lesson 131's and 133's own
+observation that the block extends to bare detection commands too. Fell
+back to hand-checking the lesson's three C# code blocks against the
+fetched docs' own exact signatures and worked examples instead, as above;
+all three blocks match the docs verbatim where not intentionally trimmed
+(the `ClassicMovieAttribute`/`IClientModelValidator` block condenses the
+docs' own longer worked example down to this lesson's own structure,
+dropping the `GetErrorMessage()` helper in favor of calling
+`FormatErrorMessage("")` directly, which the same docs page documents as
+the method a subclass can override to build that same string).
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson134/`, not `/tmp`, per the
+same sandbox constraint every round since Lesson 133 has noted; nothing
+written to the repo besides the three intended files; scratch directory
+deleted after): (1) a quiz word-count check per `<div class="q">` block,
+both `.split(/\s+/)` and `.split(" ")` methods agreeing — first draft
+landed uneven on all four questions (Q1 12/11/12/8, Q2 4/6/5/4, Q3
+12/11/10/9, Q4 12/12/8/12), converged after several rewrite-and-recount
+passes to exactly 11/11/11/11 (Q1), 4/4/4/4 (Q2), 11/11/11/11 (Q3), and
+12/12/12/12 (Q4), exactly one `data-ok` and four options per question
+confirmed the same way; (2) an HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean (div 6/6, p
+17/17, code 41/41, button 16/16, script 3/3, dfn 1/1, pre 3/3, h2 7/7, h1
+1/1, em 1/1, strong 5/5, a 2/2), the one `dfn` tag confirmed to carry both
+`data-en=` and `data-vn=`; (3) a brace/paren balance check on all three
+`<pre><code>` blocks after stripping tags and unescaping HTML entities —
+all balanced (4/4 braces, 8/8 parens; 0/0 braces, 0/0 parens; 1/1 braces,
+1/1 parens); (4) a raw-unescaped-`&` scan across the lesson — zero hits;
+(5) a duplicate-term scan on `glossary.html`'s first column before adding
+the two new rows — zero collisions for `IClientModelValidator` or
+`[Remote]`; a table/tr/td balance check on `glossary.html` after the
+two-row addition — balanced (tr 414/414, td 1239/1239, 413 term rows
+total = 411 prior + 2 new), plus a second duplicate-term scan afterward —
+zero duplicates; (6) `node --check` against `nav.js`, `gloss.js`,
+`quiz.js` — all clean, before and after the `nav.js` edit; (7) a basic
+HTML well-formedness check (one `<!DOCTYPE html>`, one `<html>`/
+`</html>`, three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 134 in `nav.js` (date 2026-11-16, today's actual
+generation date) right after `n: 133`. Confirmed via `git status
+--short` from the repo root that this round's own diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, and
+the new `backend/lessons/0134-client-side-validation-
+iclientmodelvalidator.html` — pre-existing unrelated uncommitted changes
+under `data/`, `python/`, `rust/`, `dataeng/`, and two scratch
+directories belong to other courses' own concurrent work and were left
+untouched, consistent with every prior round's own observation of the
+same pattern. Day number used 134, matching this file's own
+day-equals-lesson-number convention, no deviation found. No new
+`RESOURCES.md` line added — the one fetched page is `learn.microsoft.com`,
+already covered by this file's standing entries' pattern (and the same
+exact page Lessons 132 and 133 cited), cited inline in the lesson's own
+"Go deeper" section instead. No new `learning-records/` file added — the
+topic came from Lesson 133's own named scope-line gap, not a new
+observation about the learner. `bin/record-progress backend
+lesson_generated --day 134 --lesson
+0134-client-side-validation-iclientmodelvalidator.html --detail
+'{"by":"claude-sonnet-5"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: the `SizeLimit`/`MaximumBodySize` cache-wide limits and
+`SetLocking(false)`'s resource-locking opt-out (named in Lessons 130-133's
+own scope lines, now deferred six rounds running — strongly recommend
+either finally giving them one combined short lesson next time or
+formally dropping them from this list, six deferrals is long enough that
+repeating the same deferral a seventh time without acting would be an
+oversight rather than a judgment call); writing the actual JavaScript
+adapter behind a custom `data-val-*` attribute pair (the
+`$.validator.addMethod`/`$.validator.unobtrusive.adapters.add` calls, named
+this round as this lesson's own out-of-scope next step); Go's `select`-
+statement arbitration rules, still deferred many rounds running on
+fetched-page-truncation grounds; Lesson 49's dead-letter queues, still
+confirmed to have no first-party ASP.NET Core angle; Lesson 35's
+upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
+Polly/.NET resilience libraries, both still deliberately out of scope per
+MISSION.md's "concepts first" rule; and the backfill-missing-
+Lesson-117-NOTES-entry gap, still not investigated.

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 62 · Kafka dead-letter replay: the follow-up Day 41 named and never built</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 62 · ~20 min · 16 Nov 2026</p>
+<h1>Kafka dead-letter replay: the follow-up Day 41 named and never built</h1>
+<p class="byline">Today's tangible win: a new <code>scripts/replay_dead_letters.py</code> that re-attempts every row sitting in <code>raw.dead_letter_events</code> — landing the ones that now parse cleanly into <code>raw.order_events</code> for real, and leaving the genuinely broken ones in place with a fresh error, never silently deleting anything either way.</p>
+
+<div class="callout"><strong>Before today — confirm Day 41's dead-letter table actually exists:</strong> today reads and writes the exact table Day 41 created, so confirm it first:
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c "\d raw.dead_letter_events"</code></pre>
+Expected: a table with columns <code>id</code>, <code>topic</code>, <code>kafka_partition</code>, <code>kafka_offset</code>, <code>raw_value</code> (<code>bytea</code>), <code>error</code>, <code>failed_at</code>. If that table doesn't exist, finish Day 41 first — today assumes it's already catching poison messages, because today is about what happens to the rows already sitting in it, not about building quarantine from scratch.</div>
+
+<h2>1 · The gap Day 41 named and left open on purpose</h2>
+<p>Day 41's own scope line named this directly on its way out: "it does not cover replaying or reprocessing dead-lettered rows later (a real follow-up workflow, not today's)." That gap matters more than it first sounds, because a dead-letter table that only ever grows is barely better than silently dropping messages — a human can <em>see</em> the quarantined rows, but nothing in this course's pipeline ever does anything with them. Two real situations land a row in <code>dead_letter_events</code> and deserve different outcomes:</p>
+<ul>
+<li><strong>Permanently bad data:</strong> malformed JSON, or a required field truly never sent — Day 41's own two test cases. No amount of retrying fixes these; a human has to look.</li>
+<li><strong>Transiently bad timing:</strong> a message that is valid and complete, but failed for a reason that has nothing to do with the message itself — Postgres briefly unreachable, a constraint that didn't exist yet, a bug in <code>consume_order_events.py</code> that got fixed after the message was already dead-lettered. Re-running the exact same parse-and-insert logic against the exact same bytes now succeeds.</li>
+</ul>
+<p>A <dfn data-en="a separate process that re-reads previously quarantined (dead-lettered) items and re-attempts the same processing that originally failed on them, moving each one to success or leaving it quarantined with an updated reason, rather than quarantined rows sitting untouched forever" data-vn="giữ nguyên &quot;replay&quot; — tiến trình riêng, đọc lại các dòng đã bị dead-letter trước đó rồi thử xử lý lại đúng logic ban đầu đã fail; mỗi dòng sau đó hoặc thành công (chuyển ra khỏi bảng dead-letter) hoặc vẫn fail (giữ lại, cập nhật lý do mới) — không để các dòng dead-letter nằm yên vĩnh viễn">replay</dfn> script is exactly how a dead-letter table earns its name: a place items wait to be looked at again, not a graveyard.</p>
+
+<h2>2 · Reusing Day 6's idempotent insert, on purpose</h2>
+<p>The replay script doesn't invent new landing logic — it reuses Day 6's exact <code>INSERT ... ON CONFLICT (event_id) DO NOTHING</code> against <code>raw.order_events</code>, unchanged. That reuse is the whole safety argument, not a shortcut: Day 6 already made landing an event <em>idempotent</em> — <strong>bridge from backend:</strong> the same idempotency-key shape <code>backend/</code> covers for an API request, applied here to a warehouse write — so replaying the identical bytes twice, by accident or by design, cannot create a duplicate row. That is what makes it safe to answer "what if I run the replay script twice?" with "nothing changes the second time," without adding a single new guard anywhere.</p>
+
+<h2>3 · Build: <code>scripts/replay_dead_letters.py</code></h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add a new script — it reads every row currently in <code>dead_letter_events</code>, re-parses the raw bytes, and either lands the event for real or records a fresh error on the same row:</p>
+<pre><code><span class="cm">"""Replay rows out of raw.dead_letter_events back into raw.order_events."""</span>
+<span class="kw">import</span> json
+
+<span class="kw">import</span> psycopg
+
+DSN = <span class="str">"postgresql://fdp:fdp@localhost:5432/fdp"</span>
+
+SELECT_SQL = <span class="str">"SELECT id, raw_value FROM raw.dead_letter_events ORDER BY id"</span>
+
+INSERT_SQL = <span class="str">"""
+    INSERT INTO raw.order_events (event_id, order_id, status, occurred_at)
+    VALUES (%(event_id)s, %(order_id)s, %(status)s, %(occurred_at)s)
+    ON CONFLICT (event_id) DO NOTHING
+"""</span>
+
+DELETE_SQL = <span class="str">"DELETE FROM raw.dead_letter_events WHERE id = %(id)s"</span>
+
+UPDATE_ERROR_SQL = <span class="str">"""
+    UPDATE raw.dead_letter_events
+       SET error = %(error)s, failed_at = now()
+     WHERE id = %(id)s
+"""</span>
+
+
+<span class="kw">def</span> main():
+    conn = psycopg.connect(DSN)
+    replayed, still_dead = <span class="kw">0</span>, <span class="kw">0</span>
+    <span class="kw">with</span> conn:
+        <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+            cur.execute(SELECT_SQL)
+            rows = cur.fetchall()
+
+        <span class="kw">for</span> row_id, raw_value <span class="kw">in</span> rows:
+            <span class="kw">try</span>:
+                event = json.loads(raw_value)   <span class="cm"># bytea column loads as bytes; json.loads() takes bytes directly</span>
+                params = {
+                    <span class="str">"event_id"</span>: event[<span class="str">"event_id"</span>], <span class="str">"order_id"</span>: event[<span class="str">"order_id"</span>],
+                    <span class="str">"status"</span>: event[<span class="str">"status"</span>], <span class="str">"occurred_at"</span>: event[<span class="str">"occurred_at"</span>],
+                }
+                <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+                    cur.execute(INSERT_SQL, params)
+                    cur.execute(DELETE_SQL, {<span class="str">"id"</span>: row_id})
+                conn.commit()
+                replayed += <span class="kw">1</span>
+                <span class="kw">print</span>(<span class="str">f"replayed dead_letter id={row_id} -&gt; order_events event_id={params['event_id']}"</span>)
+            <span class="kw">except</span> (json.JSONDecodeError, KeyError) <span class="kw">as</span> exc:
+                conn.rollback()
+                <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+                    cur.execute(UPDATE_ERROR_SQL, {<span class="str">"id"</span>: row_id, <span class="str">"error"</span>: <span class="kw">str</span>(exc)})
+                conn.commit()
+                still_dead += <span class="kw">1</span>
+                <span class="kw">print</span>(<span class="str">f"still dead id={row_id} error={exc}"</span>)
+
+    <span class="kw">print</span>(<span class="str">f"REPLAYED={replayed} STILL_DEAD={still_dead}"</span>)
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p>Two things worth noticing on purpose, not by accident: <code>conn.rollback()</code> on the failure path exists for exactly the reason Day 41's own consumer needed it — a failed statement leaves a Postgres transaction unusable until it's rolled back, so the next statement on that same connection (today, the <code>UPDATE</code> that records the fresh error) would fail too without it. And a still-broken row is <code>UPDATE</code>d, never <code>DELETE</code>d — the whole point is that nothing quarantined ever vanishes without a human deciding so.</p>
+
+<h2>4 · Verify: a fixable row gets replayed, a broken one doesn't, and running it twice changes nothing new</h2>
+<p>Seed one dead-lettered row that was always valid JSON (standing in for "this failed for a reason that had nothing to do with the message itself") next to Day 41's two permanently broken ones:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "INSERT INTO raw.dead_letter_events (topic, kafka_partition, kafka_offset, raw_value, error)
+   VALUES ('order_events', 0, 999,
+           '{\"event_id\": 9001, \"order_id\": 12, \"status\": \"placed\", \"occurred_at\": \"2026-11-10T10:00:00Z\"}',
+           'simulated transient failure');"
+uv run --with "psycopg[binary]" python3 scripts/replay_dead_letters.py</code></pre>
+<p>Expected — one line per row already in the table, the new row replayed and Day 41's two originals (bad JSON, missing <code>event_id</code>) still dead with their error unchanged in substance:</p>
+<pre><code>still dead id=1 error=Expecting value: line 1 column 1 (char 0)
+still dead id=2 error='event_id'
+replayed dead_letter id=3 -&gt; order_events event_id=9001
+REPLAYED=1 STILL_DEAD=2</code></pre>
+<div class="callout"><strong>Checked as a static proof this round, not a live broker or warehouse (noted honestly, same convention Days 17, 41, 50, 55 and 58 each used):</strong> no reachable Postgres this sandbox round either (confirmed directly: connecting to <code>postgresql://fdp:fdp@localhost:5432/fdp</code> with a real <code>psycopg.connect()</code> call raised <code>OperationalError: connection to server ... failed: Connection refused</code>, not assumed) — so the control flow above was verified with a standalone script modeling the same logic against three fake dead-letter rows (one fixable, two permanently broken, the exact shapes Day 41 and Section 4 above use) with a fake cursor standing in for the database. First pass: the fixable row replayed and the two broken rows stayed dead with their error recorded, matching Section 4's expected output exactly. Second pass, re-run against the now-shorter remaining set: zero rows replayed, nothing changed, confirming the script is safe to run on a schedule with nothing new happening when there's nothing left to fix. Third pass, deliberately replaying the already-landed row a second time: the fake cursor's own <code>ON CONFLICT DO NOTHING</code> stand-in left exactly one <code>order_events</code> row, not two, confirming Day 6's idempotent insert is still what's actually protecting this script from creating a duplicate. Also confirmed directly, not assumed: <code>json.loads()</code> accepts a <code>bytes</code> value directly (<code>json.loads(b'{"a": 1}')</code> returns <code>{'a': 1}</code> with no decode step needed), and psycopg3's own installed <code>ByteaLoader.load()</code> (read directly from the installed <code>psycopg==3.3.9</code> package) returns <code>bytes</code> for a <code>bytea</code> column already, confirming the comment on the <code>json.loads(raw_value)</code> line. The actual <code>replay_dead_letters.py</code> file was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm the warehouse side directly — one new row in <code>order_events</code>, two rows still quarantined in <code>dead_letter_events</code>:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM raw.order_events WHERE event_id = 9001;"
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT id, error FROM raw.dead_letter_events ORDER BY id;"</code></pre>
+<p>Expected: the first query returns <code>1</code>; the second lists exactly the two permanently broken rows from Day 41, never the one that just replayed. Re-run <code>scripts/replay_dead_letters.py</code> a second time and confirm its own output is <code>REPLAYED=0 STILL_DEAD=2</code> — nothing left to fix, nothing new happens. Commit <code>scripts/replay_dead_letters.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your pipeline has a dead-letter table for Kafka messages that failed to land. How do you handle the rows that pile up in it?"</strong> A strong answer, out loud: <em>"A dead-letter table only buys you something if it's also a queue of work to come back to, not just a place things get dropped and forgotten. I'd write a separate replay process that re-reads each quarantined row's raw bytes and re-attempts the exact same parse-and-insert logic that failed originally. Some of those failures are permanent — bad JSON, a field that was genuinely never sent — and replaying changes nothing there, so the row stays, with its error refreshed. But some failures are transient: the database was briefly down, or a bug got fixed after the message was already dead-lettered, and replaying those lands them for real. The safety argument is that the replay's insert reuses the exact same idempotent ON CONFLICT DO NOTHING the original consumer used, so running the replay on a schedule, or by accident twice in a row, can never create a duplicate row — it either makes progress or it doesn't, and either way nothing downstream can tell the difference from a message that landed on the first try."</em> The signal: distinguishing permanent from transient failure instead of treating every dead-lettered row the same, and naming idempotency as what makes repeated replay safe rather than something the replay script has to reinvent.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers a standalone replay script that re-parses every row currently in <code>dead_letter_events</code> and either lands it in <code>order_events</code> for real or updates its error in place. It does not cover scheduling the replay automatically (an Airflow task is the obvious next home for it, but this course's single DAG doesn't yet have a slot for a periodic maintenance task, and adding one without a real trigger would be scope creep for its own sake), alerting when the dead-letter table's row count crosses a threshold (Day 46 already built exactly that alerting shape for a different signal — the pattern transfers directly, not re-derived here), or automatically distinguishing "permanent" from "transient" failures ahead of time — today's script finds out empirically, by actually re-attempting the insert, rather than trying to classify the error text first.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A dead-letter table that only ever grows gives a human visibility into what failed, but nothing in the pipeline ever acts on that visibility. A replay process is what turns the quarantine into a queue of work that actually gets revisited, rather than a one-way graveyard of rows nobody returns to.">
+    <p class="stem">Why does Day 41's dead-letter table need a replay script at all, instead of being the finished fix?</p>
+    <button class="opt" data-ok>without replay, quarantined rows never get revisited again</button>
+    <button class="opt">Postgres automatically deletes old dead-letter rows by itself</button>
+    <button class="opt">Kafka itself replays every dead-lettered message for you</button>
+  </div>
+  <div class="q" data-why="Reusing the exact ON CONFLICT DO NOTHING insert from Day 6 means landing the same event twice can never create a second row, regardless of how many times or how accidentally the replay script runs against the same already-landed row. That is what makes rerunning the whole script safe without any new guard logic.">
+    <p class="stem">Why does the replay script reuse Day 6's <code>ON CONFLICT (event_id) DO NOTHING</code> insert rather than writing a new one?</p>
+    <button class="opt" data-ok>it keeps replaying the same row from duplicating</button>
+    <button class="opt">Postgres requires every single INSERT to repeat verbatim</button>
+    <button class="opt">it makes the dead_letter_events table itself delete faster</button>
+  </div>
+  <div class="q" data-why="Bad JSON and a permanently missing field are errors in the message itself -- re-parsing the exact same bytes again produces the exact same failure every time, no matter how many times the replay script runs. A transient failure, like a brief outage or a bug that has since been fixed, is a failure in the surrounding system at that moment, not in the bytes -- replaying the same unchanged bytes later can succeed once that surrounding problem is gone.">
+    <p class="stem">Why does replaying help a transiently-failed row but never a permanently malformed one?</p>
+    <button class="opt" data-ok>only a transient failure's cause can change between attempts</button>
+    <button class="opt">Postgres silently repairs malformed JSON after enough extra retries</button>
+    <button class="opt">transient rows always get a much longer kafka_offset value</button>
+  </div>
+  <div class="q" data-why="The failure path calls conn.rollback() before its own UPDATE for the same reason Day 41's consumer needed it on the dead-letter INSERT: a failed statement leaves a Postgres transaction unusable until it's explicitly rolled back, so the next statement on that same connection -- here, the UPDATE recording the fresh error -- could fail too without it.">
+    <p class="stem">Why does the failure branch call <code>conn.rollback()</code> before its own <code>UPDATE</code> statement?</p>
+    <button class="opt" data-ok>clears the failed attempt so the later update can still succeed</button>
+    <button class="opt">deletes the dead-letter row from the table permanently, right away, forever</button>
+    <button class="opt">forces the script to skip every row that remains after it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, <a href="https://www.postgresql.org/docs/current/tutorial-transactions.html">PostgreSQL's own transactions documentation</a>, already cited for Day 41's <code>conn.rollback()</code> call, is the primary source again today for the identical reason: a failed statement leaves a transaction unusable until rolled back, which applies equally to the replay script's own failure branch. Kleppmann's <em>Designing Data-Intensive Applications</em> ch. 11 (cited in <code>RESOURCES.md</code> for Kafka delivery semantics) frames why idempotent writes matter beyond the original consumer: any process that might re-apply the same write — a restarted consumer, or, as today shows, a standalone replay script running on a schedule — needs that same guarantee, not a new one invented per script.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 62.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now twenty-eight rounds, 35-62) — still worth a human granting it once. Airflow pools remain blocked on the same unmet precondition (a second DAG genuinely existing). With today's pick, Kafka has had two of the last six rounds' fresh-gap attention (58, 62) against Airflow's two (56, 61) and dbt's three (57, 59, 60) — all three threads are close to even again, so a future round's gap-scan should feel free to follow whichever learner signal or named TODO turns up first rather than rotating by rule. Scheduling today's replay script as a periodic Airflow task is the most concrete remaining idea this round is aware of, if a second DAG slot or a real trigger for it ever makes sense.<br><br>
+💬 Anything unclear — why permanent vs. transient failure matters for what replay can fix, or why idempotency is what makes rerunning this script safe? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

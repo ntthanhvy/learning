@@ -274,6 +274,8 @@
       file: "lessons/0132-aspnetcore-model-validation-dataannotations-apicontroller.html" },
     { n: 133, date: "2026-11-15", title: "Writing a reusable validation rule once",
       file: "lessons/0133-custom-validationattribute-reusable-rules.html" },
+    { n: 134, date: "2026-11-16", title: "Making a custom validation rule run in the browser too",
+      file: "lessons/0134-client-side-validation-iclientmodelvalidator.html" },
   ];
 
   const REFS = [

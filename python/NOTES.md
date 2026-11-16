@@ -13307,3 +13307,124 @@ fail *gracefully* so the learner sees which task failed.
   0109-multiprocessing-sidestepping-the-gil.html --detail
   '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
   round and succeeded.
+- 2026-11-16 generation (Lesson 110): idempotency check first — queried the
+  DB directly (`course_progress` for `course='python'`,
+  `kind='lesson_generated'`) and confirmed the latest row was still Day
+  109 dated 2026-11-15, nothing recorded yet for 2026-11-16; also confirmed
+  no `lessons/0110-*.html` on disk and no `n: 110` entry in `nav.js` before
+  writing anything. Read `MISSION.md` (no-pandas/no-NumPy exclusion
+  re-confirmed, never modified), `PLAN.md`'s Phase 2 spine, the tail of
+  this file through Day 109's own closing note, `RESOURCES.md`,
+  `assets/nav.js`'s last entry (`n: 109`, 2026-11-15), and
+  `learning-records/` (still only the Day 1 baseline file, no newer quiz/
+  kata/lesson_completed signal for any course since 2026-10-15, matching
+  what the orchestrator had already confirmed). Per Day 109's own cadence
+  note, Day 108 was fresh day 1 and Day 109 fresh day 2 of the current
+  three-fresh-then-review cycle, so today is fresh day 3 — Day 111 should
+  be the next review day, covering Days 108-110. Ran a fresh
+  case-insensitive grep across every lesson title/body, every practice
+  file, `reference/glossary.html`, and `RESOURCES.md` for a wide candidate
+  list rather than trusting any single carried-forward name: `socket`
+  (passing-mention only across Days 21-25/58/73/109, ruled out again on
+  the same scope-depth grounds every prior round gave — real networking
+  edges into FastAPI/Phase 2b territory), `textwrap`/`string`/`calendar`/
+  `enum`/`functools`/`glob`/`fnmatch`/`namedtuple`/`argparse` (all
+  confirmed already fully taught per this file's own Day 92/106 notes —
+  not re-opened), and `fractions`/`Fraction(` (zero real hits: the English
+  word "fraction" appears only inside Day 70's own prose about `float`'s
+  binary imprecision, never as `from fractions import` or `Fraction(`
+  anywhere in any lesson, practice file, or the glossary — genuinely
+  untaught, correcting an ambiguous aside in the Day 106 note that had
+  called it "already fully taught" without a matching citation). Picked
+  **`fractions`**: it completes Day 70's own `decimal` lesson with the
+  other half of the same float-precision story — `decimal` fixes base-10
+  exactness (money), `fractions` fixes a different gap `decimal` does not
+  touch at all, exact *ratios* like one-third that have no finite exact
+  form in base 10 or base 2 either. Fetched the primary source live via
+  WebFetch (`docs.python.org/3/library/fractions.html`) for the module's
+  own "provides support for rational number arithmetic" framing, the
+  `Fraction(numerator, denominator)`/`Fraction(str)`/`Fraction(float)`
+  constructor forms, the `numerator`/`denominator` property descriptions
+  ("in lowest terms," denominator "guaranteed to be positive"), the
+  `limit_denominator()` description, and the documented float-construction
+  caveat ("the argument to `Fraction(1.1)` is not exactly equal to
+  11/10"), catching any hallucinated API detail before writing. Probed
+  every claim live in `.scratch-python-110/` (created at repo root,
+  deleted after; `/tmp` confirmed blocked in this sandbox again, same
+  known limitation as every prior round): confirmed `0.1 + 0.2 ==
+  0.30000000000000004` and `1/3 + 1/3 + 1/3 == 1.0` (the latter landing on
+  an exact-looking result by luck of rounding, not by guarantee); confirmed
+  `Fraction(1,3) + Fraction(1,3) + Fraction(1,3) == 1` is exactly `True`,
+  with `.numerator`/`.denominator` reducing to `1`/`1`; confirmed
+  `Fraction(6,8)` auto-reduces to `3/4`; confirmed `Fraction(0.1)` prints
+  `3602879701896397/36028797018963968` (the float's own binary value) while
+  `Fraction("0.1")` prints exactly `1/10`; confirmed
+  `Fraction(math.pi).limit_denominator(1000)` returns `355/113`, matching
+  the historical π approximation, with `float(355/113) ==
+  3.1415929203539825` close to but distinct from `math.pi`'s own
+  `3.141592653589793`; confirmed `Fraction(1,2) > 0.4` compares directly
+  against a plain `float` with no manual conversion; confirmed
+  `Fraction(1, 0)` raises `ZeroDivisionError`, the same exception plain
+  `1/0` raises. Checked the glossary for term collisions before writing —
+  grepped `fraction`, `Fraction`, `rational number`, `limit_denominator`,
+  and `numerator`/`denominator` case-insensitively across the full
+  `glossary.html`, zero existing rows for any of them. **New jargon: 4
+  glossary rows** (`rational number`, `fractions.Fraction`, the Fraction
+  float-construction trap, `limit_denominator()`), added as a new `<h2
+  id="day110">` section directly after Day 109's. Verification performed
+  mechanically, from a dedicated script in `.scratch-python-110/` (deleted
+  after): (1) an `html.parser.HTMLParser` full-document parse of the new
+  lesson and of `glossary.html` — no parse errors on either; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a on the new lesson — first pass caught a stray unmatched `</p>`
+  inside a callout div (18 `<p>` opens vs. 19 closes, from a callout that
+  opened with `<div>` but accidentally closed with `</p></div>`), fixed by
+  removing the stray `</p>`, re-checked balanced after the fix (div 8/8, p
+  18/18, code 102/102, button 9/9, script 3/3, dfn 1/1, pre 5/5, h2 7/7, h1
+  1/1, em 3/3, strong 5/5, a 2/2), plus a raw-unescaped-`&` regex scan —
+  zero hits; (3) a per-question quiz option word-count check via
+  regex-strip-tags extraction on the actual printed word lists (not just
+  counts) — first draft mismatched on two of three questions (12/10/10 and
+  12/13/10), iterated option-by-option across several passes, re-checking
+  the exact word list after each edit, until all three landed on equal
+  per-question counts: 12/12/12, 11/11/11, 12/12/12; (4) a
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section, plus a duplicate-`id="dayNN"` scan — balanced (table 92/92, tr
+  404/404, th 276/276, td 936/936, h2 92/92) with zero duplicates among 92
+  ids, `day110` present exactly once; a case-insensitive duplicate-term
+  scan across the glossary's term column reproduced only the one
+  pre-existing collision already on record (`dependency`), confirmed none
+  of the 4 new terms collide with it or any other row; (5) `node --check`
+  against `assets/nav.js` — clean, both before and after the edit; (6) a
+  duplicate `n:` scan across `nav.js`'s `LESSONS` array — 110 entries, zero
+  duplicates, max `n` is 110; (7) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 6 hits total
+  (`pandas` twice, `NumPy` four times), all confirmed by direct line lookup
+  to sit inside the single required "Where pandas/NumPy go from here"
+  scope-boundary callout, never a worked example, and zero hits in the
+  practice file. The shipped (unsolved)
+  `practice/110_fractions_exact_rationals.py` was executed directly from
+  its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-110/` (copied from
+  the shipped file, each TODO body filled in directly — never editing the
+  shipped file itself, deleted after) printed all 3 ✓ and "All green" on
+  two consecutive runs; the shipped file was re-run afterward from its
+  real location and reproduced the identical all-✗ result, confirming no
+  leakage back into the baseline. Added one new `RESOURCES.md` line for
+  `fractions`, placed directly after Day 109's `multiprocessing` line and
+  before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 110 in `nav.js` with today's date
+  (2026-11-16) right after the `n: 109` entry. `python/learning-records/`
+  was not touched this round — still only the Day 1 baseline record with
+  no newer quiz/kata/lesson_completed signal, so a routine fresh-topic
+  pick was the right call. Cadence note for the next round: Day 110
+  closes fresh day 3 of the current three-fresh-then-review cycle — Day
+  111 should be the next review day, covering Days 108-110. No standing
+  fresh-gap candidate remains explicitly named after today beyond the
+  routine `socket` ruled-out status (scope-depth) — a fresh gap-scan
+  should still run next round rather than assuming none remain.
+  `bin/record-progress python lesson_generated --day 110 --lesson
+  0110-fractions-exact-rationals.html --detail
+  '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
+  round; see this file's own next line if it appears, or treat
+  silence/blocking as the known sandbox limitation if not.

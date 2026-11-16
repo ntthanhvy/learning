@@ -470,6 +470,12 @@
   <tr><td>on_failure_callback</td><td>giữ nguyên "on_failure_callback" — keyword argument của mọi task Airflow, danh sách các callable được gọi (mỗi cái nhận 1 context dict) khi task instance đó rơi vào trạng thái FAILED thực sự cuối cùng — khác on_retry_callback (chạy khi lần thử fail nhưng còn retry, còn chạy lại tiếp)</td><td>A keyword argument accepted by every Airflow task — a list of callables, each invoked with one <code>context</code> dict, once that task instance has reached a genuinely final <code>FAILED</code> state. Distinct from <code>on_retry_callback</code>, which fires instead whenever a failed attempt still has retries left and will run again. Confirmed live this round by forcing <code>airflow.sdk.execution_time.task_runner.finalize()</code> directly with a real <code>TaskInstanceState.FAILED</code> and a real exception: the callback fired with <code>context["exception"]</code> holding the actual exception object, and a deliberately broken callback was caught and logged by <code>_run_task_state_change_callbacks</code>'s own <code>try</code>/<code>except</code> rather than propagating.</td></tr>
 </table>
 
+<h2 id="day62">Day 62 — Kafka dead-letter replay: the follow-up Day 41 named and never built</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>replay</td><td>giữ nguyên "replay" — tiến trình riêng, đọc lại các dòng đã bị dead-letter trước đó rồi thử xử lý lại đúng logic ban đầu đã fail; mỗi dòng sau đó hoặc thành công (chuyển ra khỏi bảng dead-letter) hoặc vẫn fail (giữ lại, cập nhật lý do mới) — không để các dòng dead-letter nằm yên vĩnh viễn</td><td>A separate process that re-reads previously quarantined (dead-lettered) items and re-attempts the same processing that originally failed on them, moving each one to success or leaving it quarantined with an updated reason, rather than quarantined rows sitting untouched forever. Confirmed live this round with a standalone three-row model (one now-fixable, two permanently broken): the fixable row moved into <code>order_events</code> and out of <code>dead_letter_events</code>, the two broken rows stayed in place with a refreshed error, and a second pass over the same remaining rows changed nothing further.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

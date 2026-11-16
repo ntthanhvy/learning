@@ -226,6 +226,8 @@
       file: "lessons/0108-queue-thread-safe-producer-consumer.html" },
     { n: 109, date: "2026-11-15", title: "multiprocessing: sidestepping the GIL for real CPU work",
       file: "lessons/0109-multiprocessing-sidestepping-the-gil.html" },
+    { n: 110, date: "2026-11-16", title: "fractions: exact rational numbers, no float imprecision",
+      file: "lessons/0110-fractions-exact-rationals.html" },
   ];
 
   const REFS = [

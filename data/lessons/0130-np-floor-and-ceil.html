@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 130 · np.floor() and np.ceil(): rounding toward infinity, not toward zero</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 130 · ~20 min · 16 Nov 2026</p>
+<h1>np.floor() and np.ceil(): rounding toward infinity, not toward zero</h1>
+<p class="byline">Lesson 129 closed its own fresh scan with <code>np.floor()</code>/<code>np.ceil()</code> and <code>np.log()</code>/<code>np.exp()</code> still open. Today's own fresh scan re-confirmed both pairs are still genuinely untaught (grepped every lesson body and every glossary row; zero dedicated coverage for either pair). Picked <code>np.floor()</code> and <code>np.ceil()</code> as one coherent pair: together they are the two calls behind the classic "round down/up to a whole dollar/unit" wrangling task, and, confirmed directly below, they break the int-upcasts-to-float pattern Lesson 129 just established for <code>np.sqrt()</code> — a genuinely different dtype story worth contrasting on its own.</p>
+
+<h2>1 · Both keep the Series and its Index — and, unlike np.sqrt(), int input is a true no-op</h2>
+<p><dfn data-en="a NumPy function that rounds each element DOWN to the nearest whole number -- toward negative infinity, not toward zero -- applied elementwise across a whole array or Series at once" data-vn="giữ nguyên 'np.floor()' — hàm làm tròn XUỐNG số nguyên gần nhất, về hướng âm vô cực, KHÔNG phải về hướng 0; áp dụng elementwise lên cả mảng/Series một lần">np.floor(x)</dfn> and <dfn data-en="a NumPy function that rounds each element UP to the nearest whole number -- toward positive infinity -- applied elementwise across a whole array or Series at once" data-vn="giữ nguyên 'np.ceil()' — hàm làm tròn LÊN số nguyên gần nhất, về hướng dương vô cực; áp dụng elementwise lên cả mảng/Series một lần">np.ceil(x)</dfn> both return a <code>Series</code> with the original <code>Index</code> intact when called directly on one — confirmed directly (numpy 2.5.5, pandas 3.1.1), same as Lesson 129's <code>np.abs()</code>/<code>np.sqrt()</code>. The dtype story is different, though:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s_int = pd.Series([<span class="kw">1</span>, -<span class="kw">1</span>, <span class="kw">3</span>, <span class="kw">7</span>])
+np.floor(s_int).dtype   <span class="cm"># int64 -- a genuine no-op, values completely untouched</span>
+np.floor(s_int).tolist() <span class="cm"># [1, -1, 3, 7] -- identical to s_int itself</span>
+
+s_float = pd.Series([<span class="kw">1.2</span>, -<span class="kw">1.2</span>, <span class="kw">2.7</span>])
+np.floor(s_float).dtype <span class="cm"># float64 -- stays float on float input</span></code></pre>
+<p>Confirmed directly: an integer is already a whole number, so <code>np.floor()</code>/<code>np.ceil()</code> on an <code>int64</code> Series return the exact same values, untouched, still <code>int64</code> — a true no-op, not an upcast. This is a sharper rule than Lesson 129's <code>np.sqrt()</code>, which <em>always</em> upcasts to <code>float64</code> even on a clean int input; <code>np.floor()</code>/<code>np.ceil()</code> only ever produce <code>float64</code> when the input was already float. Confirmed directly, pandas defines no <code>Series.floor()</code> or <code>Series.ceil()</code> method at all — calling either raises <code>AttributeError</code> immediately, the same naming gap Lessons 126–129 found for <code>np.roll()</code>/<code>np.sign()</code>/<code>np.sqrt()</code>. The pandas-idiomatic path is calling <code>np.floor()</code>/<code>np.ceil()</code> directly on the Series, confirmed directly to work identically to the plain-array case.</p>
+
+<h2>2 · The trap: "round down" means toward negative infinity, not toward zero</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.5):</strong> on a negative number, <code>np.floor()</code> rounds <em>away</em> from zero, not toward it — <code>np.floor(-1.2)</code> is <code>-2.0</code>, not <code>-1.0</code>. The function that rounds toward zero instead is <code>np.trunc()</code>, a different, unrelated function.</div>
+<pre><code>np.floor(-<span class="kw">1.2</span>)   <span class="cm"># -2.0  -- rounds DOWN, i.e. toward -infinity, past -1</span>
+np.trunc(-<span class="kw">1.2</span>)   <span class="cm"># -1.0  -- rounds TOWARD zero instead, a different function entirely</span>
+np.ceil(-<span class="kw">1.2</span>)    <span class="cm"># -1.0  -- rounds UP, i.e. toward +infinity, back toward zero</span></code></pre>
+<p>Confirmed directly: "floor" always means toward negative infinity and "ceil" always means toward positive infinity, regardless of the input's own sign — on a negative number this makes <code>floor()</code> look like it rounds "away from zero" and <code>ceil()</code> look like it rounds "toward zero," the reverse of the positive-number intuition most people build first. This is also confirmed directly to differ from <code>Series.round()</code>, which rounds to the <em>nearest</em> whole number (using banker's rounding on exact halves — <code>round(2.5)</code> is <code>2.0</code>, confirmed directly, not <code>3.0</code>) rather than committing to a single direction at all. A wrangling task that says "round down to the nearest whole dollar" means <code>np.floor()</code>, never <code>Series.round()</code> — confirmed directly they disagree on every non-whole input: <code>np.floor(2.7)</code> is <code>2.0</code> but <code>pd.Series([2.7]).round()</code> is <code>3.0</code>.</p>
+
+<h2>3 · NaN, complex, object dtype, and a same-named but unrelated datetime method</h2>
+<p>Confirmed directly: a NaN input passes straight through both functions unchanged, still NaN — neither one raises or warns, the same pass-through behavior Lesson 127's <code>np.sign()</code> has for NaN. Confirmed directly, both run on an <code>object</code>-dtype array of plain Python floats without error (dispatching through Python's own <code>math</code>-level rounding), but both raise <code>TypeError</code> immediately on complex input — confirmed directly against the real error message ("ufunc 'floor' not supported for the input types") — because "round down" has no single meaning for a 2-D complex number, unlike Lesson 129's <code>np.abs()</code>, which has a well-defined complex magnitude. One naming trap to flag explicitly: pandas <em>does</em> define <code>Series.dt.floor()</code> — but only on datetime data, rounding a timestamp down to the start of a given frequency bucket (e.g. <code>.dt.floor("h")</code> rounds down to the start of the hour). It is unrelated to <code>np.floor()</code> in every way except the shared English word; confirmed directly, calling plain <code>.floor()</code> on a non-datetime Series still raises the same <code>AttributeError</code> as before.</p>
+<pre><code><span class="cm"># the classic wrangling task: round prices down to the nearest whole dollar</span>
+prices = pd.Series([<span class="kw">19.99</span>, <span class="kw">20.01</span>, <span class="kw">5.00</span>, <span class="kw">100.0</span>])
+np.floor(prices)
+<span class="cm"># 0     19.0
+# 1     20.0
+# 2      5.0
+# 3    100.0  -- confirmed directly: a whole float input is its own floor</span>
+
+<span class="cm"># unrelated: rounding a TIMESTAMP down to the hour -- a different method entirely</span>
+ts = pd.Series(pd.to_datetime([<span class="cm">"2026-01-01 10:45:00"</span>]))
+ts.dt.floor(<span class="cm">"h"</span>)   <span class="cm"># 2026-01-01 10:00:00</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.floor()</code>'s and <code>np.ceil()</code>'s confirmed Series/Index-preserving behavior; the confirmed true-no-op-on-int dtype rule (contrasted against Lesson 129's always-upcasting <code>np.sqrt()</code>); the confirmed toward-infinity rounding direction versus <code>np.trunc()</code> (toward zero) and <code>Series.round()</code> (nearest, banker's rounding); the confirmed NaN pass-through, object-dtype dispatch, and complex <code>TypeError</code>; and the confirmed unrelated <code>Series.dt.floor()</code> naming trap. It does not cover <code>np.log()</code>/<code>np.exp()</code>, still an open candidate from this round's own fresh scan, or <code>np.trunc()</code>/<code>np.round()</code> themselves beyond the one contrast line above.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/130_np_floor_and_ceil.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/130_np_floor_and_ceil.py</code></pre>
+<p>Exercise 1 confirms the Section 1 contrast: <code>np.floor()</code>/<code>np.ceil()</code> are true no-ops on an int Series (dtype and values both unchanged), unlike <code>np.sqrt()</code>'s always-upcast rule, and <code>Series.floor()</code> does not exist. Exercise 2 confirms the Section 2 trap: on a negative input, <code>np.floor()</code> rounds toward negative infinity (away from zero) while <code>np.trunc()</code> rounds toward zero instead, and <code>Series.round()</code> rounds to nearest rather than committing to one direction. Exercise 3 confirms the Section 3 behavior: rounding a price column down to whole dollars with <code>np.floor()</code>, end to end, no loop.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: an integer is already a whole number, so np.floor()/np.ceil() on an int64 Series return the exact same values, unchanged, still int64 -- a true no-op. This differs from Lesson 129's np.sqrt(), which always upcasts to float64 even on a clean int input, since a square root is almost never a whole number.">
+    <p class="stem">Calling <code>np.floor()</code> on an <code>int64</code> Series returns what, compared to <code>np.sqrt()</code> on the same Series?</p>
+    <button class="opt" data-ok>floor is a no-op, int64; sqrt upcasts to float64</button>
+    <button class="opt">both upcast to float64, matching each other exactly here</button>
+    <button class="opt">floor also upcasts, just like sqrt always does here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.floor(-1.2) is -2.0, rounding toward negative infinity, past -1 -- the opposite of rounding toward zero. np.trunc(-1.2) is -1.0, rounding toward zero instead, a different function entirely. On a negative number, floor looks like it rounds away from zero rather than down in the everyday sense.">
+    <p class="stem">What does <code>np.floor(-1.2)</code> return, and which function rounds toward zero instead?</p>
+    <button class="opt" data-ok>-2.0, rounding toward -infinity; np.trunc() rounds toward zero</button>
+    <button class="opt">-1.0, rounding toward zero; np.trunc() rounds away instead</button>
+    <button class="opt">-1.0, since np.floor() rounds toward positive infinity here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pandas defines Series.dt.floor() as a real method, but only on datetime data -- it rounds a timestamp down to the start of a chosen frequency bucket, e.g. .dt.floor('h') rounds down to the start of the hour. It shares nothing with np.floor() except the English word; calling plain .floor() on a non-datetime Series still raises AttributeError.">
+    <p class="stem">What does <code>Series.dt.floor("h")</code> do, and how does it relate to <code>np.floor()</code>?</p>
+    <button class="opt" data-ok>rounds a timestamp down to the hour; unrelated to np.floor() otherwise</button>
+    <button class="opt">is the exact same function as np.floor(), just reached via dt</button>
+    <button class="opt">rounds a float column down; the dt accessor there is cosmetic</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.floor.html"><code>numpy.floor()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.ceil.html"><code>numpy.ceil()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) state the "round toward negative/positive infinity" rule directly; neither page covers the <code>Series.dt.floor()</code> naming overlap, which this lesson confirmed directly in its own scratch sandbox instead.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.floor()</code> and <code>np.ceil()</code> are new today, added right after Lesson 129's <code>np.sqrt()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan still leaves <code>np.log()</code>/<code>np.exp()</code> open — not pre-committed as THE next pick, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the rounding-direction trap, the dt.floor() naming overlap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

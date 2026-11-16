@@ -266,6 +266,8 @@
       file: "lessons/0128-np-vectorize.html" },
     { n: 129, date: "2026-11-15", title: "np.abs() and np.sqrt(): the two building blocks under every error-metric column",
       file: "lessons/0129-np-abs-and-sqrt.html" },
+    { n: 130, date: "2026-11-16", title: "np.floor() and np.ceil(): rounding toward infinity, not toward zero",
+      file: "lessons/0130-np-floor-and-ceil.html" },
   ];
 
   const REFS = [

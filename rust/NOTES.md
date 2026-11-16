@@ -1939,3 +1939,27 @@ by the user there; they apply here identically.
   '{"by":"claude-sonnet-5","day":"post-week-2026-11-15","action":
   "verified-unchanged"}'` succeeded via a plain relative-path call. No
   new learning record beyond the Day-1 baseline.
+- 2026-11-16 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are
+  all present and untouched (8 textual `id: "k` matches in
+  `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the
+  commented-out example line; `day:` tags still run exactly 1-7, 49
+  total; `assets/nav.js` still has exactly 7 `file: "lessons` entries,
+  days 1-7 only; `node --check` clean on `nav.js`, `quiz-bank.js`, and
+  `srs.js`). A repo-wide search for "2026-11-16" found no existing
+  artifact for today before this check. Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md — `daily.html` keeps
+  serving the existing bank via `assets/srs.js`'s Leitner schedule, and
+  the bank only grows when a new numbered lesson is authored, none due
+  since PLAN.md's lesson table ends at Day 7 — so nothing new was
+  generated, nav.js was untouched, and no bank content was added. DB
+  reads succeeded this round via the documented `node`/
+  `execFileSync('psql', [process.env.LEARNING_DB_URL, ...])` workaround;
+  the latest 20 `course_progress` rows for rust showed only routine
+  `note` rows (daily `verified-unchanged`) back through 2026-10-26, with
+  no lesson_completed/quiz/kata/scope-change signal — consistent with
+  this run's briefed context that no such signal has landed for any
+  course since 2026-10-15. `bin/record-progress rust note --detail
+  '{"by":"claude-sonnet-5","day":"post-week-2026-11-16","action":
+  "verified-unchanged"}'` succeeded on the first attempt via a plain
+  relative-path call. No new learning record beyond the Day-1 baseline.

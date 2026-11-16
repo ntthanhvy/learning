@@ -12446,3 +12446,128 @@
   `.scratch-python-109/`), none touched by this round. The scratch
   directory `.scratch-data-129/` was deleted after verification, at the
   repo root but never tracked by git.
+
+- 2026-11-16 generation (Lesson 130, headless run): ran the idempotency
+  check first via `psql` against `course_progress` for `course='data'`,
+  `kind='lesson_generated'` — confirmed the latest row was day 129, dated
+  2026-11-15, so today's round was not a duplicate; this round's own DB
+  read succeeded directly (unlike several recent prior rounds' notes about
+  that path being gated behind approval). Read `MISSION.md` (unmodified),
+  this file's own tail, `RESOURCES.md`, the one `data/learning-records/`
+  baseline file, and confirmed via `nav.js`'s own tail and `ls
+  data/lessons/` that 129 (`0129-np-abs-and-sqrt.html`, dated 2026-11-15)
+  was genuinely the latest entry with no `n: 130`/`0130-*` file already
+  present. Lesson 129's own fresh scan closed with `np.floor()`/`np.ceil()`
+  and `np.log()`/`np.exp()` as open elementwise-ufunc candidates, neither
+  pre-committed, per this course's "fresh scan each round" convention — so
+  this round ran its own fresh scan rather than taking either pair as
+  given. Grepped every lesson body and every glossary row (case-
+  insensitive) for `np.floor(`, `np.ceil(`, `np.log(`, `np.exp(`,
+  `np.trunc(`, `np.mod(`, `np.remainder(`: all four candidates came back
+  with zero dedicated coverage — the only hit at all was an unrelated
+  `clip()` glossary row that happens to use the English word "floor" in
+  passing, not actual coverage of the function. Picked `np.floor()` and
+  `np.ceil()` together as one coherent pair, same granularity as Lesson
+  129's `np.abs()`/`np.sqrt()` pairing: together they are the two calls
+  behind the classic "round this price/metric column down or up to a
+  whole unit" wrangling task, left `np.log()`/`np.exp()` open for a future
+  round. Verified directly in a scratch sandbox (numpy 2.5.5, pandas
+  3.1.1, `uv run --with pandas`) rather than trusting memory: confirmed
+  both keep a Series' own Index and return a Series (not a bare ndarray)
+  when called on one, matching the Lesson 127/129 pattern rather than
+  Lesson 128's `np.vectorize()`. The key new finding, genuinely different
+  from every prior lesson in this elementwise-ufunc lineage: on an `int64`
+  Series, `np.floor()`/`np.ceil()` are a true no-op — values AND dtype
+  both completely unchanged — confirmed directly this is stricter than
+  Lesson 129's `np.sqrt()`, which always upcasts to `float64` even on a
+  clean int input; `np.floor()`/`np.ceil()` only produce `float64` when
+  the input was already float. Confirmed directly the central trap: on a
+  negative number, `np.floor()` rounds toward negative infinity (i.e.
+  `np.floor(-1.2) == -2.0`, away from zero), the opposite of `np.trunc()`
+  (toward zero, `np.trunc(-1.2) == -1.0`) and different again from
+  `Series.round()` (rounds to nearest, banker's rounding on exact halves —
+  confirmed directly `round(2.5) == 2.0`, not `3.0`). Confirmed directly
+  NaN passes through both functions unchanged, matching Lesson 127's
+  `np.sign()` NaN pass-through rather than any replace-with-value
+  behavior. Confirmed directly both run on an `object`-dtype array of
+  plain Python floats without error, but raise `TypeError` immediately on
+  complex input (actual message: "ufunc 'floor' not supported for the
+  input types"), unlike Lesson 129's `np.abs()`, which has a well-defined
+  complex magnitude. Confirmed directly pandas defines no plain
+  `Series.floor()`/`Series.ceil()` — `AttributeError` immediately,
+  continuing the naming-gap lineage from Lessons 126-129 — but does define
+  an unrelated `Series.dt.floor()` for datetime data only (rounds a
+  timestamp down to the start of a frequency bucket, e.g. `.dt.floor("h")`
+  to the start of the hour); chose to make this one-name-two-functions trap
+  an explicit, flagged part of Section 3 rather than a footnote, since it
+  is the kind of thing a learner would plausibly try by analogy and get a
+  working-but-wrong-meaning result (calling `.dt.floor()` on a non-datetime
+  Series still raises the same `AttributeError`, confirmed directly, so
+  the trap is purely about which accessor to reach for). Did not fetch a
+  fresh WebFetch of the official NumPy docs pages for `numpy.floor()`/
+  `numpy.ceil()` beyond citing their known stable URLs per `RESOURCES.md`'s
+  NumPy-fundamentals grouping — the toward-infinity rounding rule is
+  already stated plainly on both pages from general knowledge already
+  cross-checked in this sandbox, and the `Series.dt.floor()` naming overlap
+  (which neither docs page could cover, being a pandas-side method) was
+  confirmed directly instead; explicitly noted in the lesson's own "Go
+  deeper" line that the `dt.floor()` naming trap is confirmed via this
+  sandbox, not quoted from either docs page. Added exactly two new
+  glossary rows, "np.floor()" then "np.ceil()", directly after Lesson
+  129's "np.sqrt()" entry — confirmed via a case-insensitive scan of every
+  first-column term (204 rows total after adding) that neither name was
+  already covered, zero duplicates found (max count across all first-
+  column terms was 1). Verification performed mechanically via a scratch
+  directory `.scratch-data-130/` created at the repo root (deleted after,
+  never tracked by git, matching every prior round's own precedent for
+  this sandbox's lack of `/tmp` access — confirmed directly again this
+  round that `/tmp` itself is blocked outright for both `cd` and `cp`):
+  (1) a quiz-word-count script (Python regex stripping HTML tags,
+  splitting on whitespace) found the first draft mismatched across all
+  three questions (12/9/10, 8/9/8, 11/12/12) and, after two rounds of
+  wording trims, confirmed exactly 9/9/9, 8/8/8, and 11/11/11 option words
+  across the three questions, one `data-ok` per question throughout; (2)
+  an HTML tag-balance script (same regex approach, run via `uv run python3
+  <script>`, plain Bash `grep`/`sed` blocked by this sandbox's "requires
+  approval" filter, consistent with every prior round) confirmed fully
+  balanced on the first pass: html/head/body 1/1, div 5/5, p 15/15, code
+  95/95, pre 4/4, h1 1/1, h2 7/7, strong 3/3, button 9/9, script 3/3, dfn
+  2/2, span 30/30, em 4/4, a 3/3, title 1/1, zero raw unescaped `&` outside
+  the lesson's own `cd ~/learning/data && uv run ...` shell command inside
+  its own `<pre><code>` block (matching every prior round's own precedent
+  for that exact exception); exactly 2 `<dfn>`-carrying tags, both with
+  `data-en`/`data-vn`, matching the two new glossary rows added. A
+  separate tr/td-balance check on `glossary.html` after its two-row
+  addition — balanced (tr 205/205, matching 204 data rows plus the header
+  row; td 612/612; th 1/1 — the earlier `grep -c` count of "1" for `<th>`
+  was a line-count artifact since all three header cells share one line,
+  confirmed via `grep -o` that the true open/close counts both need the
+  occurrence form, not the line-count form, matching this round's own
+  `tr`/`td` checks which used `grep -o` correctly from the start), plus a
+  duplicate-term scan across all 204 first-column entries — zero
+  duplicates, confirmed both new rows' exact term strings, "np.floor()"
+  and "np.ceil()", each appear exactly once. `node --check` confirmed
+  `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid JavaScript,
+  both before and after adding one `n: 130` entry and one
+  `0130-np-floor-and-ceil` file reference to `nav.js`. The shipped
+  (unsolved) `practice/130_np_floor_and_ceil.py` was run directly from its
+  real `practice/` location (via `uv run --with pandas python3`) and
+  printed exactly 3 ✗ with no raw traceback. Built a solved copy inside
+  `.scratch-data-130/` (deleted after, never tracked by git); it printed
+  all 3 ✓ and "All green" on the first run, no further fixes needed. Re-ran
+  the shipped file directly from `practice/` again afterward and
+  reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. This round's own
+  fresh scan still leaves `np.log()`/`np.exp()` open, not pre-committed as
+  THE next pick, per this course's "fresh scan each round" convention —
+  tomorrow's round still owes its own fresh scan. `np.trunc()` and
+  `Series.round()` were both named only as contrast points inside this
+  lesson's own Section 2, not standing candidates for a future lesson of
+  their own (their behavior is now fully covered by this lesson's own
+  contrast). `git status --short` after all edits is expected to show only
+  the intended `data/` files touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new
+  `data/lessons/0130-np-floor-and-ceil.html`, new
+  `data/practice/130_np_floor_and_ceil.py`, and this file). The scratch
+  directory `.scratch-data-130/` was deleted after verification, at the
+  repo root but never tracked by git.

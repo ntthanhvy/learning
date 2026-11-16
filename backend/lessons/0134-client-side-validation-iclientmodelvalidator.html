@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 134 · Making a custom validation rule run in the browser too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 134 · ~20 min</p>
+<h1>Making a custom validation rule run in the browser too</h1>
+<p class="byline">Lesson 133 named its own out-of-scope next step: a custom <code>ValidationAttribute</code> only ever runs on the server, after a full round trip, even though the rule it encodes (classic movies need an early release year) could just as easily be checked the moment the user types. This lesson is that next step — the interface a custom attribute implements to also run client-side, and the simpler escape hatch for when the rule can't run client-side at all.</p>
+
+<h2>1 · The rule still only runs on the server, until it says otherwise</h2>
+<p>Lesson 133's <code>ClassicMovieAttribute</code> works end to end, but only on the server: submit the form, wait for the response, then see the error. Built-in attributes like <code>[Required]</code> and <code>[Range]</code> don't make the user wait — the browser flags the problem before the request is even sent. That gap exists because <code>[Required]</code> and <code>[Range]</code> do one extra thing <code>ClassicMovieAttribute</code> doesn't yet do: implement a second interface, <dfn data-en="an ASP.NET Core interface (Microsoft.AspNetCore.Mvc.ModelBinding.Validation.IClientModelValidator) with one method, AddValidation(ClientModelValidationContext context), that a ValidationAttribute subclass additionally implements to add the data-val-* HTML attributes a client-side validation library reads -- without this interface, the rule exists only server-side" data-vn="IClientModelValidator (giữ nguyên) — interface của ASP.NET Core (Microsoft.AspNetCore.Mvc.ModelBinding.Validation.IClientModelValidator) có 1 method AddValidation(ClientModelValidationContext context), ValidationAttribute subclass implement thêm để gắn attribute HTML data-val-* mà thư viện validate phía client đọc được -- không có interface này thì luật chỉ chạy ở server">IClientModelValidator</dfn>, alongside <code>ValidationAttribute</code> itself.</p>
+
+<h2>2 · The one method: AddValidation</h2>
+<p><code>IClientModelValidator</code> has exactly one method: <code>public void AddValidation(ClientModelValidationContext context)</code>. It doesn't check anything — it writes <code>data-val-*</code> HTML attributes onto the rendered form element, which a client-side library reads later to do the actual checking in the browser.</p>
+
+<pre><code><span class="kw">public class</span> ClassicMovieAttribute : ValidationAttribute, IClientModelValidator
+{
+    <span class="kw">public</span> ClassicMovieAttribute(<span class="kw">int</span> year) =&gt; Year = year;
+
+    <span class="kw">public int</span> Year { get; }
+
+    <span class="kw">public void</span> AddValidation(ClientModelValidationContext context)
+    {
+        MergeAttribute(context.Attributes, <span class="kw">"data-val"</span>, <span class="kw">"true"</span>);
+        MergeAttribute(context.Attributes, <span class="kw">"data-val-classicmovie"</span>, FormatErrorMessage(<span class="kw">""</span>));
+        MergeAttribute(context.Attributes, <span class="kw">"data-val-classicmovie-year"</span>,
+            Year.ToString(CultureInfo.InvariantCulture));
+    }
+
+    <span class="kw">protected override</span> ValidationResult? IsValid(
+        <span class="kw">object</span>? value, ValidationContext validationContext)
+    {
+        <span class="kw">// unchanged from Lesson 133 -- server-side logic still lives here</span>
+    }
+}</code></pre>
+<p>Two interfaces, two jobs, on the same class: <code>ValidationAttribute.IsValid</code> still does the real check on the server; <code>IClientModelValidator.AddValidation</code> only ever emits markup. Nothing about adding the second interface changes or replaces the first.</p>
+
+<h2>3 · Who actually renders those attributes, and who reads them</h2>
+<p>Razor's own Tag Helpers and HTML helpers are what call <code>AddValidation</code> while building a form, folding each attribute's <code>data-val-*</code> output straight into the rendered <code>&lt;input&gt;</code> tag:</p>
+<pre><code>&lt;input type=<span class="kw">"date"</span>
+    data-val=<span class="kw">"true"</span>
+    data-val-classicmovie=<span class="kw">"Classic movies must have a release year no later than 1960."</span>
+    data-val-classicmovie-year=<span class="kw">"1960"</span>
+    data-val-required=<span class="kw">"The Release Date field is required."</span>
+    id=<span class="kw">"Movie_ReleaseDate"</span> name=<span class="kw">"Movie.ReleaseDate"</span> value=<span class="kw">""</span>&gt;</code></pre>
+<p>That markup alone does nothing — it's inert data until something reads it. Two separate jQuery libraries split that job: <strong>jQuery Validation</strong> is the generic engine that runs named rules against form fields, and <strong>jQuery Unobtrusive Validation</strong> is the adapter that scans a page for <code>data-val-*</code> attributes and feeds them to jQuery Validation as rules — in Microsoft's own words, "effectively &lsquo;copying&rsquo; the server-side validation logic to the client." Neither library knows anything about <code>ClassicMovieAttribute</code> by name; they only ever see the <code>data-val-classicmovie</code>/<code>data-val-classicmovie-year</code> attribute pair <code>AddValidation</code> happened to emit, plus whatever client-side JavaScript rule was separately registered under the matching <code>"classicmovie"</code> adapter name to interpret them.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like a Zod schema shared between a Next.js server action and a client-side form hook — one schema, both sides free, because both sides run the same JavaScript. The gap that doesn't carry over: <code>IsValid</code> is C#, and a browser cannot run C#. <code>AddValidation</code> doesn't export the C# logic to the browser — it emits a few data attributes, and a <em>separate</em>, hand-written JavaScript adapter (registered with jQuery Validation under a matching rule name) has to re-implement the same comparison in JavaScript for those attributes to mean anything. Nothing here shares one check across both languages the way Zod does.</div>
+
+<h2>4 · When re-implementing the rule in JavaScript isn't worth it: [Remote]</h2>
+<p>Writing a parallel JavaScript adapter is only worth it for logic simple enough to duplicate safely, like comparing a year to a constant. A rule that needs a database lookup — checking an email address is unique — can't be re-implemented client-side at all, short of shipping the whole user table to the browser. For that case ASP.NET Core ships a narrower, purpose-built attribute: <code>[Remote]</code>. Instead of emitting a comparison for a JavaScript library to run locally, the Microsoft Learn docs describe it as implementing "client-side validation that requires calling a method on the server to determine whether field input is valid" — the browser still makes an asynchronous round trip, but it fires automatically on blur, not only on submit, so the result shows up before the user moves through the rest of the form.</p>
+<pre><code>[Remote(action: <span class="kw">"VerifyEmail"</span>, controller: <span class="kw">"Users"</span>)]
+<span class="kw">public string</span> Email { get; set; }</code></pre>
+<p><code>[Remote]</code> and a custom <code>IClientModelValidator</code> implementation solve opposite shapes of the same problem: one skips writing JavaScript entirely by calling the server again; the other skips calling the server again by duplicating simple logic in JavaScript. The docs frame the choice directly: a client-side validator is worth writing when the rule "doesn't do any server-side validation and doesn't need any services from DI" — anything needing DI or a database lookup is <code>[Remote]</code>'s job, not a hand-written adapter's.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers the <code>IClientModelValidator</code> interface, its one method <code>AddValidation(ClientModelValidationContext context)</code>, the <code>data-val-*</code> attribute contract between Razor's renderer and jQuery Unobtrusive Validation/jQuery Validation, and <code>[Remote]</code> as the alternative for server-dependent rules. It does not cover writing the matching JavaScript adapter itself (the <code>$.validator.addMethod</code>/<code>$.validator.unobtrusive.adapters.add</code> calls that give <code>data-val-classicmovie</code> an actual browser-side check), nor any non-jQuery client validation approach — both reasonable next steps, not today's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ValidationAttribute.IsValid still does the real check on the server; IClientModelValidator.AddValidation only emits data-val-* HTML attributes for a client-side library to read -- adding the second interface does not change or replace the first.">
+    <p class="stem">What changes when a custom ValidationAttribute also implements IClientModelValidator?</p>
+    <button class="opt" data-ok>It additionally emits data-val-* markup; the server IsValid check still runs</button>
+    <button class="opt">IsValid simply stops running, since only the browser owns the check</button>
+    <button class="opt">The attribute can no longer apply to more than one field</button>
+    <button class="opt">ModelState.IsValid quietly starts skipping over that one property from then on</button>
+  </div>
+  <div class="q" data-why="IClientModelValidator has exactly one documented method: public void AddValidation(ClientModelValidationContext context), which writes data-val-* HTML attributes rather than performing any check itself.">
+    <p class="stem">What is the exact signature of IClientModelValidator's one method?</p>
+    <button class="opt" data-ok>public void AddValidation(ClientModelValidationContext context)</button>
+    <button class="opt">public bool IsValidClient(ClientModelValidationContext context)</button>
+    <button class="opt">public Task ValidateAsync(ModelValidationContext context)</button>
+    <button class="opt">public ValidationResult AddValidation(ModelStateDictionary context)</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs describe jQuery Unobtrusive Validation as parsing the data- attributes and passing the logic to jQuery Validation, 'effectively copying the server-side validation logic to the client' -- two separate libraries, one parses markup, the other runs the rules.">
+    <p class="stem">What does jQuery Unobtrusive Validation actually do with the rendered data-val-* attributes?</p>
+    <button class="opt" data-ok>parses them, then hands the rules over to jQuery Validation itself</button>
+    <button class="opt">sends them straight back to the server on every single keystroke</button>
+    <button class="opt">deletes them immediately once the page finishes loading its own form</button>
+    <button class="opt">compiles them directly down into actual working raw C# bytecode in-browser</button>
+  </div>
+  <div class="q" data-why="The docs frame a hand-written IClientModelValidator adapter as appropriate when the rule 'doesn't do any server-side validation and doesn't need any services from DI'; a rule needing DI or a database lookup (like a uniqueness check) is instead [Remote]'s documented job, since [Remote] calls the server again rather than duplicating logic in JavaScript.">
+    <p class="stem">Why is a uniqueness check (like a taken email) a job for [Remote], not a hand-written client adapter?</p>
+    <button class="opt" data-ok>it needs a database lookup, which a JavaScript adapter alone cannot perform</button>
+    <button class="opt">[Remote] is simply the newer of the two attributes, released more recently</button>
+    <button class="opt">IClientModelValidator cannot legally be combined with ValidationAttribute on the same class itself</button>
+    <button class="opt">[Remote] always runs server-side while the other one never touches the server</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation">Microsoft Learn: Model validation in ASP.NET Core MVC and Razor Pages</a> — the same page Lessons 132 and 133 cited, read again specifically for its "Client-side validation" and "IClientModelValidator" sections, which give the exact <code>AddValidation(ClientModelValidationContext context)</code> signature, the full <code>ClassicMovieAttribute</code>-with-client-validation worked example this lesson's own code block is drawn from, the quoted sentence on jQuery Unobtrusive Validation "copying" server-side logic to the client, and the <code>[Remote]</code> attribute's documented purpose and the DI-needs test for when to prefer it.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 133's custom ValidationAttribute. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu rule cần gọi database (như check email đã tồn tại), thì ngoài [Remote] ra còn cách nào tránh round-trip mà vẫn an toàn không?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

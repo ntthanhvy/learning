@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 110 · fractions: exact rational numbers, no float imprecision</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 110 · ~20 min · 16 Nov 2026</p>
+<h1><code>fractions</code>: exact rational numbers, no float imprecision</h1>
+<p class="byline">Day 70 fixed one float trap: <code>decimal</code> gives exact <em>base-10</em> arithmetic, so money adds up correctly. <code>float</code> has a second, different trap <code>decimal</code> doesn't touch — a <dfn data-en="a rational number is any number that can be written exactly as one integer divided by another nonzero integer, like 1/3 or 355/113; float cannot represent most rational numbers exactly because it stores values in base 2, so 1/3 becomes an infinitely-repeating binary fraction that gets truncated and rounded" data-vn="giữ nguyên &quot;rational number&quot; — số viết được chính xác dưới dạng 1 số nguyên chia 1 số nguyên khác 0, như 1/3 hay 355/113; float không lưu đúng được hầu hết rational number vì float lưu theo hệ nhị phân (base 2), nên 1/3 thành 1 phân số nhị phân lặp vô hạn, bị cắt và round lại">rational number</dfn> like one-third has no exact finite form in binary, so <code>1/3</code> as a <code>float</code> is already an approximation before any arithmetic even starts. The standard-library <code>fractions</code> module stores a ratio of two integers directly — exact, with no base-10 or base-2 rounding at all.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, lesson body, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>fractions</code>/<code>Fraction(</code> has never been taught — the English word "fraction" appears only inside Day 70's own prose about <code>float</code>'s binary imprecision, never the module itself, and nothing anywhere imports it or constructs a <code>Fraction</code>. <code>socket</code> remains ruled out on the same scope-depth grounds as every prior round (real networking runs deeper than 20 minutes and edges into the FastAPI phase Days 21-25 already touch). Per Day 109's own cadence note, Day 108 was fresh day 1 and Day 109 fresh day 2 of the current three-fresh-then-review cycle, so today is fresh day 3 — Day 111 should be the next review day, covering Days 108-110.</div>
+
+<h2>1 · Why <code>float</code> gets 1/3 wrong before any math happens</h2>
+<p><code>float</code> stores numbers in base 2. Some decimal fractions, like <code>0.1</code>, have no exact finite binary form — that was Day 70's trap. One-third has the same problem in <em>every</em> base except base 3, so it is never exact as a <code>float</code> at all:</p>
+<pre><code><span class="kw">print</span>(<span class="kw">1</span>/<span class="kw">3</span> + <span class="kw">1</span>/<span class="kw">3</span> + <span class="kw">1</span>/<span class="kw">3</span>)        <span class="cm"># 1.0 -- looks fine here...</span>
+<span class="kw">print</span>(<span class="kw">0.1</span> + <span class="kw">0.2</span>)              <span class="cm"># 0.30000000000000004 -- confirmed live, Day 70's trap</span></code></pre>
+<p>The first line happens to land on exactly <code>1.0</code> by luck of rounding; it is not guaranteed to, and in a longer pipeline of ratios — splitting a bill three ways, scaling a recipe, computing odds — those tiny errors accumulate exactly like Day 70's prices did. <code>decimal.Decimal</code> does not help here either: it is exact for base-10 digits, but one-third is not exact in base 10 any more than it is in base 2 (it is <code>0.3333...</code> repeating forever either way).</p>
+
+<h2>2 · <code>Fraction</code>: a ratio of two integers, stored exactly</h2>
+<p><code>fractions.Fraction(numerator, denominator)</code> stores the two integers directly — no binary or decimal rounding involved at all, confirmed live:</p>
+<pre><code><span class="kw">from</span> fractions <span class="kw">import</span> Fraction
+
+third = Fraction(<span class="kw">1</span>, <span class="kw">3</span>)
+total = third + third + third
+<span class="kw">print</span>(total, total == <span class="kw">1</span>)              <span class="cm"># 1 True -- exact, not 0.9999999999999998</span>
+
+r = Fraction(<span class="kw">6</span>, <span class="kw">8</span>)
+<span class="kw">print</span>(r, r.numerator, r.denominator)  <span class="cm"># 3/4 3 4 -- auto-reduced to lowest terms</span></code></pre>
+<p>Every <code>Fraction</code> auto-reduces to lowest terms on construction, and <code>.denominator</code> is guaranteed positive per the docs — <code>Fraction(16, -10)</code> comes out as <code>Fraction(-8, 5)</code>, not <code>Fraction(-16, 10)</code>. Arithmetic (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>) between two <code>Fraction</code>s stays exact and keeps reducing: <code>Fraction(1, 3) + Fraction(1, 6)</code> is exactly <code>Fraction(1, 2)</code>, confirmed live. A zero denominator raises <code>ZeroDivisionError</code> immediately, the same exception plain <code>1/0</code> raises — not a new exception type invented for this module.</p>
+
+<div class="callout"><strong>Fraction compares directly against <code>int</code> and <code>float</code>:</strong> <code>Fraction(1, 2) > 0.4</code> is <code>True</code>, confirmed live — no manual conversion needed first. <code>float(some_fraction)</code> converts back to an approximate <code>float</code> when one is actually needed, e.g. to pass to a function that only accepts floats.</div>
+
+<h2>3 · The float-construction trap, same shape as Day 70's</h2>
+<p><code>Fraction</code> has the exact same construction trap <code>decimal.Decimal</code> does: building one <em>from a float</em> captures that float's own pre-existing binary imprecision, rather than fixing it:</p>
+<pre><code><span class="kw">from</span> fractions <span class="kw">import</span> Fraction
+
+<span class="kw">print</span>(Fraction(<span class="kw">0.1</span>))      <span class="cm"># 3602879701896397/36028797018963968 -- confirmed live</span>
+<span class="kw">print</span>(Fraction(<span class="str">"0.1"</span>))    <span class="cm"># 1/10 -- confirmed live, exact</span></code></pre>
+<p><code>Fraction(0.1)</code> faithfully reports the exact ratio the <code>float</code> <code>0.1</code> already was in memory — a strange-looking huge fraction, because that is genuinely what the nearest binary approximation to one-tenth equals. Building from a <code>str</code> instead — <code>Fraction("0.1")</code>, or <code>Fraction("3/7")</code> for a ratio written directly — never passes through <code>float</code> at all, so it lands on the exact value intended. The docs state this directly: <code>Fraction(1.1)</code> "is not exactly equal to 11/10," for the same reason <code>Decimal(0.1)</code> was never exact in Day 70. The fix is identical in shape: construct from a <code>str</code> (or an <code>int</code> pair), never from a <code>float</code> literal, whenever the exact value matters.</p>
+
+<h2>4 · <code>limit_denominator()</code>: the closest simple fraction to a messy number</h2>
+<p>Sometimes the input really is a <code>float</code> already — a measurement, a computed ratio — and the goal is the simplest fraction close to it, not the float's exact (and ugly) binary value. <code>limit_denominator(max_denominator)</code> finds the closest <code>Fraction</code> with a denominator no larger than the one given:</p>
+<pre><code><span class="kw">import</span> math
+<span class="kw">from</span> fractions <span class="kw">import</span> Fraction
+
+approx = Fraction(math.pi).limit_denominator(<span class="kw">1000</span>)
+<span class="kw">print</span>(approx, <span class="kw">float</span>(approx))   <span class="cm"># 355/113 3.1415929203539825 -- confirmed live</span>
+<span class="cm"># math.pi itself: 3.141592653589793 -- 355/113 is correct to 6 decimal places</span></code></pre>
+<p><code>355/113</code> is a famous historical approximation of π, and <code>limit_denominator()</code> rediscovers it directly from the <code>float</code> value with no hard-coding. This is the opposite move from Section 3: Section 3 preserves an exact value by avoiding <code>float</code> entirely; <code>limit_denominator()</code> deliberately accepts a small amount of error in exchange for a short, human-readable ratio out of a float that was never exact to begin with.</p>
+
+<div class="callout"><strong>Bridge from Day 70:</strong> both modules exist to fix a <code>float</code> precision gap, for different kinds of exactness. <code>Decimal</code> is exact for numbers that are naturally decimal — money, percentages, anything a human writes with a fixed number of digits after the point. <code>Fraction</code> is exact for numbers that are naturally ratios — proportions, odds, fractions of a whole — including ones like 1/3 that no finite decimal or binary expansion ever represents exactly. Reach for whichever one matches how the original number was meant to be written.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has a dedicated exact-rational column dtype matching <code>Fraction</code> — a NumPy array of <code>Fraction</code> objects works but loses the vectorized-math speed that is the point of using NumPy at all, so this stays a plain-Python tool for exact small-scale ratio work. Not covered further here, per <code>MISSION.md</code>; this course teaches the standard-library mechanism, not a worked pandas/NumPy example.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/110_fractions_exact_rationals.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/110_fractions_exact_rationals.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building exact <code>Fraction</code>s from integer pairs and summing them to confirm the result is exactly equal to an expected whole number (not a near-miss float); building a <code>Fraction</code> from a <code>str</code> instead of a <code>float</code> literal to avoid the construction trap; and using <code>limit_denominator()</code> to find the simplest fraction close to a given <code>float</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Fraction stores the numerator and denominator directly as two integers, with no binary or decimal rounding step at all -- so Fraction(1,3) + Fraction(1,3) + Fraction(1,3) is exactly Fraction(3,3), which reduces to exactly 1, confirmed live. float's 1/3 is already an approximation before any addition even happens, because one-third has no exact finite binary form.">
+    <p class="stem">Why does <code>Fraction(1, 3) + Fraction(1, 3) + Fraction(1, 3)</code> equal exactly <code>1</code>, when the equivalent <code>float</code> math can land on a near-miss?</p>
+    <button class="opt" data-ok>Fraction stores the two integers directly, with no rounding step at all</button>
+    <button class="opt">Fraction secretly converts every value into a Decimal before adding anything up</button>
+    <button class="opt">Python specially treats the number one-third as its own exact built-in constant</button>
+  </div>
+  <div class="q" data-why="Confirmed live and stated directly in the official docs: Fraction(0.1) reports the exact ratio the float 0.1 already was in memory, a large ugly fraction, because that float was never exactly one-tenth to begin with. Fraction('0.1') never passes through float at all, so it lands on the exact intended value, Fraction(1, 10) -- the same construction trap Day 70's Decimal(0.1) had.">
+    <p class="stem">Why does <code>Fraction(0.1)</code> print a large, unexpected-looking fraction instead of <code>1/10</code>?</p>
+    <button class="opt" data-ok>it exactly reports the float's own pre-existing binary approximation of 0.1</button>
+    <button class="opt">Fraction always expands any input value into its largest possible denominator</button>
+    <button class="opt">this behavior is a long-standing, officially acknowledged bug nobody has fixed</button>
+  </div>
+  <div class="q" data-why="limit_denominator() deliberately accepts a small amount of error in exchange for a short, human-readable ratio -- the opposite goal from Fraction(str) or Fraction(int, int), which exist to stay perfectly exact. Confirmed live: Fraction(math.pi).limit_denominator(1000) returns 355/113, the historical approximation of pi, not the exact (and enormous) binary ratio math.pi actually holds.">
+    <p class="stem">What trade-off does <code>limit_denominator()</code> deliberately make that <code>Fraction("0.1")</code> does not?</p>
+    <button class="opt" data-ok>it accepts a small error in exchange for a short, simple denominator</button>
+    <button class="opt">it silently rounds every single input up to the next whole integer</button>
+    <button class="opt">it converts the given fraction into a fixed-precision Decimal object right now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/fractions.html"><code>fractions</code></a> docs — "provides support for rational number arithmetic," and covers today's <code>Fraction(numerator, denominator)</code>/<code>Fraction(str)</code> constructors, the <code>numerator</code>/<code>denominator</code> properties ("in lowest terms," denominator "guaranteed to be positive"), <code>limit_denominator()</code>, and the float-construction caveat quoted directly in Section 3.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day110">glossary</a> under Day 110.<br>
+Day 110 closes fresh day 3 of the current three-fresh-then-review cycle — Day 111 should be the next review day, covering Days 108-110. <code>socket</code> remains the standing ruled-out candidate on scope-depth grounds; a fresh gap-scan should still run before the next fresh-topic round rather than assuming none remain.<br><br>
+💬 Anything unclear — <code>Fraction</code> vs. <code>Decimal</code>, the float-construction trap, or <code>limit_denominator()</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

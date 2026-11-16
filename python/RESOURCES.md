@@ -101,6 +101,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 108 — `queue.Queue` for exchanging items safely between threads with no manual `threading.Lock` (Day 73), `put()`/`get()`'s default blocking behavior vs. `put_nowait()`/`get_nowait()`'s immediate `Full`/`Empty` exceptions, `task_done()`/`join()` for confirming every item was fully processed rather than merely removed, and `LifoQueue`/`PriorityQueue`/`SimpleQueue` as named-but-undemonstrated next steps.
 - [Docs: `multiprocessing`](https://docs.python.org/3/library/multiprocessing.html)
   Use for: Day 109 — `Process`'s `target=`/`args=` plus `start()`/`join()` for running real parallel CPU work across separate processes instead of Day 73's GIL-bound threads, `multiprocessing.Queue` for passing picklable results back across the process boundary, `Pool.map()`/`apply_async()` for the batch-shaped equivalent of `ThreadPoolExecutor`, and the documented `if __name__ == "__main__":` guard requirement tied to the `spawn`/`fork`/`forkserver` start methods.
+- [Docs: `fractions`](https://docs.python.org/3/library/fractions.html)
+  Use for: Day 110 — `Fraction(numerator, denominator)`/`Fraction(str)` for exact rational-number arithmetic with no binary or decimal rounding, the `numerator`/`denominator` properties (always in lowest terms, denominator guaranteed positive), the float-construction trap where `Fraction(0.1)` captures `float`'s own pre-existing binary imprecision instead of fixing it, and `limit_denominator()` for the closest simple fraction to a messy float.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

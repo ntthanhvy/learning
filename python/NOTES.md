@@ -13428,3 +13428,87 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
   round; see this file's own next line if it appears, or treat
   silence/blocking as the known sandbox limitation if not.
+- 2026-11-17 generation (Lesson 111, headless run): idempotency check first
+  confirmed no `lessons/0111-*.html` on disk and no `n: 111`/2026-11-17 entry
+  in `nav.js` or this file — proceeded. DB access worked this round (the
+  Node-wrapped `psql` workaround ran cleanly): the 25 most recent
+  `course_progress` rows confirmed the latest python row was Day 110 dated
+  2026-11-16, with only routine `lesson_generated` rows for python since —
+  no quiz/kata/lesson_completed signal, matching `learning-records/`, which
+  still holds only the Day 1 baseline file. Read `MISSION.md`
+  (no-pandas/no-NumPy exclusion re-confirmed, never modified), `PLAN.md`'s
+  Phase 2 spine, this file's tail through Day 110's own closing note,
+  `assets/nav.js`'s last entry (`n: 110`, 2026-11-16), and Days 108-110's
+  lessons/practice files directly as review material. Per Day 110's own
+  cadence note, Day 108 was fresh day 1, Day 109 fresh day 2, and Day 110
+  fresh day 3 of the current three-fresh-then-review cycle, so today is the
+  next review day, covering exactly Days 108-110 — this is the twenty-first
+  review day in the series (Day 71 reviewed 68-70, 75→72-74, 79→76-78,
+  83→80-82, 87→84-86, 91→88-90, 95→92-94, 99→96-98, 103→100-102,
+  107→104-106, now 111→108-110). Ran the standing fresh-gap grep anyway,
+  matching every prior review day's own discipline — `socket` remains the
+  one standing candidate, still passing-mention-only across Days 21-25, 58,
+  73, and 109 (same scope-depth grounds every prior round gave); no other
+  genuinely untouched stdlib corner turned up. Modeled the lesson
+  structurally on Day 107 (`0107-review-retrieval-day-20.html`), the most
+  recent review day: three fold-out retrieval questions in original
+  teaching order (Day 108 `queue.Queue` blocking/locking, Day 109
+  `multiprocessing.Process`'s separate-memory behavior, Day 110 `Fraction`
+  exactness and its float-construction trap), a "why today / why not a
+  fourth fresh day" callout re-running the fresh-gap grep first, a
+  pandas/NumPy scope-boundary callout, an interleaving-rationale paragraph
+  naming the Day 108/109 concurrency throughline and Day 110's "exact is
+  not one fixed idea" contrast with Day 70, and a quiz of three questions
+  recalling each day's confirmed-live claim. No new jargon introduced — a
+  review day revisits terms already glossed under their original days (108,
+  109, 110), so `reference/glossary.html` and `RESOURCES.md` were not
+  touched this round, matching every prior review day's own convention.
+  Verification performed mechanically, from a dedicated script
+  (`_verify111.py`, written directly under `python/` since `/tmp` is not
+  writable in this sandbox, deleted after): (1) an `html.parser.HTMLParser`
+  full-document parse of the new lesson and of `glossary.html` (unchanged)
+  — no parse errors on either; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — balanced (div 9/9, p
+  16/16, code 64/64, button 9/9, script 3/3, dfn 0/0 as expected for a
+  review day, pre 1/1, h2 5/5, h1 1/1, em 1/1, strong 7/7, a 6/6), plus a
+  raw-unescaped-`&` regex scan — zero hits; (3) a per-question quiz option
+  word-count check via regex-strip-tags extraction on the actual printed
+  word lists (not just counts) — first draft mismatched on one of three
+  questions (13/12/12), reworded the long option twice until it landed at
+  12 words, re-checking the exact word list after each edit, until all
+  three landed on equal per-question counts: 11/11/11, 12/12/12, 12/12/12;
+  (4) `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all three clean, both before and after the `nav.js`
+  edit; (5) a duplicate `n:` scan across `nav.js`'s `LESSONS` array — 111
+  entries, zero duplicates, max `n` is 111; (6) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — 6 hits total
+  (`pandas` twice, `NumPy` three times, `DataFrame` once), all confirmed by
+  direct line lookup to sit inside the single required "Where pandas/NumPy
+  go from here" scope-boundary callout, never a worked example, and zero
+  hits in the practice file. Practice verification: the shipped (unsolved)
+  `practice/111_review_retrieval_day_21.py` was executed directly from its
+  real `practice/` location (`uv run python3
+  practice/111_review_retrieval_day_21.py`) and printed exactly 3 ✗ with no
+  raw traceback. A solved copy was built in a scratch dir inside the repo
+  (`.scratch-python-111/`, created because `/tmp` was blocked for
+  write/copy in this sandbox, deleted after) — copied from the shipped
+  file, each TODO body filled in directly, never editing the shipped file
+  itself — and printed all 3 ✓ and "All green" on two consecutive runs,
+  with no bugs caught in this round. The shipped file was re-run afterward
+  from its real location and reproduced the identical all-✗ result,
+  confirming no leakage back into the baseline. The multiprocessing
+  exercise (Ex 2) relies on a module-level helper function
+  (`_square_into_queue`) so the child process can pickle and import it, the
+  same picklability rule Day 109's own lesson named. Registered Lesson 111
+  in `nav.js` with today's date (2026-11-17) right after the `n: 110` entry.
+  `python/learning-records/` was not touched this round — still only the
+  Day 1 baseline record with no newer quiz/kata/lesson_completed signal, so
+  a routine review-day pick following the course's own settled cadence was
+  the right call. Cadence note for the next round: Day 111 closes the
+  twenty-first review cycle — Day 112 should resume fresh topics, fresh day
+  1 of a new three-fresh-then-review cycle, with a full gap-scan from
+  scratch rather than assuming `socket` is the only remaining candidate.
+  `bin/record-progress python lesson_generated --day 111 --lesson
+  0111-review-retrieval-day-21.html --detail
+  '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
+  round and succeeded.

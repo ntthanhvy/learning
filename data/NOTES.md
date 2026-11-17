@@ -12571,3 +12571,133 @@
   `data/practice/130_np_floor_and_ceil.py`, and this file). The scratch
   directory `.scratch-data-130/` was deleted after verification, at the
   repo root but never tracked by git.
+
+- 2026-11-17 generation (Lesson 131, headless run): this round's own DB
+  read via the `node -e ... execFileSync('psql', ...)` workaround succeeded
+  directly (no approval-gate failure this time) and confirmed the latest
+  `course='data'` row was day 130, dated 2026-11-16 — today's round was not
+  a duplicate. Idempotency re-confirmed on disk and in `nav.js`: no
+  `lessons/0131-*.html` and no `n: 131`/`2026-11-17` entry existed before
+  writing anything. Read `MISSION.md` (unmodified), this file's own tail,
+  `RESOURCES.md`, the one `data/learning-records/` baseline file,
+  `lessons/0130-np-floor-and-ceil.html` and `lessons/0129-np-abs-and-sqrt.html`
+  plus their matching `practice/` files in full as structural templates, and
+  `reference/glossary.html`'s tail for the exact row format. Topic choice:
+  Lesson 130 closed its own fresh scan with `np.log()`/`np.exp()` as the
+  one standing candidate left over from Lesson 128's original scan. Per
+  this course's "fresh scan each round" convention, re-ran the scan rather
+  than taking it as given — grepped every lesson body and every glossary
+  row case-insensitively for `np.log(`, `np.exp(`, `np.log1p(`, `np.expm1(`,
+  `np.log10(`, `np.log2(`: zero dedicated coverage for any of them, only
+  three prior "next lesson" teaser lines naming the pair in passing. Picked
+  `np.log()`/`np.exp()` as one coherent pair, same granularity as the
+  Lesson 126-130 elementwise-ufunc lineage: together they are the standard
+  skew-fix-transform/reverse-transform pair (log-transforming a right-skewed
+  column before summary stats, `np.exp()` to undo it) and the log-return
+  formula (`np.log(price / price.shift(1))`), both genuinely common
+  interview-relevant wrangling tasks per `MISSION.md`'s front-loading
+  framing. Verified directly in a scratch sandbox (numpy 2.5.5, pandas
+  3.1.1, `uv run --with pandas`) rather than trusting memory: confirmed both
+  keep a Series' own Index and return a Series when called on one, matching
+  the Lesson 127/129/130 pattern; confirmed both always upcast to
+  `float64` regardless of input dtype — the same always-upcast rule as
+  Lesson 129's `np.sqrt()`, not the int-preserving rule `np.floor()`/
+  `np.ceil()`/`np.abs()` follow, since a log or exponential is almost never
+  a whole number. The central trap, confirmed directly: `np.log(0)` returns
+  `-inf` with a `RuntimeWarning` ("divide by zero encountered in log"), and
+  `np.log()` of a negative real returns `NaN` with a *different*
+  `RuntimeWarning` ("invalid value encountered in log") — neither raises an
+  exception, both only warn, confirmed via Python's `warnings.catch_warnings`
+  directly in the scratch sandbox; a plain NaN input, confirmed separately,
+  passes through unchanged with no warning fired at all. Confirmed directly
+  `np.log1p(x)` equals `log(1+x)` for ordinary inputs but is more precise at
+  very small `x` (checked on `x = 1e-15`: `log(1+x)` loses precision to
+  floating-point rounding in the addition itself, `log1p(x)` does not), and
+  `np.log1p(0)` is a clean `0.0` with no `-inf` trap. Confirmed directly
+  `np.exp()` overflows to `inf` with its own `RuntimeWarning` ("overflow
+  encountered in exp") on a large input (`np.exp(1000)` is `inf`), and that
+  `np.exp(np.log(x))` does not round-trip to bit-identical values — confirmed
+  directly on `[10.0, 1000.0, 50000.0]`, the round trip came back
+  `[10.000000000000002, 999.9999999999998, 50000.00000000001]` — the
+  standard "never compare floats with `==`" lesson, pointing at `np.isclose()`
+  (Lesson 117) instead. Confirmed directly pandas defines neither
+  `Series.log()` nor `Series.exp()` — both raise `AttributeError`
+  immediately, continuing the naming-gap lineage from Lessons 126-130.
+  Confirmed directly `np.log()` raises `TypeError` on `object` dtype (no
+  complex-number branch explored, out of scope per `MISSION.md`'s "no deep
+  NumPy internals" line); `np.log10()`/`np.log2()` were named only as
+  same-family base variants, not built out as their own exercises. Did not
+  fetch a fresh WebFetch of the official NumPy docs pages for `numpy.log()`/
+  `numpy.exp()` beyond citing their known stable URLs per `RESOURCES.md`'s
+  NumPy-fundamentals grouping — the domain-restriction and overflow rules
+  are stated plainly on both pages from general knowledge already
+  cross-checked in this sandbox; the exact float round-trip residual value
+  is confirmed via this sandbox only, not quoted from either docs page,
+  noted explicitly in the lesson's own "Go deeper" line. Added exactly two
+  new glossary rows, "np.log()" then "np.exp()", directly after Lesson
+  130's "np.ceil()" entry — confirmed via a scripted scan of every
+  first-column term (206 rows total after adding) that neither name was
+  already present, zero duplicates found. Also included an explicit
+  `.interview` callout div in this lesson (the Q&A "why log-transform, what
+  has to be true of the data first" framing) — noted while reading recent
+  templates that Lessons 114-130 (the raw-NumPy-primitive lineage) had
+  drifted away from including one, but `NOTES.md`'s own standing rule
+  ("every lesson should include an `.interview` callout box") was treated as
+  authoritative over that recent drift, per this round's task instructions.
+  Verification performed mechanically via a scratch directory
+  `.scratch-data-131/` created at the repo root (deleted after, never
+  tracked by git, matching every prior round's own precedent): (1) a
+  quiz-word-count script (Python regex stripping HTML tags, splitting on
+  whitespace) found the first draft mismatched across all three questions
+  (8/8/9, 11/9/10, 10/12/7) and, after a few rounds of wording trims,
+  confirmed exactly 8/8/8, 10/10/10, and 10/10/10 option words across the
+  three questions, one `data-ok` per question throughout; (2) an HTML
+  tag-balance script (same regex approach, run via `uv run python3
+  <script>`) confirmed fully balanced: html/head/body 1/1, div 6/6, p
+  17/17, code 123/123, pre 4/4, h1 1/1, h2 7/7, strong 4/4, button 9/9,
+  script 3/3, dfn 2/2, span 21/21, em 2/2, a 3/3, title 1/1, zero raw
+  unescaped `&` outside the lesson's own `cd ~/learning/data && uv run ...`
+  shell command inside its own `<pre><code>` block (matching every prior
+  round's own precedent for that exact exception); exactly 2
+  `<dfn>`-carrying tags, both with `data-en`/`data-vn`, matching the two new
+  glossary rows added. A separate tr/td-balance check on `glossary.html`
+  after its two-row addition — balanced (tr 207/207, matching 206 data rows
+  plus the header row; td 618/618; th 3/3; zero raw `&`), plus a
+  duplicate-term scan across all 206 first-column entries — zero
+  duplicates, confirmed both new rows' exact term strings, "np.log()" and
+  "np.exp()", each appear exactly once. `node --check` confirmed `nav.js`,
+  `gloss.js`, and `quiz.js` all still parse as valid JavaScript, both before
+  and after adding one `n: 131` entry and one `0131-np-log-and-exp` file
+  reference to `nav.js`. The first run of the shipped (unsolved)
+  `practice/131_np_log_and_exp.py`, run directly from its real `practice/`
+  location via `uv run --with pandas python3`, printed exactly 3 ✗ with no
+  raw traceback, as expected. Building the solved copy inside
+  `.scratch-data-131/` (deleted after, never tracked by git) caught a real
+  bug on the first attempt, not just a wording issue: Exercise 2's checks
+  compared a `numpy.bool_` result against Python's `True` using `is`
+  (`ex2_log_zero_is_neginf is True`), which is always `False` for a NumPy
+  scalar even when numerically correct, since `is` tests identity, not
+  equality — fixed by wrapping all three Exercise 2 comparisons in `bool()`
+  in the shipped `practice/131_np_log_and_exp.py` itself (not just the
+  scratch solved copy), matching the pattern Exercise 1/3 already used
+  correctly. After that fix, the solved copy printed all 3 ✓ and "All
+  green" on the first re-run; the expected two `RuntimeWarning`s from the
+  Section 2 zero/negative-log exercise printed to stderr but did not affect
+  the check results, by design — that warning is the trap being tested, not
+  a bug. Re-ran the shipped file directly from `practice/` again afterward
+  and reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. This round's own fresh
+  scan closed the last standing candidate carried over from Lesson 128 —
+  tomorrow's round starts with nothing pre-committed and owes its own fresh
+  scan from scratch, per this course's standing convention. No new
+  `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal since mid-October. `git status --short` after all
+  edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0131-np-log-and-exp.html`, new
+  `data/practice/131_np_log_and_exp.py`, and this file). The scratch
+  directory `.scratch-data-131/` was deleted after verification, at the
+  repo root but never tracked by git. `bin/record-progress data
+  lesson_generated --day 131 --lesson 0131-np-log-and-exp.html --detail
+  '{"by":"claude-sonnet-5"}'` was run directly from the repo root to close
+  out this round.

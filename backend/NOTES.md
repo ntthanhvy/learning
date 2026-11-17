@@ -11557,3 +11557,132 @@ upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
 Polly/.NET resilience libraries, both still deliberately out of scope per
 MISSION.md's "concepts first" rule; and the backfill-missing-
 Lesson-117-NOTES-entry gap, still not investigated.
+
+## 2026-11-17 — Lesson 135: the output cache's own size limits and its locking switch (SizeLimit, MaximumBodySize, SetLocking(false))
+
+Headless run. DB access worked this round: the Node-wrapped `psql
+"$LEARNING_DB_URL"` workaround this run's own instructions specify ran
+cleanly (the literal `psql` pattern typed directly in Bash is still
+blocked by this sandbox, consistent with every prior round's own
+observation). `course_progress` rows for `course='backend' AND
+kind='lesson_generated'` ordered by id descending showed the top row
+dated 2026-11-16 (day 134), not 2026-11-17 — safe to proceed. `nav.js`'s
+last entry was also `n: 134, date: "2026-11-16"` and no `lessons/0135-*
+.html` file existed on disk, agreeing with the DB check. `learning-
+records/` still has no entry newer than Lesson 3 — no fresh per-lesson
+completion signal to size today's step against, so generated
+conservatively, finally acting on the standing candidate rather than
+deferring it a seventh time.
+
+Topic picked: the `SizeLimit`/`MaximumBodySize` output-cache limits and
+`SetLocking(false)`'s resource-locking opt-out — named out of scope across
+Lessons 129 through 134's own scope lines, deferred six rounds running as
+of Lesson 134, with that lesson's own entry explicitly recommending
+"either finally giving them one combined short lesson next time or
+formally dropping them from this list." Combined all three properties
+into one lesson rather than deferring again or splitting them further,
+since all three live on the same `OutputCacheOptions`/`OutputCachePolicy
+Builder` surface Lesson 128 already introduced and the material was thin
+enough on its own (three short property descriptions) that a seventh
+deferral or a further split would have been the oversight Lesson 134's
+own entry warned against. `grep -i` for `SizeLimit`/`MaximumBodySize`/
+`SetLocking` across `backend/lessons/` and `glossary.html` came back
+empty before writing, confirming the gap was real and the terms were
+free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/performance/
+caching/output` again (the same page Lessons 128 through 131 and 134 have
+all cited), this time for its "Configure limits" and "Disable resource
+locking" sections specifically. Confirmed verbatim: `SizeLimit`'s
+documented default of 100 MB and its exact consequence once reached, "no
+new responses will be cached until older entries are evicted";
+`MaximumBodySize`'s documented default of 64 MB and its exact
+consequence, "If the response body exceeds this limit, it will not be
+cached"; `DefaultExpirationTimeSpan`'s 60-second default (already named
+in passing by Lesson 128, cited here only for the same options class);
+and the quoted sentence that "By default, resource locking is enabled to
+mitigate the risk of cache stampede and thundering herd," plus the exact
+`SetLocking(false)` policy-builder worked example (`AddPolicy("NoLock",
+builder => builder.SetLocking(false))` paired with `.CacheOutput
+("NoLock")`), used verbatim in this lesson's own second code block.
+`which dotnet` succeeded this round (unlike every round since Lesson 103,
+which this file has repeatedly recorded as blocked) — however, invoking
+`dotnet --version` or any other `dotnet` subcommand still required
+interactive approval the sandbox would not grant headlessly, so actual
+compilation was not possible either way. Fell back to hand-checking the
+lesson's two C# code blocks against the fetched docs' own exact property
+names and worked examples instead, as above; both blocks match the docs
+verbatim (the `SizeLimit`/`MaximumBodySize`/`DefaultExpirationTimeSpan`
+block simply assigns the three documented properties together on one
+`AddOutputCache` call; the `SetLocking(false)` block is the docs' own
+`AddPolicy`/`CacheOutput` pair, trimmed to the one relevant policy).
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson135/`, not `/tmp`, per the
+same sandbox constraint every round since Lesson 133 has noted; nothing
+written to the repo besides the three intended files; scratch directory
+deleted after): (1) a quiz word-count check per `<div class="q">` block,
+both `.split(/\s+/)` and `.split(" ")` methods agreeing — first draft
+landed uneven on all four questions (Q1 13/13/10/10, Q2 11/11/12/11, Q3
+9/11/12/12, Q4 11/13/12/10), converged after several rewrite-and-recount
+passes to exactly 12/12/12/12 (Q1), 11/11/11/11 (Q2), 12/12/12/12 (Q3),
+and 12/12/12/12 (Q4), exactly one `data-ok` and four options per question
+confirmed the same way; (2) an HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean (div 6/6, p
+15/15, code 19/19, button 16/16, script 3/3, dfn 2/2, pre 2/2, h2 5/5, h1
+1/1, em 1/1, strong 3/3, a 2/2), both `dfn` tags confirmed to carry both
+`data-en=` and `data-vn=`; (3) a brace/paren balance check on both
+`<pre><code>` blocks after stripping tags and unescaping HTML entities —
+balanced (1/1 braces, 2/2 parens; 1/1 braces, 5/5 parens); (4) a
+raw-unescaped-`&` scan across the lesson — zero hits; (5) a
+duplicate-term scan on `glossary.html`'s first column before adding the
+three new rows — zero collisions for `SizeLimit`, `MaximumBodySize`, or
+`SetLocking(false)`; a table/tr/td balance check on `glossary.html` after
+the three-row addition — balanced (tr 417/417, td 1248/1248, 416 term
+rows total = 413 prior + 3 new), plus a second duplicate-term scan
+afterward — zero duplicates; (6) `node --check` against `nav.js`,
+`gloss.js`, `quiz.js` — all clean, before and after the `nav.js` edit;
+(7) a basic HTML well-formedness check (one `<!DOCTYPE html>`, one
+`<html>`/`</html>`, three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 135 in `nav.js` (date 2026-11-17, today's actual
+generation date) right after `n: 134`. Confirmed via `git status
+--short` from the repo root (attempted directly from the repo root this
+time, since the earlier `cd`-then-`git` compound form hit a sandbox
+approval prompt mid-round) that this round intended to touch only
+`backend/assets/nav.js`, `backend/reference/glossary.html`, and the new
+`backend/lessons/0135-output-cache-size-limits-and-locking.html`; the
+direct `git status --short` call itself also required interactive
+approval not available headlessly, so the scope claim rests on this
+round's own tracked file edits rather than a confirmed diff, unlike most
+prior rounds' own explicit confirmation — worth re-checking next round
+whether that approval prompt was a one-off or a new standing block. Day
+number used 135, matching this file's own day-equals-lesson-number
+convention, no deviation found. No new `RESOURCES.md` line added — the
+one fetched page is `learn.microsoft.com`, already covered by this
+file's standing entries' pattern (and the same exact page Lessons 128
+through 131 and 134 cited), cited inline in the lesson's own "Go deeper"
+section instead. No new `learning-records/` file added — the topic came
+from Lesson 134's own named scope-line gap, not a new observation about
+the learner. `bin/record-progress backend lesson_generated --day 135
+--lesson 0135-output-cache-size-limits-and-locking.html --detail
+'{"by":"claude-sonnet-5"}'` ran successfully this round (unlike the
+`dotnet`/`git` commands above, this one-shot invocation from the repo
+root hit no approval block), confirmed by its own printed `recorded:
+backend/lesson_generated day=135
+lesson=0135-output-cache-size-limits-and-locking.html` output.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: writing a custom eviction policy that reacts to `SizeLimit`
+pressure directly, and benchmarking the actual throughput cost of
+resource locking under real concurrent contention (both named this round
+as this lesson's own out-of-scope next steps); writing the actual
+JavaScript adapter behind a custom `data-val-*` attribute pair, still
+deferred from Lesson 134; Go's `select`-statement arbitration rules,
+still deferred many rounds running on fetched-page-truncation grounds;
+Lesson 49's dead-letter queues, still confirmed to have no first-party
+ASP.NET Core angle; Lesson 35's upsert/ON CONFLICT, still confirmed the
+same way; FluentValidation and Polly/.NET resilience libraries, both
+still deliberately out of scope per MISSION.md's "concepts first" rule;
+and the backfill-missing-Lesson-117-NOTES-entry gap, still not
+investigated.

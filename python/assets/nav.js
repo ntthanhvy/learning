@@ -228,6 +228,8 @@
       file: "lessons/0109-multiprocessing-sidestepping-the-gil.html" },
     { n: 110, date: "2026-11-16", title: "fractions: exact rational numbers, no float imprecision",
       file: "lessons/0110-fractions-exact-rationals.html" },
+    { n: 111, date: "2026-11-17", title: "Review day 21: retrieval across Days 108-110",
+      file: "lessons/0111-review-retrieval-day-21.html" },
   ];
 
   const REFS = [

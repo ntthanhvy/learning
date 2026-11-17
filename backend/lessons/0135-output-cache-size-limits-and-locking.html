@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 135 · The output cache's own size limits and its locking switch</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 135 · ~20 min</p>
+<h1>The output cache's own size limits and its locking switch</h1>
+<p class="byline">Lessons 129 through 134 named the same two knobs as "out of scope for now" every single time: the <code>SizeLimit</code>/<code>MaximumBodySize</code> cache-wide limits, and <code>SetLocking(false)</code>'s resource-locking opt-out. Both are real properties on the same <code>OutputCacheOptions</code> class Lesson 128 already introduced — not new concepts, just two settings a first pass at output caching had no room for yet. This lesson finally closes that gap.</p>
+
+<h2>1 · Two different questions, two different limits</h2>
+<p>"How big can the cache get?" and "how big can one cached response be?" sound like the same question. <code>OutputCacheOptions</code> answers them with two separate properties, because they fail differently. <dfn data-en="a property on ASP.NET Core's OutputCacheOptions class setting the maximum total size of the output cache's storage, across every cached response combined -- default 100 MB; once the total is reached, no new responses are cached until older entries are evicted" data-vn="SizeLimit (giữ nguyên) — property của OutputCacheOptions giới hạn tổng dung lượng toàn bộ output cache, mặc định 100 MB -- đầy rồi thì response mới không được cache cho tới khi entry cũ bị evict">SizeLimit</dfn> caps the whole cache's total storage at 100 MB by default; once that total is reached, Microsoft's own docs say "no new responses will be cached until older entries are evicted" — existing entries keep serving, but the cache simply stops growing. <dfn data-en="a property on ASP.NET Core's OutputCacheOptions class setting the maximum size of a single response body eligible for caching -- default 64 MB; a response body exceeding this limit is not cached at all, even if the overall cache has room left under SizeLimit" data-vn="MaximumBodySize (giữ nguyên) — property của OutputCacheOptions giới hạn dung lượng 1 response, mặc định 64 MB -- response vượt mức này thì không được cache luôn, dù SizeLimit tổng vẫn còn chỗ">MaximumBodySize</dfn> instead caps one response at 64 MB by default; the docs are direct about the consequence: "If the response body exceeds this limit, it will not be cached" — that one response is skipped outright, regardless of how much room the overall cache still has.</p>
+<pre><code>builder.Services.AddOutputCache(options =&gt;
+{
+    options.SizeLimit = <span class="kw">100</span> * <span class="kw">1024</span> * <span class="kw">1024</span>; <span class="cm">// total cache budget; 100 MB is the default</span>
+    options.MaximumBodySize = <span class="kw">64</span> * <span class="kw">1024</span> * <span class="kw">1024</span>; <span class="cm">// per-response ceiling; 64 MB is the default</span>
+    options.DefaultExpirationTimeSpan = TimeSpan.FromSeconds(<span class="kw">60</span>); <span class="cm">// Lesson 128's own default, same class</span>
+});</code></pre>
+<p>A large response that trips <code>MaximumBodySize</code> never gets the chance to count against <code>SizeLimit</code> at all — the per-response check runs first and rejects it before it ever reaches the shared storage budget. A busy, mostly-small-response cache is far more likely to fill up <code>SizeLimit</code> than to trip <code>MaximumBodySize</code> on any single entry; the two limits guard against two different failure shapes, not the same one at two scales.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this reads like a CDN's per-object size cap, and the per-response half genuinely is that. But <code>SizeLimit</code> has no browser-cache equivalent at all — a browser's HTTP cache is sized and evicted by the browser itself, never something application code configures. Here, both numbers are backend configuration the app owns directly, in the same options object as the expiration time from Lesson 128.</div>
+
+<h2>2 · Why locking is on by default, and what turning it off actually risks</h2>
+<p>Lesson 57 named the failure mode directly: a hot cache key expires, and every request arriving in that instant falls through to the origin at once — a <em>cache stampede</em>. Output caching ships a default defense against exactly that, and the docs say so in as many words: "By default, resource locking is enabled to mitigate the risk of cache stampede and thundering herd." Concretely, when many requests for the same not-yet-cached key arrive together, only the first acquires the lock and actually runs the handler; the rest wait for that result instead of each separately recomputing it — Lesson 57's request-coalescing fix, built into the middleware instead of hand-rolled.</p>
+<p>Turning locking off is one call on a policy builder:</p>
+<pre><code>builder.Services.AddOutputCache(options =&gt;
+{
+    options.AddPolicy(<span class="st">"NoLock"</span>, builder =&gt; builder.SetLocking(<span class="kw">false</span>));
+});
+
+app.MapGet(<span class="st">"/nolock"</span>, Gravatar.WriteGravatar)
+    .CacheOutput(<span class="st">"NoLock"</span>);</code></pre>
+<p>With locking off, every one of those simultaneous requests runs the handler independently the instant the key is missing — the exact pile-up Lesson 57 taught request coalescing to prevent. That trade only makes sense for a handler cheap enough that duplicate concurrent runs cost nothing worth guarding against; for anything that queries Postgres or calls a slow downstream service, leaving the default locking in place is the safer choice, and Lesson 129's eviction calls and Lesson 128's expiration times both already assume it's there.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>OutputCacheOptions.SizeLimit</code>, <code>OutputCacheOptions.MaximumBodySize</code>, and <code>SetLocking(false)</code>'s resource-locking opt-out — the two limits and the one locking switch named out of scope across Lessons 129 through 134. It does not cover writing a custom eviction policy around <code>SizeLimit</code> pressure, nor benchmarking the actual cost of resource locking under real contention — both reasonable next steps, not today's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="SizeLimit caps the total size of the whole cache across every entry (default 100 MB); once that total is reached, no new responses are cached until older entries are evicted. MaximumBodySize caps one response individually (default 64 MB); a response over that limit is skipped outright, regardless of how much total room SizeLimit still allows.">
+    <p class="stem">What is the actual difference between SizeLimit and MaximumBodySize?</p>
+    <button class="opt" data-ok>one caps the whole cache's total size, the other caps one response</button>
+    <button class="opt">they are simply two old names for the exact same identical setting</button>
+    <button class="opt">MaximumBodySize only ever applies to the request bodies, never any single response</button>
+    <button class="opt">SizeLimit only ever takes effect once MaximumBodySize has been made fully disabled</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs state that once SizeLimit (default 100 MB) is reached, no new responses are cached until older entries are evicted -- existing entries keep serving, the cache just stops accepting new ones until space frees up.">
+    <p class="stem">What actually happens once the output cache hits its SizeLimit?</p>
+    <button class="opt" data-ok>no new responses get cached until some older entries are evicted</button>
+    <button class="opt">the whole app process crashes immediately with one unhandled exception thrown</button>
+    <button class="opt">every existing cached entry gets instantly wiped out and fully discarded</button>
+    <button class="opt">SizeLimit quietly doubles its own value forever just to make room</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs state plainly that by default, resource locking is enabled specifically to mitigate the risk of cache stampede and thundering herd -- Lesson 57's named failure mode, where a hot key's expiry sends many simultaneous requests to the origin at once.">
+    <p class="stem">Why is resource locking enabled by default for the output cache?</p>
+    <button class="opt" data-ok>to mitigate the cache-stampede/thundering-herd risk that this course's Lesson 57 already named</button>
+    <button class="opt">purely to keep the cache's own total size safely under its SizeLimit</button>
+    <button class="opt">it is only a leftover legacy default carrying no real behavior anymore</button>
+    <button class="opt">to force every single cached response to always revalidate through an ETag</button>
+  </div>
+  <div class="q" data-why="With locking disabled via SetLocking(false), every simultaneous request for a missing key runs the handler independently rather than one winner's result being shared -- reasonable only for a handler cheap enough that duplicate concurrent runs cost nothing worth guarding against; otherwise the default locking (which coalesces those requests behind one recompute) is the safer choice.">
+    <p class="stem">What does calling SetLocking(false) on a policy actually trade away?</p>
+    <button class="opt" data-ok>request coalescing -- concurrent misses now each run the handler on own</button>
+    <button class="opt">nothing real, it is purely a cosmetic debugging flag with no effect</button>
+    <button class="opt">the ability to ever set any expiration time at all on policy</button>
+    <button class="opt">every cached response's own ETag and If-None-Match revalidation support, now gone entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/output">Microsoft Learn: Output Caching Middleware</a> — the same page Lessons 128 through 131 cited, read again specifically for its "Configure limits" and "Disable resource locking" sections, which give the exact <code>SizeLimit</code> (100 MB default) and <code>MaximumBodySize</code> (64 MB default) property descriptions and their distinct failure behavior, plus the quoted sentence that resource locking is enabled by default "to mitigate the risk of cache stampede and thundering herd," and the <code>SetLocking(false)</code> policy-builder example this lesson's own code block is drawn from.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 128's output caching middleware, Lesson 129's eviction, and Lesson 57's cache-stampede material. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu 1 policy cụ thể cần SizeLimit riêng khác với cache chung thì có cách nào set không, hay SizeLimit luôn là toàn cục?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

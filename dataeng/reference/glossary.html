@@ -476,6 +476,12 @@
   <tr><td>replay</td><td>giữ nguyên "replay" — tiến trình riêng, đọc lại các dòng đã bị dead-letter trước đó rồi thử xử lý lại đúng logic ban đầu đã fail; mỗi dòng sau đó hoặc thành công (chuyển ra khỏi bảng dead-letter) hoặc vẫn fail (giữ lại, cập nhật lý do mới) — không để các dòng dead-letter nằm yên vĩnh viễn</td><td>A separate process that re-reads previously quarantined (dead-lettered) items and re-attempts the same processing that originally failed on them, moving each one to success or leaving it quarantined with an updated reason, rather than quarantined rows sitting untouched forever. Confirmed live this round with a standalone three-row model (one now-fixable, two permanently broken): the fixable row moved into <code>order_events</code> and out of <code>dead_letter_events</code>, the two broken rows stayed in place with a refreshed error, and a second pass over the same remaining rows changed nothing further.</td></tr>
 </table>
 
+<h2 id="day63">Day 63 — A per-restaurant delivery-time histogram: the grain Day 48 named and left alone</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>composite join condition</td><td>giữ nguyên "composite join condition" — trong left join, đưa đủ MỌI điều kiện cần thiết vào on, để 1 dòng bên phải chỉ được gắn vào đúng dòng bên trái khi TẤT CẢ điều kiện đó cùng đúng -- thiếu 1 trong các điều kiện (1 trong các "trục") có thể khiến dòng bị gắn sai nhóm một cách âm thầm, không chỉ tạo ra null dư</td><td>In a left join, including every matching condition needed so a row from the right-hand (joined) table only attaches to the correct row on the left when all of those conditions hold at once — a join condition missing one of several axes can silently attach a row from the wrong group, not just produce an extra null. Confirmed by contrast this round: Day 49's city histogram needed two conditions (city, bucket range); today's restaurant histogram needs three (restaurant_id, plus both bucket bounds), since the grid now has an extra axis that must also line up.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

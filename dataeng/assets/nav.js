@@ -75,6 +75,7 @@
     { n: 60, date: "2026-11-14", title: "dbt selector composition: union, intersection, exclude & default: true", file: "lessons/0060-dbt-selector-union-intersection-default.html" },
     { n: 61, date: "2026-11-15", title: "Airflow on_failure_callback: the hook Day 35 named and never built", file: "lessons/0061-airflow-on-failure-callback.html" },
     { n: 62, date: "2026-11-16", title: "Kafka dead-letter replay: the follow-up Day 41 named and never built", file: "lessons/0062-kafka-dead-letter-replay.html" },
+    { n: 63, date: "2026-11-17", title: "A per-restaurant delivery-time histogram: the grain Day 48 named and left alone", file: "lessons/0063-dbt-histogram-by-restaurant.html" },
   ];
 
   const REFS = [

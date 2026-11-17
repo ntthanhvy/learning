@@ -276,6 +276,8 @@
       file: "lessons/0133-custom-validationattribute-reusable-rules.html" },
     { n: 134, date: "2026-11-16", title: "Making a custom validation rule run in the browser too",
       file: "lessons/0134-client-side-validation-iclientmodelvalidator.html" },
+    { n: 135, date: "2026-11-17", title: "The output cache's own size limits and its locking switch",
+      file: "lessons/0135-output-cache-size-limits-and-locking.html" },
   ];
 
   const REFS = [

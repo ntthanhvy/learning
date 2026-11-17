@@ -268,6 +268,8 @@
       file: "lessons/0129-np-abs-and-sqrt.html" },
     { n: 130, date: "2026-11-16", title: "np.floor() and np.ceil(): rounding toward infinity, not toward zero",
       file: "lessons/0130-np-floor-and-ceil.html" },
+    { n: 131, date: "2026-11-17", title: "np.log() and np.exp(): the skew-fix transform, and its undo button",
+      file: "lessons/0131-np-log-and-exp.html" },
   ];
 
   const REFS = [

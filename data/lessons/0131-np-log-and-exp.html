@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 131 · np.log() and np.exp(): the skew-fix transform, and its undo button</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 131 · ~20 min · 17 Nov 2026</p>
+<h1>np.log() and np.exp(): the skew-fix transform, and its undo button</h1>
+<p class="byline">Lesson 130 closed its own fresh scan with <code>np.log()</code>/<code>np.exp()</code> still open, the one pair left over from Lesson 128's own scan. Today's own fresh scan re-confirmed both are still genuinely untaught — grepped every lesson body and every glossary row case-insensitively for <code>np.log(</code>, <code>np.exp(</code>, <code>np.log1p(</code>, <code>np.expm1(</code>, <code>np.log10(</code>, <code>np.log2(</code>: the only hits were three prior "next lesson" teaser lines naming the pair in passing, never actual coverage. They win on their own merit too: <code>np.log()</code> is the standard fix for a right-skewed numeric column before summary stats or a model, and <code>np.exp()</code> is its undo button — together the most common transform/reverse-transform pair in the wrangling toolkit.</p>
+
+<h2>1 · Both keep the Series and its Index — and both always upcast to float64</h2>
+<p><dfn data-en="a NumPy function that returns the natural logarithm (base e) of each element, elementwise across a whole array or Series at once" data-vn="giữ nguyên 'np.log()' — hàm trả về logarit tự nhiên (cơ số e) của từng phần tử, áp dụng elementwise lên cả mảng/Series một lần">np.log(x)</dfn> and <dfn data-en="a NumPy function that returns e raised to the power of each element, elementwise across a whole array or Series at once -- the inverse of np.log()" data-vn="giữ nguyên 'np.exp()' — hàm trả về e lũy thừa từng phần tử, áp dụng elementwise lên cả mảng/Series một lần; là hàm NGƯỢC của np.log()">np.exp(x)</dfn> both return a <code>Series</code> with the original <code>Index</code> intact when called directly on one — confirmed directly (numpy 2.5.5, pandas 3.1.1), matching the Lesson 127/129/130 pattern rather than Lesson 128's <code>np.vectorize()</code>. Unlike Lesson 130's <code>np.floor()</code>/<code>np.ceil()</code>, there is no int no-op case here:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s_int = pd.Series([<span class="kw">1</span>, <span class="kw">10</span>, <span class="kw">100</span>], index=[<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>])
+np.log(s_int).dtype   <span class="cm"># float64 -- always upcasts, even though every value is a clean integer</span>
+np.exp(s_int).dtype   <span class="cm"># float64 -- same rule</span></code></pre>
+<p>Confirmed directly: both always return <code>float64</code> regardless of the input dtype — the same always-upcast rule as Lesson 129's <code>np.sqrt()</code>, not the int-preserving rule of <code>np.abs()</code>/<code>np.floor()</code>/<code>np.ceil()</code>, since a logarithm or an exponential is almost never a whole number. Also confirmed directly, pandas defines neither <code>Series.log()</code> nor <code>Series.exp()</code> at all — both raise <code>AttributeError</code> immediately, continuing the naming-gap lineage Lessons 126-130 established for <code>.roll()</code>/<code>.sign()</code>/<code>.sqrt()</code>/<code>.floor()</code>/<code>.ceil()</code>. The pandas-idiomatic path is calling <code>np.log()</code>/<code>np.exp()</code> directly on the Series, confirmed directly to work identically to the plain-array case.</p>
+
+<h2>2 · The trap: log(0) is -inf with a warning, log(negative) is NaN with a different warning</h2>
+<div class="callout"><strong>Confirmed directly (numpy 2.5.5):</strong> <code>np.log(0)</code> returns <code>-inf</code> and raises <code>RuntimeWarning: divide by zero encountered in log</code>. <code>np.log()</code> on a negative real number returns <code>NaN</code> instead, with a <em>different</em> warning: <code>RuntimeWarning: invalid value encountered in log</code>. Neither crashes, both only warn — a silent <code>-inf</code>/<code>NaN</code> can ride all the way into a mean or a plot before anyone notices.</div>
+<pre><code>vals = pd.Series([<span class="kw">0.0</span>, -<span class="kw">5.0</span>, <span class="kw">10.0</span>])
+np.log(vals)
+<span class="cm"># RuntimeWarning: divide by zero encountered in log
+# RuntimeWarning: invalid value encountered in log
+# 0    -inf
+# 1     NaN
+# 2    2.302585
+# dtype: float64</span></code></pre>
+<p>Confirmed directly: a plain NaN input (as opposed to a negative or zero one) passes straight through <code>np.log()</code> unchanged, with no warning at all — only an actual zero or negative value triggers the two warnings above. This matters for a real wrangling task: a "take the log of this revenue column" instruction silently breaks on any zero-revenue row (common for a brand-new product or a refunded order), producing <code>-inf</code> rather than an error. The standard fix is <code>np.log1p(x)</code> — confirmed directly identical to <code>np.log(1 + x)</code> for ordinary inputs but numerically more precise for very small <code>x</code> (confirmed directly on <code>x = 1e-15</code>: <code>np.log(1 + x)</code> loses precision to floating-point rounding before the addition even reaches <code>np.log()</code>, while <code>np.log1p(x)</code> computes the correct tiny result directly) — and, more importantly here, <code>np.log1p(0)</code> is a clean <code>0.0</code>, no <code>-inf</code>, no warning, since it's really computing <code>log(1 + 0)</code> rather than <code>log(0)</code> directly.</p>
+
+<h2>3 · exp() can overflow to inf, and exp(log(x)) round-trips with float noise — never compare with ==</h2>
+<p>Confirmed directly: <code>np.exp()</code> on a large enough input overflows to <code>inf</code> with its own <code>RuntimeWarning: overflow encountered in exp</code> — <code>np.exp(1000)</code> returns <code>inf</code>, since <code>e^1000</code> is far larger than <code>float64</code> can represent (roughly <code>1.8e308</code> is the ceiling). Its companion <code>np.expm1(x)</code> (confirmed directly equal to <code>np.exp(x) - 1</code> for ordinary inputs) is the precision-safe partner to <code>np.log1p()</code>, useful when reversing a <code>log1p()</code> transform on small values.</p>
+<pre><code><span class="cm"># the classic transform/reverse-transform pair: fix a right-skewed column, then undo it</span>
+skewed = pd.Series([<span class="kw">10.0</span>, <span class="kw">1000.0</span>, <span class="kw">50000.0</span>])
+transformed = np.log(skewed)
+back = np.exp(transformed)
+back.tolist()
+<span class="cm"># [10.000000000000002, 999.9999999999998, 50000.00000000001]
+# -- NOT exactly [10.0, 1000.0, 50000.0]: float round-trip noise, confirmed directly</span></code></pre>
+<p>Confirmed directly: <code>np.exp(np.log(x))</code> does not reproduce <code>x</code> bit-for-bit — floating-point rounding during the two passes leaves a tiny residual error, the same "never compare floats with <code>==</code>" lesson every prior numeric lesson in this course has flagged; use <code>np.isclose()</code> (Lesson 117) to check a round trip instead. The real wrangling use for the pair together: <code>np.log(price / price.shift(1))</code> computes a log-return series directly — confirmed directly to match the standard financial log-return formula — and <code>np.exp()</code> is what reverses a log-transformed column back to its original scale once a model or aggregation has finished working in log-space.</p>
+
+<div class="interview">
+<p><strong>Q: "Why would you log-transform a column before computing summary stats, and what has to be true of the data first?"</strong> A strong answer, out loud: <em>"Log-transforming compresses a long right tail — a column with a few huge outliers and a lot of small values — so the mean and standard deviation aren't dominated by those extreme values, and it turns multiplicative relationships into additive ones, which is why log-returns are standard in finance. The catch is domain: np.log() is only defined for positive numbers. Zero gives negative infinity with a warning, not an error, and a negative value gives NaN with a different warning — both fail silently, so I'd check for non-positive values first, or use np.log1p() if zeros are expected and small. And the round trip back via np.exp() isn't exact — floating-point noise means I'd compare with np.isclose(), never ==."</em> The signal: naming the domain restriction unprompted, not just the formula.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.log()</code>'s and <code>np.exp()</code>'s confirmed Series/Index-preserving behavior; the confirmed always-upcast-to-<code>float64</code> dtype rule (matching <code>np.sqrt()</code>, not <code>np.floor()</code>/<code>np.ceil()</code>/<code>np.abs()</code>); the confirmed <code>log(0)</code> → <code>-inf</code>-plus-warning and <code>log(negative)</code> → <code>NaN</code>-plus-different-warning traps, and <code>np.log1p()</code>/<code>np.expm1()</code> as the precision-safe companions; the confirmed <code>exp()</code> overflow-to-<code>inf</code> case; and the confirmed float round-trip noise in <code>exp(log(x))</code>. It does not cover <code>np.log10()</code>/<code>np.log2()</code> beyond naming them as same-family base-10/base-2 variants, or the complex-number branch of <code>np.log()</code> (defined for a complex input, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/131_np_log_and_exp.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/131_np_log_and_exp.py</code></pre>
+<p>Exercise 1 confirms the Section 1 rule: <code>np.log()</code>/<code>np.exp()</code> always upcast an int Series to <code>float64</code>, and neither <code>Series.log()</code> nor <code>Series.exp()</code> exists. Exercise 2 confirms the Section 2 trap: <code>np.log(0)</code> is <code>-inf</code>, <code>np.log()</code> of a negative is <code>NaN</code>, and <code>np.log1p(0)</code> is a clean <code>0.0</code> with neither problem. Exercise 3 confirms the Section 3 behavior: an end-to-end log-transform-then-reverse round trip, checked with <code>np.isclose()</code> rather than <code>==</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.log()/np.exp() always return float64 regardless of the input dtype, the same always-upcast rule Lesson 129's np.sqrt() follows -- not the int-preserving rule Lesson 130's np.floor()/np.ceil() and np.abs() follow, since a logarithm or exponential is almost never a whole number.">
+    <p class="stem">Calling <code>np.log()</code> on a clean <code>int64</code> Series of perfect values returns what dtype?</p>
+    <button class="opt" data-ok>float64 always, the same upcast rule np.sqrt() follows</button>
+    <button class="opt">int64 unchanged, the same no-op rule np.floor() follows</button>
+    <button class="opt">object dtype, since logs can't be stored numerically</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (numpy 2.5.5): np.log(0) returns -inf together with a RuntimeWarning (divide by zero encountered in log) -- it does not raise an exception. A negative input instead returns NaN with a different RuntimeWarning (invalid value encountered in log). Both are silent failures unless the warning is actually read.">
+    <p class="stem">What does <code>np.log(0)</code> return, and does it raise an exception?</p>
+    <button class="opt" data-ok>-inf, with only a RuntimeWarning -- no exception at all</button>
+    <button class="opt">it raises a ZeroDivisionError immediately, same as plain Python 1/0</button>
+    <button class="opt">NaN, with the identical warning text that a negative produces</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.exp(np.log(x)) does not reproduce x bit-for-bit -- floating-point rounding during the two passes leaves a tiny residual error (e.g. 999.9999999999998 instead of exactly 1000.0). The correct way to check a round trip is np.isclose() (Lesson 117), never ==, the same float-comparison rule every numeric lesson in this course has flagged.">
+    <p class="stem">After <code>back = np.exp(np.log(prices))</code>, what is the safe way to check <code>back</code> equals the original <code>prices</code>?</p>
+    <button class="opt" data-ok>np.isclose(back, prices) -- == fails from tiny leftover float noise</button>
+    <button class="opt">back == prices works fine, since log/exp are exact inverses</button>
+    <button class="opt">back.equals(prices) always works, since pandas rounds floats for you automatically</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.log.html"><code>numpy.log()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.exp.html"><code>numpy.exp()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) document the domain restrictions and the <code>log1p()</code>/<code>expm1()</code> precision rationale directly; neither page covers the exact float round-trip residual shown above, confirmed directly in this lesson's own scratch sandbox instead.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.log()</code> and <code>np.exp()</code> are new today, added right after Lesson 130's <code>np.ceil()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan closed the last standing candidate from Lesson 128's scan — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the zero/negative-log trap, the float round-trip noise, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

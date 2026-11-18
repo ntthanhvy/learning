@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 112 · threading.Lock: protecting shared state by hand</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 112 · ~20 min · 18 Nov 2026</p>
+<h1><code>threading.Lock</code>: protecting shared state by hand</h1>
+<p class="byline">Day 73 named a <dfn data-en="a race condition happens when two or more threads read and write the same shared mutable state without coordination, so the final result depends on the unpredictable order the threads happen to interleave in" data-vn="giữ nguyên &quot;race condition&quot; — xảy ra khi 2+ thread cùng đọc/ghi 1 state chung mà không có cơ chế đồng bộ, kết quả cuối phụ thuộc thứ tự chạy xen kẽ không đoán trước được">race condition</dfn> and said the classic fix is a <code>threading.Lock</code> — then moved on without ever building one. Day 108 showed the far more common escape: don't share mutable state by hand at all, hand items through a <code>queue.Queue</code> that already locks internally. But sometimes a lock really is the right tool — a shared counter, a shared dict, a shared file handle — and this lesson finally builds the thing Day 73 only named.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, lesson body, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>threading.Lock</code> itself has never been built or demonstrated — it is named and quizzed on conceptually three separate times (Days 73, 108, 111) but every one of those sentences describes what a lock <em>would</em> do, never shows <code>.acquire()</code>/<code>.release()</code> or <code>with lock:</code> running. <code>socket</code> remains ruled out on the same scope-depth grounds every prior round gave (real networking runs deeper than 20 minutes and edges into the Phase 2b territory Days 21-25 already cover) — this is a genuinely different, still-open corner, not a retry of that call. <code>textwrap</code>, <code>calendar</code>, <code>fnmatch</code>, <code>glob</code>, and <code>platform</code> also turned up zero-hit, but completing a thread the course has already referenced three times outweighs opening an unrelated new one. Per Day 111's own closing note, Day 111 closed the twenty-first review cycle, so today resumes fresh topics — fresh day 1 of a new three-fresh-then-review cycle.</div>
+
+<h2>1 · Seeing the race condition for real</h2>
+<p>Day 73 and Day 108 both <em>described</em> a race condition. Here it is actually happening. Four threads each run this 2,000 times on one shared <code>counter</code>, with a deliberate gap between reading and writing so a thread switch is almost certain to land in the middle:</p>
+<pre><code><span class="kw">import</span> threading
+<span class="kw">import</span> time
+
+counter = <span class="kw">0</span>
+
+<span class="kw">def</span> bump(n):
+    <span class="kw">global</span> counter
+    <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(n):
+        temp = counter        <span class="cm"># read</span>
+        time.sleep(<span class="kw">0</span>)         <span class="cm"># yield to another thread -- widens the race window</span>
+        counter = temp + <span class="kw">1</span>   <span class="cm"># write</span>
+
+threads = [threading.Thread(target=bump, args=(<span class="kw">2000</span>,)) <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">4</span>)]
+<span class="kw">for</span> t <span class="kw">in</span> threads: t.start()
+<span class="kw">for</span> t <span class="kw">in</span> threads: t.join()
+<span class="kw">print</span>(counter)   <span class="cm"># expected 8000 -- confirmed live, actual result was 2003</span></code></pre>
+<p>Four threads each incrementing 2,000 times should land on exactly 8,000. It doesn't, confirmed live: most of the increments vanish, because two threads can both read the same <code>temp</code> before either writes it back — the second write overwrites the first's result instead of building on it. The simpler <code>counter += 1</code> (no explicit <code>time.sleep(0)</code>) often happens to come out correct on a short loop like this, since the whole operation can fit inside one scheduler turn — which is the trap: a race condition that doesn't show up in your 3 test runs isn't fixed, it's just lucky. The gap here is deliberately widened to make the bug reliable instead of occasional.</p>
+
+<h2>2 · <code>threading.Lock</code>: one thread at a time, enforced</h2>
+<p>A <dfn data-en="a threading.Lock is an object with two states, locked and unlocked; acquire() blocks until the lock is unlocked then marks it locked, and release() marks it unlocked again -- only the thread currently holding the lock should touch the shared state it protects, which is what stops the race condition" data-vn="giữ nguyên &quot;Lock&quot; — object chỉ có 2 trạng thái, locked/unlocked; acquire() block tới khi lock đang unlocked thì tự chuyển thành locked, release() chuyển lại thành unlocked; chỉ thread nào đang giữ lock mới được đụng vào shared state nó bảo vệ, đó là cách chặn race condition">lock</dfn> fixes this by making every thread wait its turn around the risky lines — the <dfn data-en="the critical section is the specific lines of code that touch shared mutable state and must never run on two threads at the same time -- everything outside it can still run concurrently" data-vn="giữ nguyên &quot;critical section&quot; — đúng những dòng code đụng vào shared mutable state, không được chạy đồng thời trên 2 thread; code ngoài phần này vẫn chạy song song bình thường">critical section</dfn>:</p>
+<pre><code><span class="kw">import</span> threading
+<span class="kw">import</span> time
+
+counter = <span class="kw">0</span>
+lock = threading.Lock()
+
+<span class="kw">def</span> bump(n):
+    <span class="kw">global</span> counter
+    <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(n):
+        <span class="kw">with</span> lock:              <span class="cm"># acquire() on entry, release() on exit -- even if an exception escapes</span>
+            temp = counter
+            time.sleep(<span class="kw">0</span>)
+            counter = temp + <span class="kw">1</span>
+
+threads = [threading.Thread(target=bump, args=(<span class="kw">2000</span>,)) <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">4</span>)]
+<span class="kw">for</span> t <span class="kw">in</span> threads: t.start()
+<span class="kw">for</span> t <span class="kw">in</span> threads: t.join()
+<span class="kw">print</span>(counter)   <span class="cm"># 8000 -- confirmed live, exact every run, same bump() body as Section 1</span></code></pre>
+<p><code>with lock:</code> is the idiom, the same context-manager shape Day 6 taught for files: it calls <code>lock.acquire()</code> on entry and <code>lock.release()</code> on exit, guaranteed, even if an exception escapes the block — confirmed live, a <code>ValueError</code> raised inside a <code>with lock:</code> block still leaves <code>lock.locked()</code> reporting <code>False</code> right after. The manual spelling, <code>lock.acquire()</code> ... <code>lock.release()</code>, works identically but a forgotten <code>release()</code> on an exception path leaves the lock stuck forever — the same "forgot to close it" risk Day 6 named for files, except a stuck lock freezes every other thread waiting on it, not just one leaked handle.</p>
+
+<div class="callout"><strong>Confirmed live — a second <code>acquire()</code> genuinely blocks:</strong> one thread calls <code>lock.acquire()</code> and never releases it; a second thread's <code>lock.acquire()</code> call does not raise or return early — it sits there waiting. Only after the first thread calls <code>.release()</code> does the second thread's call return. <code>lock.locked()</code> reports whether a lock is currently held, without touching it — useful for a status check, never for deciding whether to acquire (another thread could acquire it in the gap between the check and the real <code>acquire()</code> call).</div>
+
+<h2>3 · The trap: acquiring the same <code>Lock</code> twice</h2>
+<p>A plain <code>threading.Lock</code> does not know which thread holds it — only whether it is held. Calling <code>.acquire()</code> a second time from the <strong>same</strong> thread that already holds it blocks exactly like a different thread would, waiting forever for a release that can now never come from anywhere:</p>
+<pre><code><span class="kw">import</span> threading
+
+lock = threading.Lock()
+lock.acquire()
+lock.acquire()   <span class="cm"># deadlock -- this thread already holds it and now waits on itself, forever</span>
+<span class="kw">print</span>(<span class="str">"never reached"</span>)</code></pre>
+<p>This is a <dfn data-en="a deadlock is a stuck state where a thread (or several threads) wait forever for a condition that can never become true, because the only thing that could make it true is blocked on the same wait" data-vn="giữ nguyên &quot;deadlock&quot; — trạng thái kẹt cứng, 1 hay nhiều thread chờ mãi 1 điều kiện không bao giờ xảy ra được, vì thứ duy nhất có thể làm nó xảy ra lại đang bị block ở đúng chỗ chờ đó">deadlock</dfn>: the program doesn't crash, it just hangs with no error to explain why — the same silent-hang shape Day 108 showed for a skipped <code>task_done()</code>. <code>threading.RLock</code> ("reentrant lock") is the escape hatch, confirmed live: the same thread can acquire it multiple times without blocking itself, as long as it calls <code>.release()</code> the same number of times before another thread can acquire it — useful when a function holding a lock needs to call another function that acquires the same lock, but not a default reach-for; a plain <code>Lock</code> catching this bug loudly (by hanging) is often more useful than an <code>RLock</code> quietly tolerating code that re-enters more than intended.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither needs manual locking for this — a single-threaded pandas script has no competing threads to race, and NumPy's own C-level operations release the GIL internally for the duration of one call rather than asking the caller to manage a lock. Locks matter here because plain Python threads sharing plain Python objects is the case Day 73's <code>ThreadPoolExecutor</code> and this lesson both live in. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/112_threading_lock.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/112_threading_lock.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: reproducing the unprotected-counter race with several threads and confirming the final count comes out wrong, fixing it with <code>threading.Lock</code> and <code>with lock:</code> so the final count is exactly right every time, and writing a small function that safely appends to a shared list from multiple threads using the same lock.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Without a lock, two threads can both read the same old counter value before either writes its update back, so one thread's write overwrites the other's instead of building on it -- confirmed live, the widened-gap version above loses most of its increments. with lock: forces every thread to wait its turn around exactly that read-then-write critical section, so no two threads are ever inside it at once.">
+    <p class="stem">Why does an unprotected shared counter updated by several threads end up lower than expected?</p>
+    <button class="opt" data-ok>two threads can read the same old value before writing back</button>
+    <button class="opt">Python threads silently skip some loop iterations at random each time</button>
+    <button class="opt">the global keyword quietly resets the shared counter back to zero</button>
+  </div>
+  <div class="q" data-why="with lock: calls lock.acquire() on entry and lock.release() on exit, guaranteed even if an exception escapes the block -- confirmed live, a ValueError raised inside still leaves lock.locked() reporting False right after. The manual acquire()/release() pair works the same way but a forgotten release() on an exception path leaves the lock stuck forever.">
+    <p class="stem">What does <code>with lock:</code> guarantee that manual <code>lock.acquire()</code>/<code>lock.release()</code> does not, by default?</p>
+    <button class="opt" data-ok>release() still runs even when an exception escapes the block itself</button>
+    <button class="opt">every other waiting thread wakes up in the order it arrived</button>
+    <button class="opt">the protected shared state gets copied fresh for each waiting thread</button>
+  </div>
+  <div class="q" data-why="A plain threading.Lock only tracks locked/unlocked, not which thread holds it -- so a second acquire() from the very same thread that already holds it blocks exactly like a different thread would, waiting on a release that can now never happen from anywhere. This is a deadlock: the program hangs with no error, the same silent-hang shape Day 108 showed for a skipped task_done(). RLock is the reentrant alternative built for this exact case.">
+    <p class="stem">What happens when a thread calls <code>.acquire()</code> twice on the same plain <code>threading.Lock</code> it already holds?</p>
+    <button class="opt" data-ok>it deadlocks, waiting forever for a release that never comes</button>
+    <button class="opt">it raises a clear RuntimeError naming the exact double acquire</button>
+    <button class="opt">it silently succeeds, since that thread already owns the lock</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/threading.html#lock-objects"><code>threading</code></a> docs, "Lock Objects" — <code>acquire()</code>/<code>release()</code>/<code>locked()</code>, the guarantee that "when more than one thread is blocked in <code>acquire()</code> waiting for the state to turn to unlocked, only one thread proceeds," and the "RLock Objects" section just below it covering today's reentrant-lock escape hatch.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day112">glossary</a> under Day 112.<br>
+<code>textwrap</code>, <code>calendar</code>, <code>fnmatch</code>, <code>glob</code>, and <code>platform</code> remain open, zero-hit fresh-gap candidates for a future round.<br><br>
+💬 Anything unclear — the widened-gap race demo, <code>with lock:</code>'s exception guarantee, or when <code>RLock</code> actually earns its place over a plain <code>Lock</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

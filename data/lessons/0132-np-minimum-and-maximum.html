@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 132 · np.minimum() and np.maximum(): elementwise pairwise comparison, and clip()'s hidden engine</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 132 · ~20 min · 18 Nov 2026</p>
+<h1>np.minimum() and np.maximum(): elementwise pairwise comparison, and clip()'s hidden engine</h1>
+<p class="byline">Lesson 131 closed its own fresh scan with nothing pre-committed. Today's own fresh scan grepped every lesson body and every glossary row case-insensitively for <code>np.minimum(</code>, <code>np.maximum(</code>, <code>np.fmin(</code>, <code>np.fmax(</code>: zero hits anywhere — a genuine gap, not a narrowing of something already taught. They are a clean, interview-relevant pick on their own merit too: unlike Lesson 102's <code>np.clip()</code> (bound a Series against fixed scalar limits), <code>np.minimum()</code>/<code>np.maximum()</code> compare <strong>two full arrays element by element</strong> — and, confirmed directly below, <code>clip()</code> is literally built from exactly this pair.</p>
+
+<h2>1 · Elementwise pairwise comparison between two arrays — not a reduction, not a scalar bound</h2>
+<p><dfn data-en="a NumPy function that compares two arrays elementwise and returns a new array holding the smaller value at each position" data-vn="giữ nguyên 'np.minimum()' — so sánh 2 mảng elementwise, trả về mảng mới chứa giá trị NHỎ HƠN ở từng vị trí">np.minimum(a, b)</dfn> and <dfn data-en="a NumPy function that compares two arrays elementwise and returns a new array holding the larger value at each position -- the sibling of np.minimum()" data-vn="giữ nguyên 'np.maximum()' — so sánh 2 mảng elementwise, trả về mảng mới chứa giá trị LỚN HƠN ở từng vị trí; là hàm anh em của np.minimum()">np.maximum(a, b)</dfn> take two same-shaped arrays and return the smaller/larger value at every position — not a single reduced number the way bare <code>min()</code>/<code>max()</code> or <code>Series.min()</code>/<code>.max()</code> are. Confirmed directly (numpy 2.5.5, pandas 3.1.1), called on two Series it keeps the original Index and returns a Series:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+a = pd.Series([<span class="kw">1</span>, <span class="kw">5</span>, <span class="kw">3</span>], index=[<span class="str">"x"</span>, <span class="str">"y"</span>, <span class="str">"z"</span>])
+b = pd.Series([<span class="kw">4</span>, <span class="kw">2</span>, <span class="kw">3</span>], index=[<span class="str">"x"</span>, <span class="str">"y"</span>, <span class="str">"z"</span>])
+np.minimum(a, b)   <span class="cm"># x:1, y:2, z:3 -- the smaller of each pair, Index kept</span>
+np.maximum(a, b)   <span class="cm"># x:4, y:5, z:3 -- the larger of each pair</span></code></pre>
+<p>Confirmed directly, both follow an int-preserving dtype rule when both inputs are already the same integer dtype (<code>int64</code> in, <code>int64</code> out) — matching Lesson 129/130's <code>np.abs()</code>/<code>np.floor()</code>/<code>np.ceil()</code>, not the always-upcast rule Lesson 129/131's <code>np.sqrt()</code>/<code>np.log()</code>/<code>np.exp()</code> follow. But a mixed int/float pair upcasts to <code>float64</code>, confirmed directly, the ordinary NumPy type-promotion rule applying to two different input dtypes rather than any special case of this function. A plain scalar as the second argument broadcasts, confirmed directly: <code>np.minimum(a, 2)</code> caps every value at <code>2</code> — functionally a one-sided clip, not yet the full two-sided <code>clip()</code> from Section 2.</p>
+
+<h2>2 · clip()'s hidden engine: Series.clip(lower=, upper=) is exactly minimum(maximum(x, lower), upper)</h2>
+<div class="callout"><strong>Confirmed directly:</strong> <code>x.clip(lower=lo, upper=hi)</code> produces bit-identical output to <code>np.minimum(np.maximum(x, lo), hi)</code> on every tested input. Lesson 102's <code>np.clip()</code> is the same two-step composition under one name.</div>
+<pre><code>x = pd.Series([<span class="kw">1</span>, <span class="kw">10</span>, <span class="kw">5</span>, -<span class="kw">3</span>])
+lower = pd.Series([<span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">0</span>])
+upper = pd.Series([<span class="kw">8</span>, <span class="kw">8</span>, <span class="kw">8</span>, <span class="kw">8</span>])
+
+x.clip(lower=lower, upper=upper).tolist()            <span class="cm"># [1, 8, 5, 0]</span>
+np.minimum(np.maximum(x, lower), upper).tolist()      <span class="cm"># [1, 8, 5, 0] -- identical, confirmed directly</span></code></pre>
+<p>The practical reason to know this: <code>clip()</code> only ever bounds one Series against fixed (or per-row, via another Series) lower/upper limits in a single call. The moment a wrangling task needs the elementwise min or max of <strong>two independent measured columns</strong> — "whichever of planned_qty or actual_qty is smaller, row by row" — that is <code>np.minimum()</code> directly, not a <code>clip()</code> call, since there is no single fixed bound to clip against. Confirmed directly, mismatched Series indexes align first, the same outer-join-then-NaN-for-unmatched-labels rule ordinary arithmetic (<code>a + b</code>) follows — a label present in only one of the two Series comes back <code>NaN</code> in the result, not an error.</p>
+
+<h2>3 · The trap: NaN poisons the result here — fmin()/fmax() are the NaN-skipping siblings</h2>
+<p>Confirmed directly: if <em>either</em> input at a given position is NaN, both <code>np.minimum()</code> and <code>np.maximum()</code> return NaN at that position — the comparison itself can't decide a winner against NaN, so the NaN wins by poisoning the result, the same family of silent-NaN-propagation trap as plain arithmetic. This is the opposite default from <code>Series.min()</code>/<code>.max()</code>, which skip NaN by default (<code>skipna=True</code>).</p>
+<pre><code>c = pd.Series([<span class="kw">1.0</span>, np.nan, <span class="kw">3.0</span>])
+d = pd.Series([<span class="kw">2.0</span>, <span class="kw">5.0</span>, np.nan])
+np.minimum(c, d).tolist()   <span class="cm"># [1.0, nan, nan] -- NaN wins both pairs it touches</span>
+np.fmin(c, d).tolist()      <span class="cm"># [1.0, 5.0, 3.0] -- ignores NaN, picks the real number instead</span></code></pre>
+<p>Confirmed directly, <code>np.fmin()</code>/<code>np.fmax()</code> are the NaN-aware siblings: when exactly one side is NaN, they return the non-NaN value instead of propagating the NaN (only a pair of two NaNs still returns NaN, since there is nothing else to pick). No <code>RuntimeWarning</code> fires for either pair on a NaN input — this is silent by design, confirmed directly, unlike Lesson 131's <code>np.log(0)</code> trap which at least warns.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.minimum(a, b) and np.clip(), and when would you reach for each?"</strong> A strong answer, out loud: <em>"np.clip() bounds one array against fixed lower/upper limits — a single Series clamped between a floor and a ceiling. np.minimum() and np.maximum() compare two full arrays elementwise and are actually clip()'s engine underneath: clip(x, lo, hi) is just minimum(maximum(x, lo), hi). I'd reach for minimum()/maximum() directly when I need the elementwise min or max between two independently-measured columns, not a fixed bound — like whichever of planned versus actual is smaller, row by row. One trap either way: if either side is NaN at a position, minimum()/maximum() propagate NaN silently with no warning; fmin()/fmax() are the NaN-skipping versions if that's not what I want."</em> The signal: naming the clip() relationship unprompted, and the NaN-propagation default without being asked.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.minimum()</code>'s and <code>np.maximum()</code>'s confirmed elementwise pairwise-comparison behavior between two arrays (not a reduction); the confirmed Series/Index-preserving and int-preserving-unless-mixed-dtype rule; the confirmed identity that <code>Series.clip(lower=, upper=)</code> (Lesson 102) equals <code>minimum(maximum(x, lower), upper)</code>; the confirmed mismatched-index alignment rule (matches plain arithmetic); the confirmed NaN-poisons-the-result trap; and <code>np.fmin()</code>/<code>np.fmax()</code> as the confirmed NaN-skipping siblings. It does not cover <code>np.minimum.reduce()</code>/<code>np.maximum.reduce()</code> (the ufunc-reduction path across more than two arrays at once) beyond naming it exists, or any complex-number comparison behavior, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/132_np_minimum_and_maximum.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/132_np_minimum_and_maximum.py</code></pre>
+<p>Exercise 1 confirms the Section 1 rule: elementwise pairwise comparison between two Series, Index kept, int-preserving dtype. Exercise 2 confirms the Section 2 identity: <code>clip(lower=, upper=)</code> equals <code>minimum(maximum(x, lower), upper)</code>. Exercise 3 confirms the Section 3 trap: <code>np.minimum()</code>/<code>np.maximum()</code> propagate NaN, while <code>np.fmin()</code>/<code>np.fmax()</code> skip it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.minimum(a, b)/np.maximum(a, b) compare two full same-shaped arrays position by position, returning an array of the same shape -- not a single reduced scalar the way Series.min()/.max() or the bare Python min()/max() are.">
+    <p class="stem">What does <code>np.minimum(a, b)</code> return when <code>a</code> and <code>b</code> are two same-length Series?</p>
+    <button class="opt" data-ok>an elementwise array of the smaller value at each position</button>
+    <button class="opt">a single scalar number holding the one overall smallest value</button>
+    <button class="opt">a single boolean flag saying whether a is fully smaller</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: x.clip(lower=lo, upper=hi) produces bit-identical output to np.minimum(np.maximum(x, lo), hi) on every tested input -- clip() is this exact two-step composition under one convenience name.">
+    <p class="stem"><code>x.clip(lower=lo, upper=hi)</code> is confirmed identical to which expression?</p>
+    <button class="opt" data-ok>np.minimum(np.maximum(x, lo), hi)</button>
+    <button class="opt">np.maximum(np.minimum(x, lo), hi)</button>
+    <button class="opt">np.fmin(np.fmax(x, lo), hi)</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: if either input at a position is NaN, np.minimum()/np.maximum() return NaN there -- the comparison can't pick a winner against NaN, so NaN silently wins, with no warning. np.fmin()/np.fmax() are the NaN-skipping siblings that return the real number instead when only one side is NaN.">
+    <p class="stem">If exactly one of the two inputs at a position is NaN, what does <code>np.minimum()</code> return there, and which function skips NaN instead?</p>
+    <button class="opt" data-ok>NaN silently; np.fmin() skips NaN, returning the real value</button>
+    <button class="opt">the real value directly; np.fmin() also returns NaN instead</button>
+    <button class="opt">a RuntimeWarning fires; no other function skips NaN either</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.minimum.html"><code>numpy.minimum()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.maximum.html"><code>numpy.maximum()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) document the NaN-propagation behavior and the <code>fmin()</code>/<code>fmax()</code> cross-reference directly; the <code>clip()</code>-as-composition identity is confirmed directly in this lesson's own scratch sandbox rather than quoted from either docs page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.minimum()</code> and <code>np.maximum()</code> are new today, added right after Lesson 131's <code>np.exp()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan closed its own gap cleanly — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the clip() identity, the NaN-propagation trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

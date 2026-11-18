@@ -11686,3 +11686,120 @@ same way; FluentValidation and Polly/.NET resilience libraries, both
 still deliberately out of scope per MISSION.md's "concepts first" rule;
 and the backfill-missing-Lesson-117-NOTES-entry gap, still not
 investigated.
+
+## 2026-11-18 — Lesson 136: writing the actual JavaScript adapter behind a custom data-val-* rule ($.validator.addMethod, $.validator.unobtrusive.adapters.add)
+
+Headless run. Orchestrator-level DB check already summarized for this
+round: the last 40 `course_progress` rows showed no `lesson_generated`
+row for course=backend dated 2026-11-18 (last one dated 2026-11-17, day
+135), and no quiz/kata/scope-change signal for any course since
+2026-10-15 — no DB-driven pacing change needed. `nav.js`'s last entry
+was also `n: 135, date: "2026-11-17"` and no `lessons/0136-*.html` file
+existed on disk, agreeing with the DB summary — safe to proceed.
+`learning-records/` still has no entry newer than Lesson 3 — no fresh
+per-lesson completion signal to size today's step against, so generated
+conservatively, continuing the named next rung rather than guessing at
+new ground.
+
+Topic picked: the jQuery Unobtrusive Validation adapter JavaScript —
+named explicitly in both Lesson 134's and Lesson 135's own scope lines
+as the one piece still not covered ("the matching JavaScript adapter
+itself," "the `$.validator.addMethod`/`$.validator.unobtrusive.adapters.
+add` calls that give `data-val-classicmovie` an actual browser-side
+check"). No other standing candidate competed seriously this round — the
+cache-size-limit/locking knobs Lessons 129-134 deferred were finally
+resolved last round (Lesson 135), and this client-validation follow-up
+was the only other named, scoped gap left on the board. `grep -i` for
+`validator.unobtrusive.adapters.add`/`validator.addMethod` across
+`backend/lessons/` and `glossary.html` came back empty before writing,
+confirming the gap was real and the term was free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/mvc/models/
+validation` again (the same page Lessons 132 through 135 have all
+cited), this time via `WebFetch` specifically for its custom
+client-validation JavaScript example. Confirmed verbatim: the exact
+`$.validator.addMethod('classicmovie', function (value, element,
+params) {...})` rule-registration call, including its inline comments
+("The Classic genre has a value of '0'." and "The release date for a
+Classic is valid if it's no greater than the given year."); the exact
+`$.validator.unobtrusive.adapters.add('classicmovie', ['year'],
+function (options) {...})` adapter call, including the
+`$(options.form).find('select#Movie_Genre')[0]` element lookup and the
+`options.rules['classicmovie'] = [element, parseInt(options.params[
+'year'])]`/`options.messages['classicmovie'] = options.message`
+assignments; and the quoted explanation of the `data-` attribute
+contract ("additional parameters the validator needs"). Both of this
+lesson's own code blocks are drawn from that fetched example verbatim,
+with no trimming. `command -v dotnet`, `command -v go`, and `command -v
+node` were all attempted this round (not skipped on assumption) and the
+sandbox blocked all three as requiring interactive approval with no user
+present — the same block every round has hit since Lesson 103, now
+confirmed to extend to `node` detection too, not just `dotnet`/`go`.
+This lesson has no C# code to compile-check either way (it is pure
+jQuery/JavaScript), so the block had no practical effect on
+verification depth here.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson136/`, not `/tmp`, per the
+same sandbox constraint every round since Lesson 133 has noted; nothing
+written to the repo besides the three intended files; scratch directory
+deleted after): (1) `node --check` against `nav.js`, `gloss.js`,
+`quiz.js` — all clean, both before and after the `nav.js` edit, and used
+directly (not skipped) since `node` itself was reachable for this
+no-approval-needed form even though `command -v node` was blocked above;
+(2) a quiz word-count check per `<div class="q">` block, both
+`.split(/\s+/)` and `.split(" ")` methods agreeing — first draft landed
+uneven on all four questions (Q1 12/12/9/9, Q2 9/12/13/12, Q3 10/10/11/11,
+Q4 12/12/8/10), converged after several rewrite-and-recount passes
+(including one HTML-tag-balance regression along the way, caught and
+fixed — a stray `</p>` closing a `<div class="callout">` instead of
+`</div>`) to exactly 11/11/11/11 (Q1), 12/12/12/12 (Q2), 11/11/11/11
+(Q3), and 12/12/12/12 (Q4), exactly one `data-ok` and four options per
+question confirmed the same way; (3) an HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean after the fix
+above (div 6/6, p 14/14, code 40/40, button 16/16, script 3/3, dfn 1/1,
+pre 2/2, h2 5/5, h1 1/1, em 0/0, strong 3/3, a 2/2), the one `dfn` tag
+confirmed to carry both `data-en=` and `data-vn=`; (4) a brace/paren/
+bracket balance check on both `<pre><code>` blocks after stripping tags
+and unescaping HTML entities — both balanced (2/2 braces, 7/7 parens,
+3/3 brackets; 1/1 braces, 5/5 parens, 6/6 brackets); (5) a
+raw-unescaped-`&` scan across the lesson — zero hits; (6) a
+duplicate-term scan on `glossary.html`'s first column before adding the
+new row — zero collisions for `$.validator.unobtrusive.adapters.add()`;
+a `<tr>`/`<td>` count check on `glossary.html` after the one-row addition
+— 418 `<tr>` (417 term rows = 416 prior + 1 new, plus the header row) and
+1251 `<td>` (417 × 3), consistent with one balanced row added; a second
+duplicate-term scan afterward — zero duplicates; (7) a basic HTML
+well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 136 in `nav.js` (date 2026-11-18, today's actual
+generation date) right after `n: 135`. Day number used 136, matching
+this file's own day-equals-lesson-number convention, no deviation found.
+No new `RESOURCES.md` line added — the one fetched page is `learn.
+microsoft.com`, already covered by this file's standing entries'
+pattern (and the same exact page Lessons 132 through 135 cited), cited
+inline in the lesson's own "Go deeper" section instead. No new
+`learning-records/` file added — the topic came from Lesson 134's and
+135's own named scope-line gap, not a new observation about the
+learner, consistent with how Lessons 133-135 each handled the same
+situation. `bin/record-progress backend lesson_generated --day 136
+--lesson 0136-jquery-unobtrusive-validation-adapter.html --detail
+'{"by":"claude-sonnet-5"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: writing this same client-side check without jQuery at all (a
+vanilla-JS or framework-native validator), and shipping this adapter
+file project-wide via a bundler rather than a one-off script tag (both
+named this round as this lesson's own out-of-scope next steps); writing
+a custom eviction policy reacting to `SizeLimit` pressure directly, and
+benchmarking resource locking's real throughput cost under contention
+(both still deferred from Lesson 135); Go's `select`-statement
+arbitration rules, still deferred many rounds running on
+fetched-page-truncation grounds; Lesson 49's dead-letter queues, still
+confirmed to have no first-party ASP.NET Core angle; Lesson 35's
+upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
+Polly/.NET resilience libraries, both still deliberately out of scope
+per MISSION.md's "concepts first" rule; and the backfill-missing-
+Lesson-117-NOTES-entry gap, still not investigated.

@@ -230,6 +230,8 @@
       file: "lessons/0110-fractions-exact-rationals.html" },
     { n: 111, date: "2026-11-17", title: "Review day 21: retrieval across Days 108-110",
       file: "lessons/0111-review-retrieval-day-21.html" },
+    { n: 112, date: "2026-11-18", title: "threading.Lock: protecting shared state by hand",
+      file: "lessons/0112-threading-lock.html" },
   ];
 
   const REFS = [

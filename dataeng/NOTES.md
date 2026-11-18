@@ -7448,3 +7448,121 @@ along the Phase 2 spine, adapted to the learning records.
   gap-scan should weigh Kafka or Airflow next, or the named per-courier
   gap above if dbt's turn comes around again, rather than assuming any one
   of the three by default.
+
+- 2026-11-18 (headless 06:00 run, Day 64 generated): sixty-fourth lesson,
+  `0064-airflow-check-kafka-lag-task.html`. Idempotency check first via the
+  filesystem, per this round's orchestrator note that the DB had already
+  been checked (last 40 `course_progress` rows showed no lesson_completed/
+  quiz/kata/scope-change signal for any course since 2026-10-15, matching
+  every round since Day 60): confirmed no `lessons/0064-*.html` on disk and
+  no `n: 64` row or `2026-11-18` date in `assets/nav.js` before writing
+  anything. Read `MISSION.md` in full (unmodified), `PLAN.md`'s full Phase 2
+  spine (still fully exhausted, matching Days 59-63's own finding), the
+  single baseline learning record (still no newer record on file),
+  `assets/nav.js`, and Day 63 in full as the structural template, plus Days
+  37, 46 and 61 in full before picking anything.
+  **Topic choice:** Day 63 closed noting dbt had the most recent round's
+  fresh-gap attention and a future round should weigh Kafka or Airflow
+  next. Listed every Kafka and Airflow lesson filename on disk to confirm
+  neither thread's own PLAN.md spine had anything unbuilt left (it didn't,
+  same finding as recent rounds), then read Day 37's and Day 62's own
+  closing sections for a named, concrete, unbuilt next step — the same
+  "a named TODO beats an unscanned guess" reasoning Days 58, 61, 62 and 63
+  each used. Day 37's own Section 4 named exactly this: wire
+  `scripts/check_consumer_lag.py` into the real DAG via `BashOperator`,
+  before `dbt_build`, so a badly-behind consumer fails fast instead of
+  letting `dbt build` run against data nothing confirmed was current. Grepped
+  every Airflow lesson's prose for `check_consumer_lag` and for
+  `dags/food_delivery_pipeline` edits first, confirming this wiring had
+  never been done in the 17 rounds since Day 37. Picked it over a fresh
+  Kafka or Airflow topic from `PLAN.md`'s own spine (already exhausted) and
+  over Day 63's own named per-courier histogram gap (dbt's turn, not
+  Kafka/Airflow's, per Day 63's own closing note) specifically because it
+  closes a cross-thread gap — a Kafka lesson's own named TODO, closed by
+  editing the Airflow DAG — rather than adding a same-thread feature. No
+  pandas, no Python-language teaching (the one code block is ordinary task
+  wiring inside an existing DAG file, not new language ground), no API/
+  idempotency re-derivation beyond the one-line bridge Day 62 already
+  established (backend's idempotency-key framing, reused, not re-taught)
+  — none applied or needed this round.
+  **Content:** one new task, `check_kafka_lag`, a `BashOperator` calling
+  Day 37's script completely unchanged, wired `load_raw >> check_kafka_lag
+  >> dbt_build >> check_dead_letters_task` — inserting a link in the middle
+  of the chain rather than appending to either end, the first lesson in this
+  DAG's history to do so. Kept the default `all_success` trigger rule
+  deliberately, named explicitly against Day 45's `all_done` on
+  `check_dead_letters`: a gate placed upstream of a step should block it,
+  a report placed downstream should only describe it regardless of outcome
+  — the same distinction stated twice now from two different sides of
+  `dbt_build`. No retries and no `on_failure_callback` on the new task,
+  both named as deliberate omissions with reasons (lag's failure mode is
+  not typically transient; Day 61's callback mechanism would attach
+  identically if wanted, not re-derived here) rather than unexplained gaps.
+  **Verification:** no reachable Airflow metadata database this sandbox
+  round either (the standing gap since Day 35, now thirty rounds) — one
+  attempt at `airflow db migrate` hit the same approval gate, not retried a
+  second time per this course's own convention. What was confirmed live
+  this round: a full scratch reconstruction of `dags/food_delivery_pipeline.py`
+  carrying every prior round's settings (Days 7/35/45/46/47/51/54/56/61)
+  plus today's edit, built under `.scratch-dataeng-64/` at the repo root
+  (deleted after; confirmed via `ls -d` returning "No such file or
+  directory" post-cleanup) — `uv run python3 -m py_compile` clean, then
+  `uv run --with "apache-airflow==3.3.1" python3 -c "..."` importing the
+  real module and reading back `dbt_build.upstream_list`,
+  `load_raw.downstream_list`, `check_kafka_lag.trigger_rule`,
+  `check_kafka_lag.retries`, `dag.max_active_runs`, `dag.dagrun_timeout`,
+  `dag.max_consecutive_failed_dag_runs` and `dbt_build.retries` — every
+  value matched exactly what the lesson claims (`check_kafka_lag` as
+  `dbt_build`'s sole upstream task, `TriggerRule.ALL_SUCCESS`, `retries: 0`,
+  and every one of Days 35/54/56's prior settings unchanged). Separately,
+  under a second scratch dir `.scratch-dataeng-64b/` (also deleted after,
+  same confirmed-via-`ls -d` cleanup), modeled Day 37's own lag-check
+  control flow standalone against two cases — caught up and badly behind —
+  confirming exit code `0` and `1` respectively, reconfirming today's DAG
+  edit doesn't change the script's own behavior at all. No dbt snippet in
+  this lesson (pure Airflow/Python), so no `dbt parse` step applied this
+  round, the same shape prior pure-Airflow rounds (35, 45, 46, 47, 51, 54,
+  56, 61) each used.
+  Quiz word counts verified with a small Node script (the same workaround
+  Day 63 used, direct Node rather than Python for this check), stripping
+  HTML tags and counting whitespace-split tokens per option. Took several
+  word-for-word edit passes across all three questions to reach a clean
+  8/8/8, 8/8/8, 9/9/9 split, re-running the script after each edit. HTML
+  structure verified via paired open/close tag counts on every tag that
+  appears (`div` 7/7, `p` 24/24, `code` 126/126, `button` 9/9, `script`
+  3/3, `dfn` 1/1, `pre` 5/5, `h2` 8/8, `h1` 1/1, `em` 5/5, `strong` 5/5, `a`
+  3/3, `span` 13/13) and a bare-`&` regex scan — zero bare `&` found.
+  Grepped the whole glossary for `quality gate` before writing the new
+  `<dfn>` — zero hits, confirming the term is genuinely new; initially
+  drafted this round as a "no new term" lesson before checking that every
+  one of the prior 63 lessons added at least one, so a real, defensible
+  term (the gate-vs-report trigger-rule distinction, central to today's own
+  design argument) was found and added instead of breaking that streak.
+  `reference/glossary.html` re-checked after appending Day 64's section:
+  `h2` 63/63, `table` 63/63, `tr` 223/223, `td` 480/480, `th` 189/189, zero
+  bare `&`, and a duplicate-term scan across all 160 terms in the first
+  column — zero duplicates. `node --check` clean on `nav.js` after today's
+  edit.
+  Added one new glossary term, `quality gate`, under a new Day 64 section.
+  Added no new `RESOURCES.md` line: today's primary sources are Airflow's
+  Tasks docs (already Days 35/45/46/61's primary source) and the
+  confluent-kafka Python client docs (already Day 37's), both reused for a
+  new angle rather than duplicated.
+  Registered Lesson 64 in `assets/nav.js` right after the `n: 63` entry,
+  dated 2026-11-18.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named, deferred TODO in Day 37's own closing section, not a
+  new durable fact about the learner distinct from the single 2026-09-14
+  baseline record on file, the same reasoning Days 62 and 63 each used.
+  **Next up:** with today's round, Day 37's own named gap (wiring the lag
+  check into the real DAG) is closed. Two concrete next steps named but not
+  built this round: an `on_failure_callback` on `check_kafka_lag` reusing
+  Day 61's exact mechanism, and moving `LAG_THRESHOLD` into an Airflow
+  `Variable` via Day 38's cursor pattern. The `airflow db migrate`/`airflow
+  dags test` approval-gate block remains the standing, unresolved
+  environment limitation (now thirty rounds, 35-64) — still worth a human
+  granting it once. With today's pick, Airflow has had the most recent
+  round's fresh-gap attention; a future round's gap-scan should weigh dbt
+  or Kafka next, or either of the two named next steps above if Airflow's
+  turn comes around again, rather than assuming any one of the three by
+  default.

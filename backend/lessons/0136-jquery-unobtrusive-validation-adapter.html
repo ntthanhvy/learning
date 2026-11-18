@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 136 · Writing the client-side rule itself (jQuery Unobtrusive Validation adapters)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 136 · ~20 min</p>
+<h1>Writing the client-side rule itself (jQuery Unobtrusive Validation adapters)</h1>
+<p class="byline">Lesson 134 got <code>ClassicMovieAttribute</code> to emit <code>data-val-classicmovie</code> and <code>data-val-classicmovie-year</code> onto the rendered form field, then stopped — that lesson's own scope line named the missing piece explicitly: "the matching JavaScript adapter itself." Markup alone checks nothing. This lesson writes the two jQuery calls that turn those attributes into an actual in-browser check.</p>
+
+<h2>1 · A rule, and the adapter that wires it to markup</h2>
+<p>Two separate calls do two separate jobs. The first registers the actual check, by name, with jQuery Validation itself — the generic engine Lesson 134 named as the thing that "runs named rules against form fields":</p>
+<pre><code>$.validator.addMethod(<span class="st">'classicmovie'</span>, <span class="kw">function</span> (value, element, params) {
+    <span class="kw">var</span> genre = $(params[<span class="kw">0</span>]).val(), year = params[<span class="kw">1</span>], date = <span class="kw">new</span> Date(value);
+
+    <span class="cm">// The Classic genre has a value of '0'.</span>
+    <span class="kw">if</span> (genre &amp;&amp; genre.length &gt; <span class="kw">0</span> &amp;&amp; genre[<span class="kw">0</span>] === <span class="st">'0'</span>) {
+        <span class="cm">// The release date for a Classic is valid if it's no greater than the given year.</span>
+        <span class="kw">return</span> date.getUTCFullYear() &lt;= year;
+    }
+
+    <span class="kw">return</span> <span class="kw">true</span>;
+});</code></pre>
+<p>Nothing here mentions HTML attributes at all — <code>addMethod</code> just teaches jQuery Validation a function named <code>'classicmovie'</code> that takes the field's current <code>value</code>, its DOM <code>element</code>, and a <code>params</code> array, and returns <code>true</code> or <code>false</code>. On its own, nothing on the page would ever call it.</p>
+
+<h2>2 · <dfn data-en="a jQuery Unobtrusive Validation function registering how a named client-side rule reads its data-val-* HTML attributes and feeds them to jQuery Validation -- $.validator.unobtrusive.adapters.add(ruleName, paramNames, callback), where the callback receives an options object exposing options.params (the attribute values), options.rules (the object the callback must fill in to actually activate the matching $.validator.addMethod rule), and options.message (the error text)" data-vn="$.validator.unobtrusive.adapters.add() (giữ nguyên) — hàm của jQuery Unobtrusive Validation đăng ký cách 1 luật phía client đọc data-val-* rồi đưa cho jQuery Validation -- $.validator.unobtrusive.adapters.add(ruleName, paramNames, callback), callback nhận object options có options.params (giá trị attribute), options.rules (object callback phải set để thực sự kích hoạt luật $.validator.addMethod tương ứng), và options.message (nội dung lỗi)">$.validator.unobtrusive.adapters.add()</dfn> reads the markup</h2>
+<p>The second call is the bridge Lesson 134's own markup needed. It tells jQuery Unobtrusive Validation — the adapter Lesson 134 described as scanning the page for <code>data-val-*</code> and feeding them to jQuery Validation — exactly how to read the <code>classicmovie</code> attributes and activate the rule just registered above:</p>
+<pre><code>$.validator.unobtrusive.adapters.add(<span class="st">'classicmovie'</span>, [<span class="st">'year'</span>], <span class="kw">function</span> (options) {
+    <span class="kw">var</span> element = $(options.form).find(<span class="st">'select#Movie_Genre'</span>)[<span class="kw">0</span>];
+
+    options.rules[<span class="st">'classicmovie'</span>] = [element, parseInt(options.params[<span class="st">'year'</span>])];
+    options.messages[<span class="st">'classicmovie'</span>] = options.message;
+});</code></pre>
+<p>Three arguments, three jobs. <code>'classicmovie'</code> is the rule name — it has to match both the <code>data-val-classicmovie</code> attribute Lesson 134's <code>AddValidation</code> wrote and the name just given to <code>addMethod</code> above. <code>['year']</code> lists which extra parameters to pull off the markup — Microsoft's own docs describe this as "additional parameters the validator needs," read here from <code>data-val-classicmovie-year</code>. The callback receives an <code>options</code> object: <code>options.params['year']</code> holds that attribute's value as a string, so the adapter parses it with <code>parseInt</code>; <code>options.rules['classicmovie']</code> is set to the exact <code>[element, year]</code> array the rule function's own <code>params</code> parameter expects; and <code>options.messages['classicmovie']</code> carries over the error text the server already rendered into <code>data-val-classicmovie</code>, so the browser's error message matches the server's without being retyped.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this is still just jQuery form-validation code — nothing here should feel unfamiliar as JavaScript. The new part is the contract, not the syntax: the rule name, the params array, and the <code>options.rules</code>/<code>options.messages</code> assignments all have to line up exactly with what the C# <code>AddValidation</code> method wrote as HTML attributes. Rename one side without the other and the rule silently never fires — no error, no console warning, the checkbox or date field just stops being validated client-side.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>$.validator.addMethod</code> for registering a named client-side rule function, and <code>$.validator.unobtrusive.adapters.add</code> for reading a rule's <code>data-val-*</code> parameters and activating it — the one piece Lesson 134's own scope line named as not yet covered. It does not cover writing this same check without jQuery (a vanilla-JS or framework-native client validator), nor shipping this adapter file project-wide via a bundler — both reasonable next steps, not today's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="$.validator.addMethod registers the actual check function under a name with jQuery Validation, the generic rule engine. $.validator.unobtrusive.adapters.add is the separate call that reads a field's data-val-* attributes and activates that named rule with the right parameters. Neither call does the other's job.">
+    <p class="stem">What is the actual difference between $.validator.addMethod and $.validator.unobtrusive.adapters.add?</p>
+    <button class="opt" data-ok>one registers the check function, the other reads attributes to activate</button>
+    <button class="opt">they are simply two old aliases for one identical jQuery function</button>
+    <button class="opt">addMethod only ever runs after adapters.add has already fully run first</button>
+    <button class="opt">adapters.add fully replaces addMethod entirely across every single newer jQuery release</button>
+  </div>
+  <div class="q" data-why="The adapter's second argument, ['year'], lists which additional data-val-*-param attributes to read off the markup -- here pulling data-val-classicmovie-year into options.params['year'] for the callback to use.">
+    <p class="stem">In $.validator.unobtrusive.adapters.add('classicmovie', ['year'], fn), what does the ['year'] array actually do?</p>
+    <button class="opt" data-ok>lists which extra data-val-param attributes the adapter itself should read right off</button>
+    <button class="opt">sets the one exact calendar year the whole validation rule expires on</button>
+    <button class="opt">names the single CSS class applied to every field that fails this</button>
+    <button class="opt">orders jQuery to only ever load this one adapter during leap years</button>
+  </div>
+  <div class="q" data-why="Microsoft's own worked example sets options.rules['classicmovie'] to [element, parseInt(options.params['year'])] -- exactly the [element, params] shape the registered addMethod rule function expects as its own params argument.">
+    <p class="stem">Inside the adapter callback, what does assigning options.rules['classicmovie'] actually accomplish?</p>
+    <button class="opt" data-ok>supplies the params array the matching addMethod rule function itself expects</button>
+    <button class="opt">permanently deletes that one rule from jQuery Validation's own engine now</button>
+    <button class="opt">silently disables every other validation rule on that entire same form</button>
+    <button class="opt">submits the surrounding form early, well before any real check runs</button>
+  </div>
+  <div class="q" data-why="The rule name string has to match exactly across three places: the data-val-classicmovie HTML attribute Lesson 134's AddValidation wrote, the name given to addMethod, and the name given to adapters.add. A mismatch on any one of the three means the rule silently never fires, with no error or console warning.">
+    <p class="stem">What breaks if the rule name passed to addMethod doesn't exactly match the name passed to adapters.add?</p>
+    <button class="opt" data-ok>the rule silently never fires, with no thrown error or console warning</button>
+    <button class="opt">jQuery throws one loud exception the instant the page itself first loads</button>
+    <button class="opt">the server-side ValidationAttribute itself also stops running entirely too right now still</button>
+    <button class="opt">nothing at all changes, since jQuery always just ignores any name mismatches</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation">Microsoft Learn: Model validation in ASP.NET Core MVC and Razor Pages</a> — the same page Lessons 132 through 134 cited, read again specifically for its custom-client-validation JavaScript example, which gives the exact <code>$.validator.addMethod('classicmovie', ...)</code> and <code>$.validator.unobtrusive.adapters.add('classicmovie', ['year'], ...)</code> code this lesson's own two blocks are drawn from verbatim, plus the quoted description of the <code>data-</code> attribute contract ("additional parameters the validator needs").</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 134's <code>IClientModelValidator</code>/<code>data-val-*</code> markup and Lesson 133's <code>ClassicMovieAttribute</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu không muốn dùng jQuery thì adapter này viết lại bằng vanilla JS sẽ khác gì, có mất gì không?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

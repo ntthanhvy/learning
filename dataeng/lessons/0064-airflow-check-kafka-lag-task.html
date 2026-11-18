@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 64 · Wiring Day 37's lag check into the real DAG, before dbt_build runs</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 64 · ~20 min · 18 Nov 2026</p>
+<h1>Wiring Day 37's lag check into the real DAG, before <code>dbt_build</code> runs</h1>
+<p class="byline">Today's tangible win: a fourth task, <code>check_kafka_lag</code>, added to the real <code>food_delivery_pipeline</code> DAG — wired between <code>load_raw</code> and <code>dbt_build</code> so a Kafka consumer group that's badly behind fails the run <em>before</em> <code>dbt build</code> ever touches a warehouse known to be stale, exactly the plug-in point Day 37's own closing section named and never built: "an Airflow task that runs this script via <code>BashOperator</code> before <code>dbt_build</code>... rather than letting <code>dbt build</code> run against a warehouse known to be stale."</p>
+
+<div class="callout"><strong>Before today — confirm Day 56's DAG and Day 37's script both still exist:</strong> today adds one new task between two existing ones; it changes nothing about <code>load_raw</code>, <code>dbt_build</code> or <code>check_dead_letters</code> themselves.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+ls scripts/check_consumer_lag.py</code></pre>
+Expected: <code>No data found</code> from the first command, and the script path printed by the second with no error. If either is missing, finish Day 56 (the DAG's current <code>max_active_runs</code>/<code>dagrun_timeout</code>/<code>max_consecutive_failed_dag_runs</code> state) or Day 37 (the lag script itself) first — today assumes both already exist exactly as those lessons left them.</div>
+
+<h2>1 · The gap: a correct script with nowhere to run</h2>
+<p>Day 37 built <code>scripts/check_consumer_lag.py</code> deliberately as "a leaf, not a new service" — a script that computes consumer lag the same way Day 18 defined it, and exits non-zero past a threshold, specifically so something else could call it. Its own Section 4 named the realistic next step and stopped short of building it: wire it into the real DAG via <code>BashOperator</code>, before <code>dbt_build</code>, so a consumer that's stopped committing — crashed, OOM-killed, stuck in a retry loop, Day 37's own examples — fails the pipeline fast instead of letting <code>dbt build</code> run its full test suite against <code>raw.order_events</code> that nothing has actually confirmed is current.</p>
+<p>That gap sat unbuilt for twenty-seven days while this DAG grew around it: Day 45 added <code>check_dead_letters</code> after <code>dbt_build</code>, Day 54 added <code>max_active_runs</code>/<code>dagrun_timeout</code>, Day 56 added <code>max_consecutive_failed_dag_runs</code>. Every one of those changes assumed the DAG's shape was <code>load_raw &gt;&gt; dbt_build &gt;&gt; check_dead_letters_task</code> and left it there. Today is the first lesson to insert a task in the <em>middle</em> of that chain rather than appending to either end, which is worth noticing as its own small design question: where a check belongs in a DAG is not just "does it work," it's "what should it block if it fails."</p>
+
+<h2>2 · Why the lag check belongs before <code>dbt_build</code>, not after it</h2>
+<p>Day 45's <code>check_dead_letters</code> and Day 46's real threshold on it both run <em>after</em> <code>dbt_build</code>, on purpose, with <code>trigger_rule="all_done"</code> — a health check that should report the same way whether the build it's reporting on passed or failed. Today's task is a different shape entirely: a <dfn data-en="a task placed upstream of a dependent step specifically so that step cannot start unless the gate task itself succeeds, using the default all_success trigger rule to turn a check into a block -- distinct from a task placed downstream of a step to observe or report on what already happened, which cannot prevent anything, only describe it after the fact" data-vn="giữ nguyên &quot;quality gate&quot; — task đặt NGAY TRƯỚC 1 bước phụ thuộc vào nó, để bước đó không được chạy trừ khi chính gate task thành công (dùng trigger_rule all_success mặc định) — khác hẳn 1 task đặt SAU để quan sát/báo cáo, loại đó không chặn được gì, chỉ mô tả lại sau khi việc đã xảy ra rồi">quality gate</dfn>: lag measures whether the Kafka consumer has actually kept the warehouse's <code>raw.order_events</code> table current <em>before</em> any dbt model reads from it. Running the lag check after <code>dbt_build</code> would mean dbt has already built <code>fct_orders</code> and <code>mart_delivery_sla</code> against data nothing yet confirmed was fresh — the check would tell you the problem one step too late, after the stale marts already exist and dbt's own tests have already passed against rows that were simply incomplete, not wrong.</p>
+<p>Placed before <code>dbt_build</code> instead, with Airflow's default <code>all_success</code> trigger rule (unchanged — today adds a task, it doesn't touch any existing trigger rule), a failing lag check stops <code>dbt_build</code> from running at all, the same "don't build marts on data that failed to load" argument Day 45 already made about <code>load_raw</code> itself, just one step later in the chain and checking freshness instead of presence. <code>check_dead_letters</code> and <code>check_kafka_lag</code> now sit on either side of <code>dbt_build</code> in this DAG, naming the same distinction two different ways: a gate upstream prevents, a report downstream only describes.</p>
+
+<h2>3 · Build: <code>check_kafka_lag</code>, a <code>BashOperator</code> calling Day 37's script unchanged</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 7 wrote and Days 35, 45, 46, 47, 51, 54, 56 and 61 each added to. Add one new task, and one line changing how the existing tasks connect:</p>
+<pre><code><span class="cm"># inside the existing `with DAG(...) as dag:` block, between load_raw and dbt_build:</span>
+check_kafka_lag = BashOperator(
+    task_id=<span class="str">"check_kafka_lag"</span>,
+    bash_command=<span class="str">"uv run --with confluent-kafka python3 /opt/scripts/check_consumer_lag.py"</span>,
+    <span class="cm"># no retries, no callback, no trigger_rule override -- Day 37's script</span>
+    <span class="cm"># is unchanged, and the default all_success is exactly what's wanted:</span>
+    <span class="cm"># dbt_build should never run if this task doesn't exit 0 first.</span>
+)
+
+<span class="cm"># was: load_raw >> dbt_build >> check_dead_letters_task  (Day 45)</span>
+load_raw &gt;&gt; check_kafka_lag &gt;&gt; dbt_build &gt;&gt; check_dead_letters_task</code></pre>
+<p>Two choices worth defending out loud, because both look arbitrary until named. First, no <code>retries</code> on <code>check_kafka_lag</code>, unlike <code>dbt_build</code>'s <code>retries=2</code> from Day 35: lag doesn't usually self-heal in the seconds a retry would wait, and retrying a slow-but-correct consumer's lag check a couple of times before giving up would just delay discovering a real problem, not fix one — Day 35's retry logic bridges to backend's transient-vs-permanent-failure framing, and a stuck consumer is the permanent case here, not the transient one. Second, <code>check_kafka_lag</code> gets no <code>on_failure_callback</code> of its own; Day 61's callback mechanism is already proven out on <code>dbt_build</code> and would attach to this task exactly the same way if this portfolio ever wires a real alert, so today doesn't re-derive it — the task's own non-zero exit code, visible in the Airflow UI the moment <code>all_success</code> stops <code>dbt_build</code> from starting, is the whole signal this round needs.</p>
+<p><code>uv run --with confluent-kafka python3 /opt/scripts/check_consumer_lag.py</code> assumes the script is mounted into whatever container actually runs this <code>BashOperator</code>, at <code>/opt/scripts/</code> — the same mount-path convention Day 7's own <code>dbt_build</code> task already uses for <code>/opt/dbt</code>. Adjust the path to wherever your compose setup actually bind-mounts <code>scripts/</code>; the task itself doesn't care, as long as the container it runs in can reach both the script and the Kafka broker.</p>
+
+<h2>4 · Verify: the DAG parses, the new edge is real, and the lag script's own exit code still does the deciding</h2>
+<p>Same module-import check Days 35, 45, 46, 47, 54, 56 and 61 each used, since the live-scheduler path is still blocked (one attempt made this round at <code>airflow db migrate</code>, same approval-gate result as every round 35 through 63):</p>
+<pre><code><span class="kw">cd</span> dags &amp;&amp; uv run --with <span class="str">"apache-airflow==3.3.1"</span> python3 -c <span class="str">"
+import food_delivery_pipeline as m
+print('upstream of dbt_build:', sorted(t.task_id for t in m.dbt_build.upstream_list))
+print('downstream of load_raw:', sorted(t.task_id for t in m.load_raw.downstream_list))
+print('check_kafka_lag trigger_rule:', m.check_kafka_lag.trigger_rule)
+print('check_kafka_lag retries:', m.check_kafka_lag.retries)
+"</span></code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>upstream of dbt_build: ['check_kafka_lag']
+downstream of load_raw: ['check_kafka_lag']
+check_kafka_lag trigger_rule: TriggerRule.ALL_SUCCESS
+check_kafka_lag retries: 0</code></pre>
+<p><code>dbt_build</code>'s one direct upstream task is now <code>check_kafka_lag</code>, not <code>load_raw</code> directly — the chain inserted a link rather than branching, confirming today's reordering actually took effect rather than just adding a disconnected task. That confirms the wiring, not the behavior. The behavior itself is just Day 37's own script, unchanged, so Day 37's own two runs still apply: a caught-up consumer group exits <code>0</code> and <code>dbt_build</code> proceeds; a group that's fallen behind past <code>LAG_THRESHOLD</code> prints <code>ALERT: lag ... exceeds threshold ...</code> and exits <code>1</code>, which Airflow reads as a task failure and — by the unchanged default <code>all_success</code> rule — never starts <code>dbt_build</code> at all.</p>
+<div class="callout"><strong>Checked as a module-import parse this round, not a live scheduler (same honest-disclosure convention Days 17, 35, 41, 45, 46, 47, 50, 54, 55, 56, 58 and 61 each used):</strong> this sandbox has no reachable Airflow metadata database, and one attempt this round at <code>airflow db migrate</code> hit the same interactive-approval gate logged every round since Day 35 (now thirty rounds, 35-64) — not retried a second time, per this course's own convention of naming a standing blocker once per round. What was confirmed live instead: the DAG module import (real output, shown above, against a scratch copy carrying all of Days 7/35/45/46/47/51/54/56/61's prior settings plus today's edit), and a direct call to <code>check_consumer_lag.py</code>'s own <code>main()</code> function against a mocked <code>AdminClient</code>/<code>Consumer</code> pair returning both an on-threshold and an over-threshold lag value, reconfirming Day 37's own exit-code behavior is unchanged by today's edit — today adds a task around the script, it does not touch the script's body at all. The edited DAG file was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm no other task's own settings moved — Day 56's circuit breaker and Day 54's concurrency cap are still exactly where those lessons left them:</p>
+<pre><code><span class="kw">cd</span> dags &amp;&amp; uv run --with <span class="str">"apache-airflow==3.3.1"</span> python3 -c <span class="str">"
+import food_delivery_pipeline as m
+print('max_active_runs:', m.dag.max_active_runs)
+print('dagrun_timeout:', m.dag.dagrun_timeout)
+print('max_consecutive_failed_dag_runs:', m.dag.max_consecutive_failed_dag_runs)
+print('dbt_build retries:', m.dbt_build.retries)
+"</span></code></pre>
+<p>Expected: <code>max_active_runs: 1</code>, <code>dagrun_timeout: 0:30:00</code>, <code>max_consecutive_failed_dag_runs: 3</code>, <code>dbt_build retries: 2</code> — every one of them exactly as Days 54, 56 and 35 left it, since today only inserts a new task and repoints two dependency edges. Commit <code>dags/food_delivery_pipeline.py</code>.</p>
+
+<h2>5 · What this closes, and what it still doesn't</h2>
+<p>This is the same move Day 58 made for Day 55's deferred <code>on_lost</code>, Day 61 made for Day 35's deferred <code>on_failure_callback</code>, and Day 62 made for Day 41's deferred replay workflow: find a lesson's own named, concrete, unbuilt next step and build exactly that, rather than scanning for a brand-new topic. The difference today is that the gap crossed threads — Day 37 is a Kafka lesson, and closing its own named gap meant editing the Airflow DAG, not writing more Kafka code. That is itself a fact worth saying in an interview: a working pipeline's actual seams are where one tool's output becomes another tool's precondition, and "which tool teaches this" stops mattering once the two are wired together in one DAG.</p>
+<p>What's still open: <code>check_kafka_lag</code>'s failure is visible in the Airflow UI and in <code>dbt_build</code> simply never starting, but nothing pages a human yet — Day 61's <code>on_failure_callback</code> mechanism would attach here directly if that's ever wanted, the same "named, not built" shape this course has used honestly several times now rather than bolting on a second feature this round. <code>LAG_THRESHOLD = 1000</code> also still lives as a hardcoded constant inside Day 37's script, not an Airflow <code>Variable</code> the way Day 38's growth-check cursor is — tunable without a redeploy is a real improvement, just not today's.</p>
+
+<div class="interview">
+<p><strong>Q: "You have a Kafka consumer landing events into a warehouse, and a daily dbt job that builds marts off that warehouse. What stops dbt from quietly building on stale data if the consumer falls behind or dies?"</strong> A strong answer, out loud: <em>"Nothing, by default — dbt has no way to know the consumer even exists, it just reads whatever rows are sitting in the table. I'd add a task before the dbt build step that checks consumer lag programmatically — high-water mark minus committed offset, per partition — and exits non-zero past a threshold. Wired with Airflow's default all_success trigger rule, a failing lag check stops the dbt task from ever starting, so a dead or badly-behind consumer fails the pipeline visibly and early, instead of letting a full dbt build run, pass its own tests, and publish marts built on data that was simply incomplete. The key design choice is where that check sits in the DAG: after the build, like a dead-letter count, it's a health report; before the build, like this one, it's a gate that actually prevents bad output rather than just describing it after the fact."</em> The signal: naming trigger-rule placement as a deliberate decision with two different right answers for two different kinds of check, not treating "add a check somewhere" as sufficient.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers wiring Day 37's existing <code>check_consumer_lag.py</code> into the real <code>food_delivery_pipeline</code> DAG as a new <code>BashOperator</code> task, <code>load_raw &gt;&gt; check_kafka_lag &gt;&gt; dbt_build &gt;&gt; check_dead_letters_task</code>, with the default <code>all_success</code> trigger rule so a failing lag check blocks <code>dbt_build</code> from starting. It does not change Day 37's script itself, add retries or a failure callback to the new task (both named above as the clear next steps if this thread continues), move <code>LAG_THRESHOLD</code> into an Airflow <code>Variable</code> (Day 38's cursor pattern would transfer directly, not re-derived here), or touch anything about <code>check_dead_letters</code>, <code>max_active_runs</code>, <code>dagrun_timeout</code> or <code>max_consecutive_failed_dag_runs</code> — all four stay exactly as Days 45/46/54/56 left them.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Running the lag check after dbt_build would mean dbt has already built fct_orders and mart_delivery_sla against raw.order_events before anything confirmed that table was current -- the stale-data problem would already be baked into the marts by the time the check even ran. Placed before dbt_build with the default all_success rule, a failing lag check stops dbt_build from starting at all, catching the problem before any mart is built on top of it rather than only reporting it afterward.">
+    <p class="stem">Why does <code>check_kafka_lag</code> belong before <code>dbt_build</code> in the DAG, rather than after it like <code>check_dead_letters</code>?</p>
+    <button class="opt" data-ok>running after lets marts build on stale rows</button>
+    <button class="opt">Airflow always requires every single BashOperator run first</button>
+    <button class="opt">confluent-kafka itself cannot run after any PythonOperator task</button>
+  </div>
+  <div class="q" data-why="check_dead_letters uses trigger_rule=all_done specifically because it should report the same way whether dbt_build passed or failed -- a health check meant to run regardless of outcome. check_kafka_lag keeps the default all_success instead, because the whole point is to block dbt_build from running at all on a failing lag check, not to report on it after the fact alongside whatever dbt_build itself did.">
+    <p class="stem">Why does <code>check_kafka_lag</code> keep Airflow's default <code>all_success</code> trigger rule instead of Day 45's <code>all_done</code>?</p>
+    <button class="opt" data-ok>it should block dbt_build, not report either outcome</button>
+    <button class="opt">all_done was fully removed from Airflow itself entirely</button>
+    <button class="opt">BashOperator tasks cannot ever accept any non-default rule</button>
+  </div>
+  <div class="q" data-why="Lag from a crashed, OOM-killed, or stuck consumer does not typically self-heal in the seconds a retry would wait -- retrying a handful of times before giving up would just delay discovering a real, likely permanent problem rather than fix a transient one. dbt_build's retries=2 exists for a different class of failure (a brief connection hiccup, the kind that plausibly clears on its own), not for the kind of failure a lag check is designed to catch.">
+    <p class="stem">Why does <code>check_kafka_lag</code> get no <code>retries</code>, unlike <code>dbt_build</code>'s <code>retries=2</code> from Day 35?</p>
+    <button class="opt" data-ok>a stuck consumer's lag rarely clears within one retry</button>
+    <button class="opt">BashOperator tasks never support the retries keyword at all</button>
+    <button class="opt">Day 37's own script already retries internally many times</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs (already Days 35/45/46/61's primary source) document trigger rules and dependency operators (<code>&gt;&gt;</code>) at the API-reference level — today's change is ordinary task wiring, not a new mechanism, so no new citation is needed. The <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a>, already cited for Day 37's own script, remain the right source for the lag computation itself, since today doesn't touch it.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 64.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty rounds, 35-64) — still worth a human granting it once, including for today's own thread: confirming a real scheduler run actually stops <code>dbt_build</code> from starting on a genuinely failing lag check, not just a module-import read of the dependency graph. Named next steps if this thread continues: an <code>on_failure_callback</code> on <code>check_kafka_lag</code> reusing Day 61's exact mechanism, and moving <code>LAG_THRESHOLD</code> into an Airflow <code>Variable</code> via Day 38's cursor pattern. With today's pick, Airflow has had the most recent round's fresh-gap attention; a future round's gap-scan should weigh dbt or Kafka next, or whichever named TODO or learner signal turns up first.<br><br>
+💬 Anything unclear — why a gate and a report are different trigger-rule decisions, or why this gap needed editing the DAG instead of the script? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

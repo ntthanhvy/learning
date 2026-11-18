@@ -270,6 +270,8 @@
       file: "lessons/0130-np-floor-and-ceil.html" },
     { n: 131, date: "2026-11-17", title: "np.log() and np.exp(): the skew-fix transform, and its undo button",
       file: "lessons/0131-np-log-and-exp.html" },
+    { n: 132, date: "2026-11-18", title: "np.minimum() and np.maximum(): elementwise pairwise comparison, and clip()'s hidden engine",
+      file: "lessons/0132-np-minimum-and-maximum.html" },
   ];
 
   const REFS = [

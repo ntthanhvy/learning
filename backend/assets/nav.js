@@ -280,6 +280,8 @@
       file: "lessons/0135-output-cache-size-limits-and-locking.html" },
     { n: 136, date: "2026-11-18", title: "Writing the client-side rule itself",
       file: "lessons/0136-jquery-unobtrusive-validation-adapter.html" },
+    { n: 137, date: "2026-11-19", title: "CORS, now in C# too",
+      file: "lessons/0137-cors-aspnetcore-addcors-usecors.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 113 · glob &amp; fnmatch: filename pattern matching</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 113 · ~20 min · 19 Nov 2026</p>
+<h1><code>glob</code> &amp; <code>fnmatch</code>: filename pattern matching</h1>
+<p class="byline">Day 13 built <code>pathlib.Path</code> objects and walked a directory with <code>.iterdir()</code>, checking each name by hand. That works, but "every file ending in <code>.csv</code>" or "every file nested at any depth under <code>logs/</code>" is common enough to deserve its own syntax — the shell-style <dfn data-en="a wildcard pattern uses a small set of special characters ( * matches any run of characters, ? matches exactly one, [abc] matches one of a set) to describe many filenames at once, instead of naming each one or writing a full regular expression" data-vn="giữ nguyên &quot;wildcard pattern&quot; — dùng vài ký tự đặc biệt (* khớp mọi đoạn ký tự, ? khớp đúng 1 ký tự, [abc] khớp 1 trong các ký tự liệt kê) để tả nhiều tên file cùng lúc, thay vì liệt kê từng cái hay viết hẳn 1 regular expression">wildcard pattern</dfn> every shell already uses for <code>ls *.csv</code>. Python has two matching layers built on the same pattern syntax: <code>Path.glob()</code> searches the filesystem for you, and <code>fnmatch</code> tests one name you already have against a pattern.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, lesson body, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>glob</code>/<code>fnmatch</code> have zero real hits anywhere in the course — Day 13's <code>pathlib</code> lesson uses the word "platform" once in an unrelated sentence and never calls <code>.glob()</code>. <code>textwrap</code>/<code>string.Template</code> are already closed (Days 46 and 98), and <code>calendar</code>/<code>socket</code> remain ruled out on scope-depth grounds from prior rounds. Day 112 closed fresh day 1 of the current cycle, so today is fresh day 2.</div>
+
+<h2>1 · <code>Path.glob()</code>: searching a directory by pattern</h2>
+<p>Day 13's <code>.iterdir()</code> lists everything in one directory, no filtering. <code>Path.glob(pattern)</code> filters as it lists, using the same wildcard characters a shell uses: <code>*</code> for any run of characters (never crossing a <code>/</code>), <code>?</code> for exactly one character, and <code>[abc]</code> for one character out of a set.</p>
+<pre><code><span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+root = Path(<span class="str">"logs"</span>)
+<span class="kw">for</span> p <span class="kw">in</span> <span class="kw">sorted</span>(root.glob(<span class="str">"*.csv"</span>)):
+    <span class="kw">print</span>(p.name)
+<span class="cm"># confirmed live, against logs/app.csv, logs/2024.csv, logs/notes.txt, logs/archive/old.csv:</span>
+<span class="cm"># 2024.csv</span>
+<span class="cm"># app.csv</span>
+<span class="cm"># -- archive/old.csv is NOT listed: glob("*.csv") only looks one level deep</span></code></pre>
+<p><code>glob()</code> returns an iterator (Day 5's lazy-pipeline idea again), not a list — wrap it in <code>sorted()</code> or <code>list()</code> to see every result at once, since directory listing order is not guaranteed to be consistent across runs or platforms.</p>
+
+<h2>2 · <code>rglob()</code>: the same pattern, every depth</h2>
+<p><code>Path.rglob(pattern)</code> ("recursive glob") is <code>glob("**/" + pattern)</code> written out — it walks into every subdirectory, no matter how deep, applying the same pattern at each level:</p>
+<pre><code><span class="kw">for</span> p <span class="kw">in</span> <span class="kw">sorted</span>(root.rglob(<span class="str">"*.csv"</span>)):
+    <span class="kw">print</span>(p)
+<span class="cm"># confirmed live, same logs/ tree as above:</span>
+<span class="cm"># logs/2024.csv</span>
+<span class="cm"># logs/app.csv</span>
+<span class="cm"># logs/archive/old.csv   -- rglob() found the nested one glob() skipped</span></code></pre>
+<p>The <code>**</code> segment itself is a <dfn data-en="in a glob pattern, ** matches any number of directory levels, including zero -- it is the one piece of glob syntax that crosses a / boundary, which is why a plain * never does" data-vn="giữ nguyên &quot;**&quot; — trong glob pattern, ** khớp bất kỳ số lượng cấp thư mục, kể cả 0 cấp; đây là ký tự duy nhất trong glob syntax được băng qua dấu /, còn * thường thì không bao giờ băng qua">recursive wildcard</dfn> — the one piece of glob syntax allowed to cross a <code>/</code> boundary, which is exactly why a plain <code>*</code> in Section 1 stayed confined to one directory. <code>root.glob("**/*.csv")</code> and <code>root.rglob("*.csv")</code> are confirmed live to return the identical set.</p>
+
+<div class="callout"><strong>Confirmed live — <code>glob()</code> never raises on zero matches:</strong> <code>list(root.glob("*.xyz"))</code> for a pattern matching nothing returns <code>[]</code>, not an exception — unlike Day 13's <code>Path.read_text()</code> on a missing file, which raises <code>FileNotFoundError</code> immediately. A pattern search finding nothing is a normal, expected outcome, not a failure.</div>
+
+<h2>3 · <code>fnmatch</code>: testing one name you already have</h2>
+<p><code>glob()</code> searches a real filesystem. Sometimes the names are already in hand — read from a <code>zipfile</code> listing (Day 64), a database row, an API response — and the question is just "does this one name match the pattern?" That's <dfn data-en="fnmatch.fnmatch(name, pattern) tests whether one filename string matches a shell-style wildcard pattern, returning True or False -- the same pattern syntax Path.glob() uses internally, but applied to a string already in hand instead of searching a real filesystem" data-vn="giữ nguyên &quot;fnmatch&quot; — module test 1 string tên file có khớp shell-style wildcard pattern không, trả True/False; cùng cú pháp pattern mà Path.glob() dùng bên trong, nhưng áp dụng lên string có sẵn, không cần filesystem thật">fnmatch</dfn>:</p>
+<pre><code><span class="kw">from</span> fnmatch <span class="kw">import</span> fnmatch
+
+names = [<span class="str">"report_2024.csv"</span>, <span class="str">"report_2024.tmp"</span>, <span class="str">"README.md"</span>]
+matches = [n <span class="kw">for</span> n <span class="kw">in</span> names <span class="kw">if</span> fnmatch(n, <span class="str">"report_*.csv"</span>)]
+<span class="kw">print</span>(matches)   <span class="cm"># confirmed live: ['report_2024.csv']</span>
+
+<span class="kw">print</span>(fnmatch(<span class="str">"REPORT.CSV"</span>, <span class="str">"*.csv"</span>))   <span class="cm"># confirmed live on this Linux machine: False</span>
+<span class="kw">from</span> fnmatch <span class="kw">import</span> fnmatchcase
+<span class="kw">print</span>(fnmatchcase(<span class="str">"REPORT.CSV"</span>, <span class="str">"*.csv"</span>))   <span class="cm"># confirmed live: False as well -- identical result here</span></code></pre>
+<p><code>fnmatch()</code> is documented to normalize case the same way the operating system's own filesystem does before comparing — case-insensitive on Windows and default macOS, but case-sensitive on Linux, confirmed live above: both calls return <code>False</code> on this machine, because Linux's normalization step is a no-op. <code>fnmatchcase()</code> skips that OS-dependent normalization entirely and always compares exactly as written — on Linux the two functions happen to agree, but on Windows <code>fnmatch("REPORT.CSV", "*.csv")</code> would return <code>True</code> while <code>fnmatchcase()</code> stays <code>False</code> on every platform. Reach for <code>fnmatchcase()</code> whenever the result needs to be the same regardless of what OS runs the code — matching a label from a CSV column, say, rather than an actual filesystem path.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has a filename-pattern matcher of its own — a pandas pipeline that needs "every CSV under this folder" still reaches for <code>Path.glob()</code> or <code>pathlib</code> first, then hands each matched path to <code>pd.read_csv()</code> one at a time. Pattern matching over filenames is a stdlib/OS-level job, not a data-frame job. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/113_glob_and_fnmatch.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/113_glob_and_fnmatch.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>Path.glob()</code> to list only the top-level matches of a pattern against a small directory tree built by the practice file itself, using <code>Path.rglob()</code> to find the same pattern at every depth, and filtering a plain list of filename strings with <code>fnmatch.fnmatch()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain * in a glob pattern never crosses a / boundary, so Path.glob('*.csv') only looks inside the one directory it's called on. Path.rglob('*.csv') is glob('**/*.csv') written out -- the ** segment is the one piece of glob syntax allowed to cross a / boundary, so rglob() walks into every subdirectory at every depth applying the same pattern.">
+    <p class="stem">Why does <code>root.glob("*.csv")</code> miss a matching file sitting inside a subdirectory of <code>root</code>, while <code>root.rglob("*.csv")</code> finds it?</p>
+    <button class="opt" data-ok>a plain star never crosses a slash, but rglob's ** does cross it</button>
+    <button class="opt">glob() only runs correctly on files that were modified during the current session</button>
+    <button class="opt">rglob() is simply a newer alias name that fixed an old glob() bug</button>
+  </div>
+  <div class="q" data-why="fnmatch(name, pattern) normalizes case the same way the operating system's own filesystem does before comparing -- case-insensitive on Windows and default macOS, case-sensitive on Linux, confirmed live: fnmatch('REPORT.CSV', '*.csv') returns False on this Linux machine, matching fnmatchcase()'s result here. fnmatchcase() always skips that OS-dependent normalization, so on Windows it would still return False while plain fnmatch() returned True there -- the two functions can disagree depending on the platform running the code, even though they agree on Linux.">
+    <p class="stem">What does <code>fnmatch.fnmatch()</code> do differently from <code>fnmatch.fnmatchcase()</code> that <code>fnmatchcase()</code> never does?</p>
+    <button class="opt" data-ok>normalizes case to match the running OS's own filesystem rules first</button>
+    <button class="opt">searches the real filesystem instead of comparing one string in hand</button>
+    <button class="opt">only accepts Path objects instead of plain filename strings as input</button>
+  </div>
+  <div class="q" data-why="list(root.glob('*.xyz')) for a pattern matching nothing returns an empty list, confirmed live -- not an exception. This is unlike Day 13's Path.read_text() on a missing file, which raises FileNotFoundError immediately. A pattern search finding zero matches is a normal, expected outcome worth checking for, not a failure path needing try/except.">
+    <p class="stem">What happens when <code>Path.glob()</code> is called with a pattern that matches nothing in the directory?</p>
+    <button class="opt" data-ok>it returns an empty result, confirmed live, never raising anything at all</button>
+    <button class="opt">it always raises the exact same FileNotFoundError Day 13's own read_text() raises</button>
+    <button class="opt">it falls back to calling rglob() right away to search every depth</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/pathlib.html#pathlib.Path.glob"><code>pathlib</code></a> docs for <code>Path.glob()</code>/<code>Path.rglob()</code> and their pattern-syntax table, plus the <a href="https://docs.python.org/3/library/fnmatch.html"><code>fnmatch</code></a> docs for <code>fnmatch()</code>/<code>fnmatchcase()</code> and the platform-dependent case-normalization note.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day113">glossary</a> under Day 113.<br>
+<code>calendar</code> and <code>socket</code> remain open, ruled-out-so-far candidates for a future round (thin content and scope-depth respectively).<br><br>
+💬 Anything unclear — the <code>glob()</code> vs <code>rglob()</code> depth difference, why <code>**</code> is special, or <code>fnmatch()</code>'s case behavior? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

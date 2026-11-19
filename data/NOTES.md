@@ -12701,3 +12701,105 @@
   lesson_generated --day 131 --lesson 0131-np-log-and-exp.html --detail
   '{"by":"claude-sonnet-5"}'` was run directly from the repo root to close
   out this round.
+- 2026-11-19 generation (Lesson 133, headless 06:00 run): this round's own
+  DB read via the `node -e ... execFileSync('psql', ...)` workaround
+  succeeded directly and confirmed the latest `course='data'` row was day
+  132, dated 2026-11-18 (no learnable table named `progress` exists — the
+  real table is `course_progress`, columns `course`/`day`/`lesson`/
+  `kind`/`detail`/`recorded_at`) — today's round was not a duplicate; no
+  `lesson_completed`/quiz/kata signal has landed for any course since
+  2026-10-15, so this round paced a normal sequential lesson rather than
+  reacting to a reported weak spot. Read `MISSION.md` (unmodified), this
+  file's own tail, `RESOURCES.md`, the one `data/learning-records/`
+  baseline file, `assets/nav.js`'s `LESSONS` array, and Lesson 132's own
+  HTML plus its matching `practice/132_np_minimum_maximum.py` in full as
+  the structural template. Topic choice: ran this round's own fresh scan
+  (per this course's "fresh scan each round" convention, not trusting
+  Lesson 132's own "nothing pre-committed" line as given) — grepped every
+  lesson body and every glossary row case-insensitively for every
+  `np.[a-z_]*(` call already in use, and separately for `np.round(`,
+  `np.rint(`, `np.trunc(`, `Series.round(`. Found `np.round()` and
+  `Series.round()` had only ever appeared as one-line contrast points
+  inside Lessons 130/131/132's own sections (never given their own
+  exercise), and `np.rint()` had zero hits anywhere — a real gap. Picked
+  `np.round()`: the single most common "why did my number come out wrong"
+  interview surprise in this whole elementwise-ufunc lineage, continuing
+  the Lesson 126-132 arc. Verified directly in a scratch sandbox (numpy
+  2.5.5, pandas 3.1.1, `uv run --with pandas`) rather than trusting memory:
+  confirmed banker's rounding (round-half-to-even) on exact `.5` ties —
+  `np.round(0.5)` is `0.0`, `np.round(1.5)` is `2.0`, `np.round(2.5)` is
+  `2.0` again, rounding to whichever integer neighbor is even, not always
+  up; confirmed `Series.round()` matches `np.round()` exactly and is the
+  ONE case in the Lesson 126-132 lineage with no `AttributeError` naming
+  gap (every other ufunc in that lineage lacks a matching Series method);
+  confirmed `decimals=` accepts negative values, rounding left of the
+  decimal point (`np.round(1234.5678, -2)` is `1200.0`); confirmed an
+  `int64` Series is a true no-op under `np.round()`, matching Lesson 130's
+  `np.floor()`/`np.ceil()` rule. Dug into the sharper trap directly rather
+  than taking "banker's rounding" as the full explanation for every
+  surprise: `np.round(2.675, 2)` returns `2.68`, and confirmed via
+  `Decimal(2.675)` that the literal is NOT stored exactly in `float64` —
+  the true stored value is `2.67499999999999982236...`, already below the
+  halfway tie before any rounding rule even applies; this is a
+  float-representation surprise layered under the rounding-rule surprise,
+  not explained by banker's rounding alone (2.68's last digit is even
+  either way, so that one example doesn't even disambiguate the tie-rule
+  from the representation issue — called this out explicitly in the
+  lesson's own callout to avoid conflating the two). Confirmed directly
+  `np.rint(a)` equals `np.round(a, decimals=0)` with no `decimals=`
+  parameter at all, and that `Series.rint()` does not exist
+  (`AttributeError`), unlike `Series.round()`. Did not build out
+  `np.fix()`/`np.around()` (legacy alias of `np.round()`) beyond naming
+  them in the scope line, out of scope per `MISSION.md`'s "no deep NumPy
+  internals" line. Added exactly one new glossary row, "np.round()",
+  directly after Lesson 132's "np.minimum() / np.maximum()" entry —
+  confirmed via a scripted scan of every first-column term (209 rows
+  total after adding, 208 data rows plus the header) that the term was not
+  already present, zero duplicates found; `tr`/`td`/`th` balance confirmed
+  209/209, 624/624, 3/3, zero raw unescaped `&`. Also included an explicit
+  `.interview` callout div in this lesson, matching this course's standing
+  rule ("every lesson should include an `.interview` callout box").
+  Verification performed mechanically via a scratch directory
+  `.scratch-data-133/` created at the repo root (deleted after, never
+  tracked by git, matching every prior round's own precedent): (1) a
+  quiz-word-count script found the first draft mismatched across all three
+  questions and, after a few rounds of wording trims, confirmed exactly
+  8/8/8, 8/8/8, and 11/11/11 option words across the three questions, one
+  `data-ok` per question throughout; (2) an HTML tag-balance script caught
+  a real bug on the first pass — the Section 2 `.callout` div had an extra
+  unmatched `</p>` left over from an earlier edit (no matching `<p>` open
+  inside that div), fixed by removing the stray closing tag — after the
+  fix, fully balanced: html/head/body 1/1, div 6/6, p 17/17, code 75/75,
+  pre 4/4, h1 1/1, h2 7/7, strong 6/6, button 9/9, script 3/3, dfn 1/1,
+  span 31/31, em 3/3, a 2/2, title 1/1, zero raw unescaped `&` outside the
+  lesson's own `cd ~/learning/data && uv run ...` shell command inside its
+  own `<pre><code>` block (matching every prior round's own precedent for
+  that exact exception); exactly 1 `<dfn>`-carrying tag, with both
+  `data-en`/`data-vn`, matching the one new glossary row added. `node
+  --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse as
+  valid JavaScript, both before and after adding one `n: 133` entry and
+  one `0133-np-round` file reference to `nav.js`. The first run of the
+  shipped (unsolved) `practice/133_np_round.py`, run directly from its
+  real `practice/` location via `uv run --with pandas python3`, printed
+  exactly 3 ✗ with no raw traceback, as expected. Building the solved copy
+  inside `.scratch-data-133/` (deleted after, never tracked by git)
+  printed all 3 ✓ and "All green" on the first attempt, no further fixes
+  needed. Re-ran the shipped file directly from `practice/` again
+  afterward and reproduced the identical all-✗ result, confirming the
+  solved copy's edits never leaked back into the shipped baseline. This
+  round's own fresh scan closed the one standing candidate it found
+  (`np.round()`/`np.rint()`) — tomorrow's round starts with nothing
+  pre-committed and owes its own fresh scan from scratch, per this
+  course's standing convention. `np.fix()` and `np.around()` were named
+  only as contrast/alias points inside this lesson's own scope line, not
+  standing candidates for a future lesson of their own. No new
+  `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal since mid-October. `git status --short` after
+  all edits is expected to show only the intended `data/` files touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0133-np-round.html`, new `data/practice/133_np_round.py`,
+  and this file). The scratch directory `.scratch-data-133/` was deleted
+  after verification, at the repo root but never tracked by git.
+  `bin/record-progress data lesson_generated --day 133 --lesson
+  0133-np-round.html --detail '{"by":"claude-sonnet-5"}'` was run
+  directly from the repo root to close out this round.

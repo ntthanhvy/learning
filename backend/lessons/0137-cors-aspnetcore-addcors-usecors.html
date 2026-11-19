@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 137 · CORS, now in C# too (AddCors, UseCors, AllowCredentials)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 137 · ~20 min</p>
+<h1>CORS, now in C# too (AddCors, UseCors, AllowCredentials)</h1>
+<p class="byline">Lesson 52 taught CORS as a browser mechanism — same-origin policy, the <code>Origin</code> header, preflight — with a hand-rolled Go handler setting headers manually. ASP.NET Core ships a first-party CORS middleware instead: policies declared in code, applied by name, with its own sharp edge around credentials. Same mechanism, a different (and more common) way of getting it wrong.</p>
+
+<h2>1 · A named policy, registered and applied</h2>
+<p>ASP.NET Core's CORS support is two calls: <code>AddCors</code> registers one or more policies with the DI container, and <code>UseCors</code> adds the middleware that enforces one of them. A <dfn data-en="an ASP.NET Core extension method (Microsoft.Extensions.DependencyInjection.CorsServiceCollectionExtensions) registering CORS services and policies with the DI container -- takes a lambda configuring an options object whose AddPolicy(name, builder) method defines each named policy via a CorsPolicyBuilder" data-vn="AddCors() (giữ nguyên) -- extension method của ASP.NET Core đăng ký CORS service và các policy vào DI container, nhận lambda cấu hình options có method AddPolicy(name, builder) để khai từng policy qua CorsPolicyBuilder">AddCors()</dfn> call takes a lambda, and inside it <code>options.AddPolicy</code> names a policy and configures it with a <dfn data-en="an ASP.NET Core class (Microsoft.AspNetCore.Cors.Infrastructure.CorsPolicyBuilder) with chainable methods -- WithOrigins, AllowAnyHeader, AllowAnyMethod, AllowCredentials, and others -- each adding one rule to the CORS policy being built" data-vn="CorsPolicyBuilder (giữ nguyên) -- class của ASP.NET Core có các method nối chuỗi được -- WithOrigins, AllowAnyHeader, AllowAnyMethod, AllowCredentials và vài cái khác -- mỗi method thêm 1 luật vào policy CORS đang xây">CorsPolicyBuilder</dfn>:</p>
+<pre><code><span class="kw">var</span> allowedOrigins = <span class="st">"AllowedOrigins"</span>;
+
+builder.Services.AddCors(options =&gt;
+{
+    options.AddPolicy(name: allowedOrigins, policy =&gt;
+    {
+        policy.WithOrigins(<span class="st">"https://app.example.com"</span>)
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+<span class="kw">var</span> app = builder.Build();
+
+app.UseRouting();
+app.UseCors(allowedOrigins);
+app.UseAuthorization();
+
+app.MapControllers();</code></pre>
+<p><code>WithOrigins</code> is Lesson 52's allowlist, just expressed as a method call instead of a manual string comparison. <code>AllowAnyHeader</code>/<code>AllowAnyMethod</code> widen which request headers and HTTP methods the preflight check accepts — Lesson 52's <code>Access-Control-Allow-Headers</code>/<code>Access-Control-Allow-Methods</code> response headers, generated for you instead of hand-written.</p>
+
+<h2>2 · Middleware order is not optional</h2>
+<p>Microsoft's own docs state the placement rule plainly: <code>UseCors</code> "must be placed after <code>UseRouting</code>, but before <code>UseAuthorization</code>." This is the middleware-pipeline lesson from Lesson 104 showing up again in a new place — CORS has to be decided before authorization runs, because a request the browser will discard anyway shouldn't still pay for an auth check, and because the preflight <code>OPTIONS</code> request usually carries no credentials at all and would fail an auth check that CORS middleware is meant to intercept first.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> a CORS error in DevTools ("No 'Access-Control-Allow-Origin' header is present") almost always gets "fixed" by reaching for the one call that makes the error disappear: <code>AllowAnyOrigin()</code>. That call doesn't fix a misconfigured policy — Lesson 52's own interview trap applies here unchanged: CORS protects browsers, not your API, so loosening it protects nothing on the server side and widens who a signed-in user's browser will silently act on behalf of.</div>
+
+<h2>3 · The one combination the CORS service refuses to serve</h2>
+<p>One combination is not merely bad practice — it is actively rejected at runtime. Microsoft's own docs state it as a warning: "Specifying <code>AllowAnyOrigin</code> and <code>AllowCredentials</code> is an insecure configuration and can result in cross-site request forgery. The CORS service returns an invalid CORS response when an app is configured with both methods."</p>
+<pre><code>policy.AllowAnyOrigin()
+      .AllowCredentials(); <span class="cm">// never both -- CORS middleware returns an invalid response</span></code></pre>
+<p>The reason traces straight back to the CORS spec itself: a wildcard <code>*</code> origin means "any site may read this," while <dfn data-en="an ASP.NET Core CorsPolicyBuilder method that sets the Access-Control-Allow-Credentials response header, telling the browser the server permits cookies and HTTP auth headers to be sent on a cross-origin request" data-vn="AllowCredentials() (giữ nguyên) -- method của CorsPolicyBuilder set header response Access-Control-Allow-Credentials, báo cho browser biết server cho phép gửi cookie và header auth HTTP trên request cross-origin">AllowCredentials()</dfn> means "send the signed-in user's cookies along." Combine both and literally any website could silently ride a logged-in user's session to your API. The CORS specification itself forbids the combination for exactly this reason, which is why the ASP.NET Core implementation refuses it outright rather than emitting a working-but-dangerous response.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers ASP.NET Core's first-party CORS middleware — <code>AddCors</code>/<code>UseCors</code>, <code>CorsPolicyBuilder</code>'s <code>WithOrigins</code>/<code>AllowAnyHeader</code>/<code>AllowAnyMethod</code>/<code>AllowCredentials</code>, the <code>UseRouting</code>-before-<code>UseCors</code>-before-<code>UseAuthorization</code> ordering rule, and the <code>AllowAnyOrigin</code>+<code>AllowCredentials</code> rejection — as the C# shape of Lesson 52's same-origin-policy and preflight concepts, which this lesson does not re-teach. It does not cover the <code>[EnableCors]</code>/<code>[DisableCors]</code> per-endpoint attributes, or wildcard-subdomain matching via <code>SetIsOriginAllowedToAllowWildcardSubdomains</code> — reasonable next steps, not today's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Microsoft's own docs state that UseCors must be placed after UseRouting but before UseAuthorization -- CORS gets to decide whether a cross-origin request is allowed at all before an authorization check ever runs against it.">
+    <p class="stem">Where exactly must UseCors sit in the ASP.NET Core middleware pipeline?</p>
+    <button class="opt" data-ok>right exactly after UseRouting is called, before UseAuthorization is ever called</button>
+    <button class="opt">anywhere at all, since call order never changes any actual behavior</button>
+    <button class="opt">strictly after every single MapControllers call has itself completed fully now</button>
+    <button class="opt">only directly before the one final app.Run() call ends the pipeline</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs warn that specifying AllowAnyOrigin together with AllowCredentials is an insecure configuration that can enable cross-site request forgery, and state plainly that the CORS service returns an invalid CORS response when an app configures both methods together.">
+    <p class="stem">What actually happens if a policy calls both AllowAnyOrigin and AllowCredentials?</p>
+    <button class="opt" data-ok>the CORS service itself returns an invalid response for that app</button>
+    <button class="opt">ASP.NET Core quietly just picks whichever one was configured in last</button>
+    <button class="opt">nothing really changes, since the two settings barely ever interact anyway</button>
+    <button class="opt">the whole app refuses to even start up once first launched</button>
+  </div>
+  <div class="q" data-why="AllowAnyOrigin widens the policy to accept a cross-origin request from literally any website -- it does not fix a misconfigured allowlist, and Lesson 52's own point still applies: CORS protects browsers reading a response, not the server handling the request.">
+    <p class="stem">Why is reaching for AllowAnyOrigin to silence a CORS DevTools error usually the wrong fix?</p>
+    <button class="opt" data-ok>it widens who may read the response, instead of fixing the allowlist</button>
+    <button class="opt">AllowAnyOrigin is actually only just a deprecated alias with no real effect</button>
+    <button class="opt">it has no runtime effect at all, since browsers always ignore it</button>
+    <button class="opt">it only changes which exact status code a rejected response actually gets</button>
+  </div>
+  <div class="q" data-why="WithOrigins, AllowAnyHeader, and AllowAnyMethod are all chainable methods on CorsPolicyBuilder, the object AddCors's AddPolicy lambda receives -- each call adds one rule (allowed origins, allowed request headers, allowed HTTP methods respectively) to the named policy being built."><p class="stem">What is CorsPolicyBuilder, the object a policy lambda inside AddCors actually configures?</p>
+    <button class="opt" data-ok>a class with chainable methods, each one adding a rule to it</button>
+    <button class="opt">a background service that polls allowed origins from a remote config now</button>
+    <button class="opt">a single static property holding just only one hardcoded origin string value</button>
+    <button class="opt">an attribute placed only directly right on individual controller action method calls</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/security/cors">Microsoft Learn: Enable Cross-Origin Requests (CORS) in ASP.NET Core</a> — the vendor doc for <code>AddCors</code>/<code>UseCors</code>, <code>CorsPolicyBuilder</code>'s methods, the <code>UseRouting</code>/<code>UseCors</code>/<code>UseAuthorization</code> ordering rule, and the exact <code>AllowAnyOrigin</code>+<code>AllowCredentials</code> warning this lesson quotes verbatim.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 52's same-origin-policy/preflight concepts and Lesson 104's middleware-pipeline-order lesson. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "[EnableCors] trên từng action khác AddCors/UseCors toàn app ở điểm nào, khi nào nên dùng cái nào?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

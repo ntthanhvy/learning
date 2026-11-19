@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 65 · A per-courier delivery-time histogram: the other half of Day 48's gap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 65 · ~20 min · 19 Nov 2026</p>
+<h1>A per-courier delivery-time histogram: the other half of Day 48's gap</h1>
+<p class="byline">Today's tangible win: a new mart, <code>mart_delivery_time_histogram_by_courier</code>, answers "which courier is actually slow, not just which restaurant or city" — the exact per-courier breakdown Day 48's own closing note named and Day 49 re-named on its way out, built by crossing Day 48's bucket ladder against <code>stg_couriers</code>' distinct <code>courier_id</code>s, the same <code>cross join</code>-then-left-join shape Days 49 and 63 already used twice.</p>
+
+<div class="callout"><strong>Before today — confirm Day 63 actually landed:</strong> today adds one new model and one new schema block; nothing from Days 1-64 is edited.
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=... ERROR=0</code> with whatever count Day 63 left you at, including <code>mart_delivery_time_histogram</code>, <code>mart_delivery_time_histogram_by_city</code> and <code>mart_delivery_time_histogram_by_restaurant</code>. If any is missing, finish Days 48-49 and 63 first — today reuses all three lessons' CTEs, just crossed against a third axis.</div>
+
+<h2>1 · The gap three lessons touched, from three different angles</h2>
+<p>Day 48 built the first histogram — one row per delivery-time bucket, platform-wide — and closed naming "a per-city or per-restaurant breakdown" as the direct next step. Day 49 built the per-city version and re-named the rest of the gap on its own way out: "it does not add a per-restaurant or per-courier breakdown... left for whenever that granularity is actually asked for." Day 63 picked up the restaurant half and closed with the one sentence left: "a per-courier breakdown of the same histogram pattern... left open since this project has not yet surfaced a real question that needs courier-level timing rather than restaurant-level." Today closes it, the third and last of the three breakdowns Day 48's original sentence named.</p>
+<p>The reason courier grain earns its own lesson rather than a copy-paste of Day 63 with a different table name: <code>stg_couriers</code> has no name column. <code>raw.restaurants</code> carries both <code>restaurant_id</code> and a human-readable <code>restaurant_name</code>, which Day 63 carried through the grid so a reader never had to join back to see whose numbers they were looking at. <code>raw.couriers</code> (Day 1's schema: <code>courier_id</code>, <code>vehicle</code>, <code>city</code>, <code>joined_at</code>) has no equivalent — a courier in this project is identified by ID alone. Today's mart has to decide what to show instead of a name, and the honest answer is: nothing invented. <code>vehicle</code> and <code>city</code> are both real columns worth carrying through, because "which courier" is rarely the whole question a dispatcher asks — "which courier, on which vehicle, in which city" is closer to how a real operator would actually read this table.</p>
+
+<h2>2 · Reusing the same shape, crossed against a third axis with no name to carry</h2>
+<p>The construction is identical to Days 49 and 63: build the full grid first (every axis value paired with every bucket, via <code>cross join</code>), then left join the real data onto it with a composite join condition (Day 63's term — every matching axis, not just one, has to hold at once or a row can silently attach to the wrong group). Today's grid uses <code>courier_id</code> as the axis — but where Day 63 carried <code>restaurant_name</code> through for a human-readable label, today carries <code>vehicle</code> and <code>city</code> instead, because those are the real columns this raw table actually has, not a label invented to make the output look friendlier than the source data supports.</p>
+<p>This is worth naming as a deliberate contrast, not an oversight: a mart should reflect the grain and the columns its source actually has. Faking a <code>courier_name</code> out of, say, <code>"Courier " || courier_id</code> would be a <dfn data-en="a column in a model's output that is computed to look like a normal data attribute (e.g. a name) but is actually just a cosmetic restatement of a key or constant already available elsewhere, carrying no information a reader doesn't already have -- distinct from a real derived column (like order_total), which combines genuine source values into a new, informative one" data-vn="giữ nguyên &quot;synthetic label&quot; — 1 cột trong output model được tính ra để NHÌN giống 1 thuộc tính dữ liệu bình thường (ví dụ tên), nhưng thực chất chỉ là viết lại cho đẹp của 1 khóa/hằng số đã có sẵn ở chỗ khác, không mang thêm thông tin gì mới cho người đọc -- khác hẳn 1 cột derived thật (như order_total), vốn kết hợp các giá trị gốc thật để ra 1 giá trị mới, có thông tin thật">synthetic label</dfn> — it would look nicer in a demo, but it carries zero information beyond the ID already sitting right next to it, dressed up to read like real data. <code>vehicle</code> and <code>city</code>, by contrast, are genuine attributes a dispatcher would ask about: "is it mostly the motorbike couriers running late, or is it one city's couriers specifically?"</p>
+
+<h2>3 · Build: couriers × buckets, then the real orders left-joined on top</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, create <code>models/marts/mart_delivery_time_histogram_by_courier.sql</code> in full:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_time_histogram_by_courier.sql</span>
+{{ config(materialized=<span class="str">'table'</span>) }}
+
+<span class="kw">with</span> order_durations <span class="kw">as</span> (
+    <span class="cm">-- orders joined to couriers (not restaurants, this time) and the</span>
+    <span class="cm">-- placed/delivered pair of stg_order_events rows per order</span>
+    <span class="kw">select</span>
+        o.order_id,
+        c.courier_id,
+        c.vehicle,
+        c.city,
+        extract(epoch <span class="kw">from</span> (d.delivered_at - p.placed_at)) / <span class="kw">60</span> <span class="kw">as</span> minutes_to_deliver
+    <span class="kw">from</span> {{ ref(<span class="str">'stg_orders'</span>) }} <span class="kw">as</span> o
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_couriers'</span>) }} <span class="kw">as</span> c <span class="kw">on</span> o.courier_id = c.courier_id
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> p
+        <span class="kw">on</span> o.order_id = p.order_id <span class="kw">and</span> p.status = <span class="str">'placed'</span>
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> d
+        <span class="kw">on</span> o.order_id = d.order_id <span class="kw">and</span> d.status = <span class="str">'delivered'</span>
+),
+
+<span class="cm">-- stg_couriers has no name column (unlike stg_restaurants) -- vehicle and</span>
+<span class="cm">-- city are the real attributes carried through instead, not an invented label</span>
+couriers <span class="kw">as</span> (
+    <span class="kw">select distinct</span> courier_id, vehicle, city <span class="kw">from</span> {{ ref(<span class="str">'stg_couriers'</span>) }}
+),
+
+<span class="cm">-- Day 48's exact bucket_series/bucket_grid CTEs, reused verbatim</span>
+bucket_series <span class="kw">as</span> (
+    {{ dbt_utils.generate_series(var(<span class="str">'histogram_bucket_count'</span>)) }}
+),
+
+bucket_grid <span class="kw">as</span> (
+    <span class="kw">select</span>
+        (generated_number - <span class="kw">1</span>) * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_start_minutes,
+        generated_number * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_end_minutes
+    <span class="kw">from</span> bucket_series
+),
+
+<span class="cm">-- new today: the two grids crossed into one, N couriers x 20 buckets</span>
+<span class="cm">-- rows, before any real order is involved</span>
+courier_bucket_grid <span class="kw">as</span> (
+    <span class="kw">select</span>
+        couriers.courier_id,
+        couriers.vehicle,
+        couriers.city,
+        bucket_grid.bucket_start_minutes,
+        bucket_grid.bucket_end_minutes
+    <span class="kw">from</span> couriers
+    <span class="kw">cross join</span> bucket_grid
+),
+
+bucketed_orders <span class="kw">as</span> (
+    <span class="kw">select</span>
+        courier_bucket_grid.courier_id,
+        courier_bucket_grid.vehicle,
+        courier_bucket_grid.city,
+        courier_bucket_grid.bucket_start_minutes,
+        courier_bucket_grid.bucket_end_minutes,
+        count(order_durations.order_id) <span class="kw">as</span> order_count
+    <span class="kw">from</span> courier_bucket_grid
+    <span class="kw">left join</span> order_durations
+        <span class="kw">on</span> order_durations.courier_id = courier_bucket_grid.courier_id
+        <span class="kw">and</span> order_durations.minutes_to_deliver &gt;= courier_bucket_grid.bucket_start_minutes
+        <span class="kw">and</span> order_durations.minutes_to_deliver &lt; courier_bucket_grid.bucket_end_minutes
+    <span class="kw">group by</span> courier_bucket_grid.courier_id, courier_bucket_grid.vehicle, courier_bucket_grid.city,
+             courier_bucket_grid.bucket_start_minutes, courier_bucket_grid.bucket_end_minutes
+)
+
+<span class="kw">select</span>
+    {{ dbt_utils.generate_surrogate_key([<span class="str">'courier_id'</span>, <span class="str">'bucket_start_minutes'</span>]) }} <span class="kw">as</span> bucket_key,
+    courier_id,
+    vehicle,
+    city,
+    bucket_start_minutes,
+    bucket_end_minutes,
+    order_count
+<span class="kw">from</span> bucketed_orders
+<span class="kw">order by</span> courier_id, bucket_start_minutes</code></pre>
+<p>The <code>left join</code>'s <code>on</code> clause carries the same three conditions Day 63's did — <code>courier_id</code> plus both bucket bounds — for the identical reason: dropping <code>courier_id</code> would silently let any courier's real orders attach to any other courier's bucket rows purely on timing. The one real difference from Day 63 is upstream of the join entirely: the <code>couriers</code> CTE selects <code>vehicle</code> and <code>city</code> because those are what <code>stg_couriers</code> actually has, not because they are the direct equivalent of <code>restaurant_name</code> — they aren't a label at all, just two more real attributes riding along for free once the grid-building join already has to touch that row.</p>
+<p>Add a schema block testing the grid's shape:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- new model block, alongside the existing ones</span>
+  - name: mart_delivery_time_histogram_by_courier
+    description: <span class="str">"One row per (courier_id, delivery-time bucket) pair, 5-minute buckets, 0 to 100 minutes. Every courier-bucket pair appears even with zero orders in it, via a couriers cross join bucket_grid base, left-joined onto real order durations. vehicle and city are carried through as real stg_couriers attributes -- stg_couriers has no name column, unlike stg_restaurants."</span>
+    columns:
+      - name: bucket_key
+        data_tests:
+          - unique
+          - not_null
+      - name: courier_id
+        data_tests:
+          - not_null
+      - name: order_count
+        data_tests:
+          - not_null</code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram_by_courier</code></pre>
+<p>Expected — one new table, <code>(distinct courier count) × 20</code> rows, three tests, all passing. With this project's seed data carrying 15 couriers (Day 1's <code>raw.couriers</code> row count), that's 300 rows:</p>
+<pre><code>1 of 4 OK created sql table model dbt_dev.mart_delivery_time_histogram_by_courier  [SELECT 300 in 0.06s]
+2 of 4 PASS not_null_mart_delivery_time_histogram_by_courier_courier_id ....... [PASS in 0.02s]
+3 of 4 PASS not_null_mart_delivery_time_histogram_by_courier_order_count ...... [PASS in 0.02s]
+4 of 4 PASS unique_mart_delivery_time_histogram_by_courier_bucket_key ......... [PASS in 0.02s]
+
+Done. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code></pre>
+
+<h2>4 · Four histograms, four grains, one pattern — and why courier timing answers a different question than restaurant timing</h2>
+<p>The project now carries four histogram marts side by side: platform-wide (Day 48), per-city (Day 49), per-restaurant (Day 63), per-courier (today). Each earns its place because each answers a question the others structurally cannot — the same judgment Days 48, 49 and 63 each already made about <code>mart_delivery_sla</code>. A restaurant-grain slow bucket points at something on the restaurant's side of the handoff: kitchen prep time, order-acceptance delay, how far the restaurant sits from its usual delivery zone. A courier-grain slow bucket points somewhere else entirely: a specific courier running behind across many different restaurants and cities, which a restaurant-grain table would never surface, because that courier's bad numbers get spread across however many different restaurants they deliver for.</p>
+<p>That distinction is the practical reason this mart is worth building even though "a courier is slow" and "a restaurant is slow" can look identical from the <code>mart_delivery_sla</code> city rollup alone. Querying today's mart grouped by <code>courier_id</code> and filtered to the slow buckets answers "is this a kitchen problem or a delivery problem" in a way no city- or restaurant-grain table can, because it's the only one of the four that holds the restaurant side fixed and lets the courier side vary.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram_by_courier
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select courier_id, vehicle, city, count(*) as buckets, count(*) filter (where order_count = 0) as empty_buckets
+   from dbt_dev.mart_delivery_time_histogram_by_courier
+   group by courier_id, vehicle, city order by courier_id;"</code></pre>
+<p>Expected: the build reports <code>PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code> (Section 3's output), and the query returns exactly <code>20</code> under <code>buckets</code> for every single courier, regardless of that courier's real order volume — the grid's per-courier size is fixed by <code>histogram_bucket_count</code>, never by how many deliveries that courier has actually made. A courier who joined recently and has only one seeded order still shows <code>buckets = 20</code>, not a short or missing table, with <code>empty_buckets</code> near 19 — the same "a passing build isn't proof, a real zero-row query is" check Days 36, 48, 49 and 63 have each ended on.</p>
+<div class="callout"><strong>Checked as a static parse this round, not a live Postgres (same honest-disclosure convention Days 36, 48, 49, 63 and the whole dbt thread have each used):</strong> this sandbox has no learner Postgres running, so the row counts above are illustrative, following this project's own established seed shape ("15 couriers" from Day 1's own row count), not a fresh query. What <em>was</em> confirmed live this round: a full scratch dbt project — sources, staging models mirroring Days 2/6, all four histogram marts (Days 48, 49, 63 and today), and a fresh <code>dbt deps</code> pulling <code>dbt_utils</code> 1.4.1 — parsed cleanly via <code>uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .</code>, confirmed by grepping the full output for <code>Error</code> and finding none (the exit code through a pipe is unreliable, so the grep is the actual check, not the process exit status). <code>dbt parse</code> proves the Jinja and YAML compile to well-formed SQL, not that the join logic returns the right numbers against real data — the same parse-vs-compile-vs-run limit Days 13, 14, 36, 48, 49 and 63 have each already named. Confirm the real build output, the actual distinct-courier count, and the per-courier <code>buckets = 20</code> result in your own environment before quoting any of it in an interview.</div>
+
+<div class="interview">
+<p><strong>Q: "Your restaurant-level histogram looks fine for every restaurant, but ops is still getting complaints about late deliveries. What's missing, and what would you build?"</strong> A strong answer, out loud: <em>"If every restaurant looks fine, the slowness probably isn't on the kitchen side of the handoff — it's worth checking the courier side instead, which a restaurant-grain table can't see at all, because a courier's own bad pattern gets spread across however many different restaurants they deliver for and diluted into each restaurant's own numbers. I'd build the same histogram construction one more time, crossed against distinct couriers instead of restaurants: generate the bucket ladder, cross join it against every courier so even a courier with zero slow orders still has a row showing zero, then left-join real per-courier, per-bucket counts onto that grid matching on courier id and bucket range. One wrinkle worth naming — couriers in this schema don't have a name column the way restaurants do, so I'd carry through the real attributes that do exist, vehicle and city, rather than inventing a label that looks like data but isn't. Filtering that mart to the slow buckets would show directly whether it's one courier running behind everywhere, or a vehicle type, or a city-specific pattern — three different root causes a restaurant-grain or city-grain table genuinely cannot tell apart."</em> The signal: naming why restaurant-grain specifically can't see a courier-side problem, not just repeating "build another histogram," and flagging the missing-name wrinkle as a real data-honesty choice rather than skipping past it.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers crossing <code>stg_couriers</code>' distinct <code>courier_id</code>s (carrying <code>vehicle</code> and <code>city</code> through, since there's no name column to carry instead) against Day 48's bucket ladder via <code>cross join</code>, with a three-condition left join, to build a per-courier delivery-time histogram. It does not touch Day 48's global histogram, Day 49's per-city one, or Day 63's per-restaurant one — all four marts stay in the project side by side, answering different questions at different grains. It does not add any alerting or thresholding on top of today's grid (a courier crossing some "too many slow buckets" line) — Day 46's alerting pattern would transfer directly if that's ever asked for, not re-derived here. With today's lesson, every breakdown Day 48's original closing sentence named (city, restaurant, courier) is now built.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A restaurant-grain table can only ever show numbers for orders placed at that one restaurant, so a courier who runs behind across many different restaurants has their own pattern spread thin across every one of those restaurants' separate rows -- no single restaurant's numbers look bad enough on their own to stand out, even though that courier's own behavior is consistently slow.">
+    <p class="stem">Why can a courier running consistently late stay hidden in a restaurant-grain histogram, even if every restaurant's own numbers get checked?</p>
+    <button class="opt" data-ok>that courier's pattern spreads thin across many separate restaurants</button>
+    <button class="opt">Postgres always silently rounds every single courier timestamp up</button>
+    <button class="opt">dbt_utils.generate_series always quietly skips past the fifteen real couriers</button>
+  </div>
+  <div class="q" data-why="raw.couriers (and so stg_couriers) only has courier_id, vehicle, city and joined_at -- there is no name column at all, unlike raw.restaurants which carries both restaurant_id and restaurant_name. Inventing a label such as concatenating 'Courier' with the id would look like real data while adding no information beyond the id already sitting right next to it.">
+    <p class="stem">Why does today's mart carry <code>vehicle</code> and <code>city</code> through instead of a <code>courier_name</code>, where Day 63's restaurant version carried a real name?</p>
+    <button class="opt" data-ok>stg_couriers has no name column at all, unlike stg_restaurants</button>
+    <button class="opt">Postgres always strictly forbids any name column on couriers</button>
+    <button class="opt">dbt_utils.generate_surrogate_key always flatly rejects one lone text column here</button>
+  </div>
+  <div class="q" data-why="Dropping courier_id from the on clause would leave only the two bucket-range bounds as match conditions, which say nothing about which courier an order belongs to. Any courier's real orders could then attach to any other courier's bucket-grid row purely because the timing happened to fall in the same range, silently blending every courier's numbers together instead of keeping each one separate -- the identical failure mode Day 63 named for dropping restaurant_id.">
+    <p class="stem">What would silently go wrong if today's left join's <code>on</code> clause dropped the <code>courier_id</code> condition, keeping only the two bucket-range bounds?</p>
+    <button class="opt" data-ok>any courier's real orders could attach onto any other courier's row</button>
+    <button class="opt">the whole dbt build would simply refuse outright to run here</button>
+    <button class="opt">bucket_key would simply stop getting generated for every single courier row</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://github.com/dbt-labs/dbt-utils">dbt_utils</a> README remains the right citation for <code>generate_series</code> and <code>generate_surrogate_key</code>'s exact signatures, both reused verbatim from Day 48 — nothing about either macro changes when crossed against a courier axis instead of a city or restaurant one. <code>cross join</code> and a multi-condition <code>on</code> clause are plain Postgres SQL, already covered by Day 49's citation of standard SQL join semantics; no new source is needed for either today.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 65.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block logged every round since Day 35 (now thirty-one rounds, 35-65) was not attempted again this round, since today's build needed no Airflow at all — still worth a human granting it once. With today's pick, every breakdown Day 48's own closing sentence originally named (city, restaurant, courier) is now built, so the histogram thread has no more named-but-unbuilt gap on file. dbt has now had two of the last three rounds' fresh-gap attention (63, 65) against Airflow's one (64); a future round's gap-scan should weigh Kafka next, or whichever named TODO or learner signal turns up first, the same even-rotation reasoning Days 62 and 63 each closed on.<br><br>
+💬 Anything unclear — why courier grain catches a different failure mode than restaurant grain, or why today's mart carries <code>vehicle</code>/<code>city</code> instead of a name? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

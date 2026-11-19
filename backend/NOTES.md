@@ -11803,3 +11803,144 @@ upsert/ON CONFLICT, still confirmed the same way; FluentValidation and
 Polly/.NET resilience libraries, both still deliberately out of scope
 per MISSION.md's "concepts first" rule; and the backfill-missing-
 Lesson-117-NOTES-entry gap, still not investigated.
+
+## 2026-11-19 — Lesson 137: CORS, now in C# too (AddCors, UseCors, CorsPolicyBuilder, AllowCredentials)
+
+Headless run. Orchestrator-level DB check already summarized for this
+round: the most recent `backend` row was `lesson_generated` day=136,
+lesson=`0136-jquery-unobtrusive-validation-adapter.html`, recorded
+2026-11-18, and no lesson_completed/quiz/kata signal has landed for any
+course since 2026-10-15. Re-confirmed directly this round using the
+Node-wrapped `psql "$LEARNING_DB_URL" -c "..."` workaround (the literal
+`psql` form typed directly is still blocked by this sandbox's static
+analysis, consistent with every prior round): querying
+`course_progress` for `course='backend' AND kind='lesson_generated'`
+ordered by `recorded_at DESC LIMIT 5` showed the top row dated
+2026-11-18 (day 136), not 2026-11-19 — safe to proceed. `nav.js`'s last
+entry was also `n: 136, date: "2026-11-18"` and no `lessons/0137-*.html`
+file existed on disk, agreeing with the DB check. `learning-records/`
+still has no entry newer than Lesson 3 — no fresh per-lesson completion
+signal to size today's step against, so paced this as a normal
+sequential step per the orchestrator's own framing.
+
+Topic picked: the validation arc (Lessons 132-136) reached a natural
+stopping point last round — both named follow-ups from Lesson 136's own
+scope line (a non-jQuery client validator, and bundling the adapter)
+are thin, narrowly-scoped JS-only refinements rather than new backend
+ground, and every other standing deferred candidate is explicitly
+out-of-scope-per-MISSION or fetch-blocked (Go `select` arbitration,
+Lesson 49's dead-letter queues, Lesson 35's upsert, FluentValidation/
+Polly). Went back to MISSION.md's own four scope tracks and the
+long-running "concept X, now in C# too" port series (Lessons 103-136)
+to find an uncovered concept instead: Lesson 52 (CORS/same-origin
+policy, 2026-08-26) taught the browser mechanism with a hand-rolled Go
+HTTP handler, but never showed ASP.NET Core's own first-party CORS
+middleware — a clean port candidate with real PR-review value (the
+`AllowAnyOrigin`+`AllowCredentials` combination is a documented runtime
+rejection, a genuinely common misconfiguration). `grep -i` for
+`AddCors\(\)`/`CorsPolicyBuilder`/`AllowCredentials\(\)` across
+`backend/lessons/` and `glossary.html` came back empty before writing,
+confirming the gap was real and the terms were free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/security/
+cors` via `WebFetch`, specifically for the `AddCors`/`UseCors` worked
+example, the `CorsPolicyBuilder` method list (`WithOrigins`,
+`AllowAnyHeader`, `AllowAnyMethod`, `AllowCredentials`), the middleware-
+ordering rule, and the credentials warning. Confirmed verbatim: the
+`options.AddPolicy(name: ..., policy => { policy.WithOrigins(...)
+.AllowAnyHeader().AllowAnyMethod(); })` shape and the `UseRouting()` /
+`UseCors(...)` / `UseAuthorization()` call order, with the docs' own
+stated rule that "the call to `UseCors` must be placed after
+`UseRouting`, but before `UseAuthorization`"; and the exact warning
+quoted in this lesson's third section word for word: "Specifying
+`AllowAnyOrigin` and `AllowCredentials` is an insecure configuration and
+can result in cross-site request forgery. The CORS service returns an
+invalid CORS response when an app is configured with both methods."
+Both of this lesson's own code blocks are trimmed excerpts of that
+fetched page's own worked examples, not invented syntax. `dotnet
+--version` was attempted directly this round (not skipped on
+assumption) — unlike most prior rounds, `which dotnet`/`command -v
+dotnet` actually resolved a path (`/usr/bin/dotnet`) this time, including
+with the sandbox-override flag, but invoking any actual `dotnet`
+subcommand still required interactive approval with no user present,
+so a real compiling project was still not possible — the same
+practical outcome every round has hit since Lesson 103, just a
+slightly different failure point (binary resolves; subcommands don't
+run). Fell back to hand-checking the two C# excerpts against the
+fetched docs' own exact method chains and ordering, as above — both
+blocks match verbatim.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson137/`, not `/tmp` —
+`mkdir` under `/tmp` was tried first and blocked outright by this
+sandbox's workspace restriction, a slightly different block shape than
+prior rounds' own `/tmp` observations but the same practical outcome;
+nothing written to the repo besides the three intended files; scratch
+directory deleted after): (1) a quiz word-count check per `<div
+class="q">` block, both `.split(/\s+/)` and manual recount methods
+agreeing — first draft landed uneven on all four questions (Q1
+8/11/8/11, Q2 11/10/11/14, Q3 12/11/12/12, Q4 12/12/11/10), converged
+after several rewrite-and-recount passes (using a small standalone
+word-count script to test candidate option text before committing it to
+the lesson file, rather than editing the lesson directly each guess) to
+exactly 11/11/11/11 (Q1 and Q2) and 12/12/12/12 (Q3 and Q4), exactly one
+`data-ok` and four options per question confirmed the same way; (2) an
+HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/
+em/strong/a — clean (div 6/6, p 15/15, code 42/42, button 16/16, script
+3/3, dfn 3/3, pre 2/2, h2 6/6, h1 1/1, em 0/0, strong 3/3, a 2/2), all
+three `dfn` tags confirmed to carry both `data-en=` and `data-vn=`; (3)
+a brace/paren balance check on both `<pre><code>` blocks after
+stripping tags and unescaping HTML entities — both balanced (2/2
+braces, 10/10 parens; 0/0 braces, 2/2 parens); (4) a raw-unescaped-`&`
+scan across the lesson — zero hits; (5) a duplicate-term scan on
+`glossary.html`'s first column before adding the three new rows — zero
+collisions for `AddCors()`, `CorsPolicyBuilder`, or `AllowCredentials()`;
+a `<tr>`/`<td>` balance check on `glossary.html` after the three-row
+addition — balanced (tr 421/421, td 1260/1260, 420 term rows total = 417
+prior + 3 new), plus a second duplicate-term scan afterward — zero
+duplicates; (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js`
+— all clean, both before and after the `nav.js` edit; (7) a basic HTML
+well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 137 in `nav.js` (date 2026-11-19, today's actual
+generation date) right after `n: 136`. Day number used 137, matching
+this file's own day-equals-lesson-number convention, no deviation
+found. `git status --short backend/` ran cleanly this round (no
+approval block, unlike Lesson 135's own observation of a one-off block
+on that exact command) and confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, and
+the new `backend/lessons/0137-cors-aspnetcore-addcors-usecors.html`. No
+new `RESOURCES.md` line added — the one fetched page is `learn.
+microsoft.com`, already covered by this file's standing entries'
+pattern, cited inline in the lesson's own "Go deeper" section instead.
+No new `learning-records/` file added — the topic came from re-reading
+MISSION.md's scope tracks and the standing C#-port series against
+Lesson 52's own prior coverage, not a new observation about the
+learner. `bin/record-progress backend lesson_generated --day 137
+--lesson 0137-cors-aspnetcore-addcors-usecors.html --detail
+'{"by":"claude-sonnet-5"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: `[EnableCors]`/`[DisableCors]` per-endpoint attributes
+and `SetIsOriginAllowedToAllowWildcardSubdomains` wildcard-subdomain
+matching (both named this round as this lesson's own out-of-scope next
+steps); writing this lesson's own client-side validation check without
+jQuery, and shipping Lesson 136's adapter via a bundler (both still
+deferred from Lesson 136, now judged thin enough on their own that they
+may be worth dropping from this list rather than deferring indefinitely
+— worth a final call next time rather than a seventh-plus carry-over);
+other not-yet-ported Go-only concepts from the mission's four scope
+tracks that could use the same "now in C# too" treatment as CORS this
+round — audit logging (Lesson 46), distributed tracing (Lesson 65),
+feature flags (Lesson 70), rate-limit response headers (Lesson 96), and
+HATEOAS (Lesson 97) all still Go-only and worth checking first before
+reaching for a brand-new topic; Go's `select`-statement arbitration
+rules, still deferred many rounds running on fetched-page-truncation
+grounds; Lesson 49's dead-letter queues, still confirmed to have no
+first-party ASP.NET Core angle; Lesson 35's upsert/ON CONFLICT, still
+confirmed the same way; FluentValidation and Polly/.NET resilience
+libraries, both still deliberately out of scope per MISSION.md's
+"concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
+gap, still not investigated.

@@ -488,6 +488,12 @@
   <tr><td>quality gate</td><td>giữ nguyên "quality gate" — task đặt NGAY TRƯỚC 1 bước phụ thuộc vào nó, để bước đó không được chạy trừ khi chính gate task thành công (dùng trigger_rule all_success mặc định) — khác hẳn 1 task đặt SAU để quan sát/báo cáo, loại đó không chặn được gì, chỉ mô tả lại sau khi việc đã xảy ra rồi</td><td>A task placed upstream of a dependent step specifically so that step cannot start unless the gate task itself succeeds, using the default <code>all_success</code> trigger rule to turn a check into a block — distinct from a task placed downstream of a step to observe or report on what already happened, which cannot prevent anything, only describe it after the fact. Confirmed live this round: wiring <code>check_kafka_lag</code> between <code>load_raw</code> and <code>dbt_build</code> made <code>dbt_build</code>'s one direct upstream task <code>check_kafka_lag</code> rather than <code>load_raw</code>, with the default <code>all_success</code> rule unchanged.</td></tr>
 </table>
 
+<h2 id="day65">Day 65 — A per-courier delivery-time histogram: the other half of Day 48's gap</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>synthetic label</td><td>giữ nguyên "synthetic label" — 1 cột trong output model được tính ra để NHÌN giống 1 thuộc tính dữ liệu bình thường (ví dụ tên), nhưng thực chất chỉ là viết lại cho đẹp của 1 khóa/hằng số đã có sẵn ở chỗ khác, không mang thêm thông tin gì mới cho người đọc -- khác hẳn 1 cột derived thật (như order_total), vốn kết hợp các giá trị gốc thật để ra 1 giá trị mới, có thông tin thật</td><td>A column in a model's output that is computed to look like a normal data attribute (e.g. a name) but is actually just a cosmetic restatement of a key or constant already available elsewhere, carrying no information a reader doesn't already have — distinct from a real derived column (like <code>order_total</code>), which combines genuine source values into a new, informative one. Confirmed by contrast this round: <code>stg_couriers</code> has no name column the way <code>stg_restaurants</code> does, so <code>"Courier " || courier_id</code> would be a synthetic label (zero new information beyond the ID), where carrying through the real <code>vehicle</code> and <code>city</code> columns instead is not.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

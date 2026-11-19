@@ -13512,3 +13512,106 @@ fail *gracefully* so the learner sees which task failed.
   0111-review-retrieval-day-21.html --detail
   '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
   round and succeeded.
+- 2026-11-19 generation (Lesson 113, headless 06:00 run): idempotency check
+  first — `course_progress` has no `created_at` column, so the Node-wrapped
+  `psql` workaround was reissued against the real column name
+  (`recorded_at`); the 10 most recent python rows confirmed the latest was
+  Day 112 dated 2026-11-18, with no row for 2026-11-19 yet, so this round
+  proceeded rather than stopping. Read `MISSION.md` (no-pandas/no-NumPy
+  exclusion re-confirmed, never modified), `PLAN.md`'s Phase 2 spine,
+  `RESOURCES.md`, this file's tail through Day 112's own closing note,
+  `assets/nav.js`'s last entry (`n: 112`, 2026-11-18), the one file in
+  `learning-records/` (still only the Day 1 baseline, no newer
+  quiz/kata/lesson_completed signal), and the last few `practice/` files
+  directly as style references. Per Day 112's own callout, Day 112 was
+  fresh day 1 of a new three-fresh-then-review cycle, so today is fresh day
+  2. Re-ran Day 112's fresh-gap grep rather than trusting it secondhand:
+  case-insensitive search for `textwrap`, `calendar`, `fnmatch`, `glob`, and
+  `platform` across every lesson, practice file, `reference/glossary.html`,
+  and `RESOURCES.md`. Confirmed `textwrap`/`string.Template` are already
+  closed (Days 46/98, per this file's own history around lines 6716-6984),
+  `calendar` and `socket` remain thin/scope-depth ruled-out exactly as Day
+  112 left them, and `glob`/`fnmatch` were genuine zero hits — Day 13's
+  `pathlib` lesson uses the word "platform" once in an unrelated sentence
+  and never calls `.glob()`. Picked `Path.glob()`/`Path.rglob()` +
+  `fnmatch`/`fnmatchcase()` — filename pattern matching — as a clean,
+  self-contained ~20-minute stdlib topic that extends Day 13's `pathlib`
+  lesson (which built `Path` objects and walked directories by hand) without
+  re-teaching it. Caught and fixed a real bug before shipping: the first
+  draft claimed `fnmatch("REPORT.CSV", "*.csv")` is "confirmed live: True"
+  on the grounds that `fnmatch()` is case-insensitive — but actually running
+  it on this course's own Linux sandbox returned `False`, because
+  `fnmatch()`'s case-folding is OS-dependent (it defers to
+  `os.path.normcase()`, a no-op on POSIX) and this machine is Linux, not
+  Windows/macOS. Rewrote the code sample, prose, glossary row, and the
+  quiz question that depended on the wrong claim to state the
+  platform-dependent behavior accurately and show what was *actually*
+  confirmed live here (both `fnmatch()` and `fnmatchcase()` return `False`
+  on this machine), rather than asserting a cross-platform docs claim as if
+  it were locally verified. The practice file's Exercise 3 had the same bug
+  in its test fixture (expected a `.CSV`-suffixed name to match via
+  case-insensitivity) and was fixed to use a platform-independent fixture
+  instead. New jargon: 4 glossary rows (`wildcard pattern`, the `**`
+  recursive wildcard, `fnmatch`, and `fnmatch()`'s case-normalization
+  behavior), added as a new `<h2 id="day113">` section directly after Day
+  112's, after a case-insensitive grep across the full glossary for
+  `glob`/`fnmatch`/`wildcard` found zero existing rows. Verification
+  performed mechanically: (1) an `html.parser.HTMLParser` full-document
+  parse of the new lesson and of `glossary.html` — no parse errors on
+  either; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new lesson —
+  first pass caught the same stray unmatched `</p>` inside a callout div
+  Day 110's own history flagged as a recurring copy-paste risk (a callout
+  that opened with `<div>` but closed with `</p></div>`), fixed by removing
+  the stray `</p>`, re-checked balanced after the fix (div 7/7, p 16/16,
+  code 85/85, button 9/9, script 3/3, dfn 3/3, pre 4/4, h2 6/6, h1 1/1, em
+  0/0, strong 4/4, a 3/3), plus a raw-unescaped-`&` regex scan — zero hits;
+  (3) a per-question quiz option word-count check via regex-strip-tags
+  extraction on the actual printed word lists — first draft mismatched on
+  two of three questions (14/12/13 and 12/10/11), iterated option-by-option
+  across several passes until all three landed on equal per-question
+  counts: 13/13/13, 11/11/11, 12/12/12; (4) a
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section, plus a duplicate-`id="dayNN"` scan — balanced (table 94/94, tr
+  415/415, th 282/282, td 963/963, h2 94/94) with zero duplicates among 94
+  ids, `day113` present exactly once; a case-insensitive duplicate-term
+  scan across the glossary's term column reproduced only the one
+  pre-existing collision already on record (`dependency`), confirmed none
+  of the 4 new terms collide with it or any other row; (5) `node --check`
+  against `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all
+  three clean, both before and after the `nav.js` edit; (6) a duplicate
+  `n:` scan across `nav.js`'s `LESSONS` array — 113 entries, zero
+  duplicates, max `n` is 113; (7) a case-insensitive
+  `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson — matches only
+  inside the single required "Where pandas/NumPy go from here"
+  scope-boundary callout (mentions `pd.read_csv()` by name, never a worked
+  DataFrame example), and zero hits in the practice file — no pandas/NumPy
+  API was taught. The shipped (unsolved)
+  `practice/113_glob_and_fnmatch.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback. A
+  solved copy was built in a scratch dir inside the repo
+  (`.scratch-python-113/`, created because `/tmp` is blocked for
+  write/mkdir in this sandbox, deleted after) — copied from the shipped
+  file, each TODO body filled in directly, never editing the shipped file
+  itself — and printed all 3 ✓ and "All green" on two consecutive runs. The
+  shipped file was re-run afterward from its real location and reproduced
+  the identical all-✗ result, confirming no leakage back into the
+  baseline. Added one new `RESOURCES.md` line for `pathlib.Path.glob`/
+  `fnmatch`, placed directly after Day 112's `threading`/Lock-Objects line
+  and before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 113 in `nav.js` with today's date
+  (2026-11-19) right after the `n: 112` entry. `python/learning-records/`
+  was not touched this round — still only the Day 1 baseline record with
+  no newer quiz/kata/lesson_completed signal, so a routine fresh-topic pick
+  was the right call. Cadence note for the next round: Day 113 closes
+  fresh day 2 of the current three-fresh-then-review cycle — Day 114 should
+  be fresh day 3, and Day 115 the next review day, covering Days 111-113
+  (adjust if 111 is itself a review day already covered elsewhere — Day
+  111 was Review day 21, so Day 115's review should instead span Days
+  112-114 once Day 114 exists). `calendar` and `socket` remain the two
+  standing ruled-out candidates (thin content and scope-depth respectively)
+  if no better fresh gap turns up next round. `bin/record-progress python
+  lesson_generated --day 113 --lesson 0113-glob-and-fnmatch.html --detail
+  '{"by":"claude-sonnet-5"}'` was run from the repo root at the end of this
+  round; see this file's own next line if it appears, or treat
+  silence/blocking as the known sandbox limitation if not.

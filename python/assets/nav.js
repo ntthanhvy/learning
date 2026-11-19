@@ -232,6 +232,8 @@
       file: "lessons/0111-review-retrieval-day-21.html" },
     { n: 112, date: "2026-11-18", title: "threading.Lock: protecting shared state by hand",
       file: "lessons/0112-threading-lock.html" },
+    { n: 113, date: "2026-11-19", title: "glob & fnmatch: filename pattern matching",
+      file: "lessons/0113-glob-and-fnmatch.html" },
   ];
 
   const REFS = [

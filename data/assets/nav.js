@@ -272,6 +272,8 @@
       file: "lessons/0131-np-log-and-exp.html" },
     { n: 132, date: "2026-11-18", title: "np.minimum() and np.maximum(): elementwise pairwise comparison, and clip()'s hidden engine",
       file: "lessons/0132-np-minimum-and-maximum.html" },
+    { n: 133, date: "2026-11-19", title: "np.round(): rounding to the nearest even digit, not the nearest half",
+      file: "lessons/0133-np-round.html" },
   ];
 
   const REFS = [

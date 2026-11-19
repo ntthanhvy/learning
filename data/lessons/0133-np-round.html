@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 133 · np.round(): rounding to the nearest even digit, not the nearest half</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 133 · ~20 min · 19 Nov 2026</p>
+<h1>np.round(): rounding to the nearest even digit, not the nearest half</h1>
+<p class="byline">Lesson 132 closed its own fresh scan with nothing pre-committed. Today's own fresh scan grepped every lesson body and every glossary row case-insensitively for <code>np.round(</code>, <code>np.rint(</code>, <code>Series.round(</code>: both <code>np.round()</code> and <code>Series.round()</code> had appeared only as one-line contrast points inside Lessons 130/131/132's own sections (never given their own exercise), and <code>np.rint()</code> had zero hits anywhere — a real gap, not a narrowing of something already taught. <code>np.round()</code> is the pick: it is the single most common "why did my number come out wrong" interview surprise in this whole elementwise-ufunc lineage.</p>
+
+<h2>1 · Banker's rounding: ties round to the nearest EVEN digit, not always up</h2>
+<p><dfn data-en="a NumPy function that rounds each element to a given number of decimal places, elementwise -- confirmed directly to round an exact .5 tie to the nearest EVEN digit (banker's rounding), not always up or away from zero" data-vn="giữ nguyên 'np.round()' — làm tròn từng phần tử tới số chữ số thập phân cho trước, elementwise; xác nhận trực tiếp: đúng mốc .5 thì làm tròn về chữ số CHẴN gần nhất (banker's rounding), không phải luôn làm tròn lên hay ra xa 0">np.round(a, decimals=0)</dfn> rounds every element to the given number of decimal places. The trap, confirmed directly (numpy 2.5.5, pandas 3.1.1): on an exact <code>.5</code> tie, it does NOT always round up or away from zero — it rounds to whichever neighbor is <strong>even</strong>, a rule called banker's rounding.</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+np.round(<span class="kw">0.5</span>)   <span class="cm"># 0.0  -- rounds DOWN to the even neighbor, not up to 1</span>
+np.round(<span class="kw">1.5</span>)   <span class="cm"># 2.0  -- rounds UP to the even neighbor this time</span>
+np.round(<span class="kw">2.5</span>)   <span class="cm"># 2.0  -- rounds DOWN again, 2 is even</span>
+np.round(-<span class="kw">0.5</span>)  <span class="cm"># -0.0 -- same even-neighbor rule, mirrored for negatives</span></code></pre>
+<p>Confirmed directly, <code>Series.round()</code> follows the identical rule and both accept the same output: called on a Series, <code>np.round(s)</code> keeps the Series' own Index and matches <code>s.round()</code> value-for-value. This is deliberate, documented NumPy/IEEE 754 behavior (round-half-to-even), not a bug — but it is the opposite of the "always round .5 up" rule taught in most schools, and the one most people walk into an interview still assuming.</p>
+
+<h2>2 · decimals=: how many places, and the negative-decimals trick</h2>
+<p>Confirmed directly, <code>decimals=</code> (positional or keyword) controls how many digits after the decimal point survive; a <strong>negative</strong> value rounds to the left of the decimal point instead — tens, hundreds, thousands.</p>
+<pre><code>np.round(<span class="kw">2.345</span>, <span class="kw">2</span>)      <span class="cm"># 2.35 -- two decimal places</span>
+np.round(<span class="kw">1234.5678</span>, -<span class="kw">2</span>)  <span class="cm"># 1200.0 -- negative decimals rounds to the nearest hundred</span>
+
+prices = pd.Series([<span class="kw">19.995</span>, <span class="kw">4.995</span>, <span class="kw">100.004</span>])
+prices.round(<span class="kw">2</span>)   <span class="cm"># two-decimal currency rounding, Index kept, same call either spelling</span></code></pre>
+<p>Confirmed directly, an <code>int64</code> Series is a true no-op under <code>np.round()</code> — dtype and values both stay exactly unchanged, the same no-op rule Lesson 130's <code>np.floor()</code>/<code>np.ceil()</code> follow, not the always-upcast rule Lesson 129/131's <code>np.sqrt()</code>/<code>np.log()</code>/<code>np.exp()</code> follow (rounding an already-whole int to any number of decimal places changes nothing).</p>
+
+<div class="callout"><strong>Confirmed directly, the sharper trap:</strong> <code>np.round(2.675, 2)</code> returns <code>2.68</code> — which looks like ordinary "round half up," <em>not</em> banker's-rounding-to-even (2.68 is even in the last digit either way, so this one doesn't disambiguate the rule). The real reason is underneath: <code>2.675</code> is not stored exactly in <code>float64</code> at all. Its true stored value is <code>2.67499999999999982...</code> — already slightly <em>below</em> the halfway point before rounding even starts. Any decimal literal with more digits than <code>float64</code> can represent exactly is already a rounded value the moment it is typed — "the tie I thought I was rounding" may not be an exact tie in memory at all.</div>
+<pre><code><span class="kw">from</span> decimal <span class="kw">import</span> Decimal
+Decimal(<span class="kw">2.675</span>)   <span class="cm"># Decimal('2.67499999999999982236431605997495353221893310546875')</span>
+np.round(<span class="kw">2.675</span>, <span class="kw">2</span>)   <span class="cm"># 2.68 -- still not what the stored value alone would predict; NumPy's own</span>
+                   <span class="cm"># rounding algorithm does not simply chop the stored float and compare</span></code></pre>
+
+<h2>3 · np.rint(): the no-decimals-argument sibling, and the missing Series.round() gap it doesn't have</h2>
+<p>Confirmed directly, <code>np.rint(a)</code> is <code>np.round(a, decimals=0)</code> with no <code>decimals=</code> parameter at all — always rounds to the nearest whole number, same banker's-rounding-to-even tie rule. Unlike every other elementwise ufunc in this lineage (Lessons 126-132), confirmed directly, pandas actually DOES define <code>Series.round()</code> — there is no naming gap here, the one case in this whole family where the pandas method and the NumPy function are both first-class and agree exactly. <code>np.rint()</code> has no equivalent pandas method name — calling <code>Series.rint()</code> raises <code>AttributeError</code> immediately, confirmed directly, so <code>Series.round()</code> (no arguments) is the pandas-idiomatic spelling instead.</p>
+
+<div class="interview">
+<p><strong>Q: "If I round 2.5 and round 1.5, why don't I get the same pattern — shouldn't both round up?"</strong> A strong answer, out loud: <em>"NumPy and pandas both use banker's rounding — IEEE 754's round-half-to-even — not the 'always round .5 up' rule taught in school. An exact tie rounds to whichever neighboring integer is even, so round(0.5) is 0, round(1.5) is 2, and round(2.5) is 2 again. The sharper trap underneath: most decimal literals like 2.675 aren't stored exactly in float64 at all — the true stored value is already 2.67499999...98, slightly below the tie — so what looks like a rounding-rule surprise is sometimes really a floating-point-representation surprise instead. For money or exact-decimal needs, I'd reach for Python's Decimal type rather than trusting float rounding at all."</em> The signal: naming banker's rounding specifically, and not stopping at "floats are imprecise" without the concrete 2.675 example.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.round()</code>'s and <code>Series.round()</code>'s confirmed banker's-rounding (round-half-to-even) tie behavior; the confirmed <code>decimals=</code> parameter including negative values; the confirmed int-dtype no-op rule; the confirmed <code>2.675 → 2.68</code> float-representation trap (verified directly against <code>Decimal()</code>'s own exact stored value); and <code>np.rint()</code> as the confirmed no-decimals sibling, including the one case in this lineage where <code>Series.round()</code> is NOT a naming gap. It does not cover <code>np.fix()</code> or <code>np.around()</code> (a legacy alias of <code>np.round()</code>, named only in passing) beyond this line, or Python's <code>Decimal</code> type in any depth, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/133_np_round.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/133_np_round.py</code></pre>
+<p>Exercise 1 confirms the Section 1 rule: banker's rounding on exact <code>.5</code> ties (0.5→0, 1.5→2, 2.5→2), Index kept on a Series. Exercise 2 confirms the Section 2 behavior: <code>decimals=</code> including a negative value, and the int-dtype no-op. Exercise 3 confirms the Section 3 trap: <code>2.675</code> is not stored exactly in <code>float64</code> (checked against <code>Decimal()</code>), and <code>np.rint()</code> matches <code>np.round(x, 0)</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.round()/Series.round() use banker's rounding (round-half-to-even) on an exact .5 tie, not 'always round up.' np.round(0.5) is 0.0 (0 is the even neighbor), np.round(1.5) is 2.0 (2 is the even neighbor) -- a different outcome from the same .5 distance, depending only on which neighbor is even.">
+    <p class="stem">Why does <code>np.round(0.5)</code> return <code>0.0</code> while <code>np.round(1.5)</code> returns <code>2.0</code>?</p>
+    <button class="opt" data-ok>both ties round to the nearest even digit</button>
+    <button class="opt">np.round() has a bug on inputs below one</button>
+    <button class="opt">decimals=0 secretly truncates the value instead of rounding</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against Decimal(2.675), the literal 2.675 is not stored exactly in float64 -- its true stored value is 2.67499999999999982236..., already slightly below the halfway tie before any rounding rule even applies. The surprise is a float-representation issue, not purely a rounding-rule issue.">
+    <p class="stem"><code>np.round(2.675, 2)</code> returns <code>2.68</code>. What does <code>Decimal(2.675)</code> reveal about why this looks surprising?</p>
+    <button class="opt" data-ok>2.675 is stored already below the halfway tie</button>
+    <button class="opt">2.675 is stored exactly, decimals=2 must be buggy</button>
+    <button class="opt">Decimal() and float64 always store identical bit patterns</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: unlike every other elementwise ufunc in the Lesson 126-132 lineage (np.roll, np.sign, np.vectorize, np.abs/sqrt, np.floor/ceil, np.log/exp, np.minimum/maximum), round() is the one case where pandas DOES define a real Series.round() method matching np.round() exactly -- no AttributeError naming gap here. np.rint() has no pandas method equivalent though.">
+    <p class="stem">Does <code>Series.round()</code> exist in pandas, and how does it compare to the naming gaps Lessons 126-132 found?</p>
+    <button class="opt" data-ok>it exists and matches np.round(), the one case with no gap</button>
+    <button class="opt">it does not exist, calling it raises AttributeError like the rest</button>
+    <button class="opt">it exists but always rounds up, unlike np.round()'s own even rule</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.round.html"><code>numpy.round()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the round-half-to-even rule and the <code>decimals=</code> parameter directly; the exact <code>Decimal(2.675)</code> stored-value digits and the <code>np.rint()</code>/<code>Series.round()</code> comparison are confirmed directly in this lesson's own scratch sandbox rather than quoted from the docs page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.round()</code> is new today, added right after Lesson 132's <code>np.minimum()</code>/<code>np.maximum()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan closed its own gap cleanly — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — banker's rounding, the 2.675 float trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

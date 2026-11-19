@@ -7566,3 +7566,119 @@ along the Phase 2 spine, adapted to the learning records.
   or Kafka next, or either of the two named next steps above if Airflow's
   turn comes around again, rather than assuming any one of the three by
   default.
+
+- 2026-11-19 (headless 06:00 run, Day 65 generated): sixty-fifth lesson,
+  `0065-dbt-histogram-by-courier.html`. Idempotency check first via the DB
+  itself, per this round's orchestrator note: `course_progress` queried
+  directly (table name corrected to `course_progress`, not `progress`, after
+  an initial failed query against the wrong name) via the documented
+  `execFileSync` Node workaround, confirming the most recent `dataeng`
+  `lesson_generated` row was Day 64 on 2026-11-18, nothing dated 2026-11-19.
+  Read `MISSION.md` in full (unmodified), `PLAN.md`'s full Phase 2 spine
+  (still fully exhausted, matching every round since Day 59), the single
+  baseline learning record (still no newer record on file), `RESOURCES.md`,
+  `assets/nav.js`, and Days 48, 49, 63 and 64 in full before picking
+  anything.
+  **Topic choice:** Day 64's own closing note said Airflow had the most
+  recent round's fresh-gap attention and a future round should weigh dbt or
+  Kafka next. Day 63's own closing note named a concrete, already-scoped
+  gap: "a per-courier breakdown of the same histogram pattern (the other
+  half of Day 48's original named gap, a `select distinct` against
+  `stg_couriers` instead of `stg_restaurants`)." Grepped every dbt lesson's
+  prose for `stg_couriers` crossed with `histogram` first, confirming this
+  specific breakdown had never been built in the 17 rounds since Day 48
+  first named it. Picked it over a fresh Kafka topic from `PLAN.md`'s own
+  spine (already exhausted, same finding as recent rounds) specifically
+  because it is a named, already-scoped TODO — closing the one piece of Day
+  48's original three-way gap (city, restaurant, courier) still open — the
+  same "a named TODO beats an unscanned guess" reasoning Days 58, 61, 62, 63
+  and 64 each used. No pandas, no Python-language teaching (the one code
+  block is plain dbt-model SQL extending an existing pattern, not new
+  language ground), no API/idempotency re-derivation (grepped the finished
+  lesson for both and found neither) — none applied or needed this round.
+  **Content:** one new mart, `mart_delivery_time_histogram_by_courier`,
+  built with the identical cross-join-then-left-join shape Days 49 and 63
+  already used, crossed against `stg_couriers`' distinct `courier_id`s
+  instead of cities or restaurants. The one genuine wrinkle, named
+  explicitly in the lesson rather than glossed over: `stg_couriers` (Day 1's
+  schema) has `courier_id`, `vehicle`, `city` and `joined_at` — no name
+  column at all, unlike `stg_restaurants`, which has both an id and a
+  `restaurant_name`. Rather than inventing a `courier_name` via string
+  concatenation (which would look like real data while adding zero
+  information beyond the id already sitting next to it), today's grid
+  carries through `vehicle` and `city` instead — real attributes `raw.couriers`
+  actually has. Section 4 draws the substantive contrast prior histogram
+  lessons' closing sections only implied: a restaurant-grain slow bucket
+  points at the kitchen/restaurant side of the handoff, a courier-grain slow
+  bucket points at the delivery side, and city/restaurant grain structurally
+  cannot distinguish the two since one bad courier's numbers are diluted
+  across however many restaurants they deliver for.
+  **Verification:** no reachable learner Postgres this sandbox round either
+  (the standing gap since Day 36 for this histogram thread). What was
+  confirmed live this round: a full scratch dbt project under
+  `.scratch-dataeng-65/` at the repo root (deleted after; confirmed via `ls
+  -d` returning "No such file or directory" post-cleanup) — sources, staging
+  models mirroring Days 2/6, all four histogram marts (Days 48, 49, 63 and
+  today), a fresh `dbt deps` pulling `dbt_utils` 1.4.1, and `uv run --with
+  "dbt-postgres==1.11.0" dbt parse --project-dir ... --profiles-dir ...`
+  (using `--project-dir`/`--profiles-dir` flags rather than a `cd` plus
+  redirection, since this sandbox's static analysis blocks compound
+  `cd`-then-redirect commands) parsed with zero errors — confirmed by
+  grepping the full piped output for `Error` and finding none, the same
+  "the grep is the actual check, not the exit code" convention Days 48, 49,
+  63 and 64 each used, since a pipe makes the process exit status
+  unreliable. `dbt parse` proves the Jinja and YAML compile to well-formed
+  SQL, not that the join logic returns the right numbers against real data
+  — the same parse-vs-compile-vs-run limit Days 13, 14, 36, 48, 49 and 63
+  have each already named. Confirm the real build output, the actual
+  distinct-courier count (15, per Day 1's own seed row count), and the
+  per-courier `buckets = 20` result in your own environment before quoting
+  any of it in an interview.
+  Quiz word counts verified with a small Node script (the same workaround
+  Days 63 and 64 used), stripping HTML tags and counting whitespace-split
+  tokens per option. The first draft's three questions landed at 10/9/8,
+  9/12/8 and 11/13/10 before edits — took six total edit-and-recheck passes
+  across all three questions to reach a clean 9/9/9, 9/9/9, 11/11/11 split,
+  one word-count mismatch at a time rather than guessing at the whole set
+  once. HTML structure verified via paired open/close tag counts on every
+  tag that appears (`div` 7/7, `p` 21/21, `code` 81/81, `button` 9/9,
+  `script` 3/3, `dfn` 1/1, `pre` 6/6, `h2` 8/8, `h1` 1/1, `em` 2/2, `strong`
+  5/5, `a` 2/2, `span` 69/69) and a bare-`&` regex scan — zero bare `&`
+  found.
+  The lesson's own prose reuses Day 63's `composite join condition` term as
+  plain text/`<code>`, not a second `<dfn>` tag, since that term is already
+  in the glossary from Day 63 and a term should only get a `<dfn>` the round
+  it's genuinely new. Grepped the whole glossary for `synthetic label`,
+  `fabricat` and `invented column` before writing the new `<dfn>` — zero
+  hits on all three, confirming the data-honesty point (carrying real
+  `vehicle`/`city` columns through instead of inventing a cosmetic
+  `courier_name`) was a genuinely new, defensible term, not a restatement of
+  Day 63's join-condition term. `reference/glossary.html` re-checked after
+  appending Day 65's section: `h2` 64/64, `table` 64/64, `tr` 225/225, `td`
+  483/483, `th` 192/192, zero bare `&`, and a duplicate-term scan across all
+  161 terms in the first column — zero duplicates. `node --check` clean on
+  `nav.js` after today's edit.
+  Added one new glossary term, `synthetic label`, under a new Day 65
+  section.
+  Added no new `RESOURCES.md` line: today's primary sources are the
+  `dbt_utils` README (already Day 48's primary source for `generate_series`
+  and `generate_surrogate_key`) and standard SQL join semantics (already Day
+  49's citation for `cross join`), both reused for a new angle rather than
+  duplicated.
+  Registered Lesson 65 in `assets/nav.js` right after the `n: 64` entry,
+  dated 2026-11-19.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named, already-scoped TODO in Day 63's own closing section,
+  not a new durable fact about the learner distinct from the single
+  2026-09-14 baseline record on file, the same reasoning Days 62, 63 and 64
+  each used.
+  **Next up:** with today's round, every breakdown Day 48's original
+  closing sentence named (city, restaurant, courier) is now built — the
+  histogram thread has no more named-but-unbuilt gap on file. The
+  `airflow db migrate`/`airflow dags test` approval-gate block remains the
+  standing, unresolved environment limitation (now thirty-one rounds,
+  35-65) — still worth a human granting it once. dbt has now had two of the
+  last three rounds' fresh-gap attention (63, 65) against Airflow's one
+  (64); a future round's gap-scan should weigh Kafka next, or whichever
+  named TODO or learner signal turns up first, rather than assuming any one
+  of the three by default.

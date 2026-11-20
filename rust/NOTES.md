@@ -1963,3 +1963,26 @@ by the user there; they apply here identically.
   '{"by":"claude-sonnet-5","day":"post-week-2026-11-16","action":
   "verified-unchanged"}'` succeeded on the first attempt via a plain
   relative-path call. No new learning record beyond the Day-1 baseline.
+- 2026-11-20 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (8 textual
+  `id: "k` matches in `quiz-bank.js` — the 7 real kata entries `k1`-`k7`
+  plus the commented-out example line; `day:` tags still run exactly 1-7;
+  `assets/nav.js` still has exactly 7 `file: "lessons` entries, days 1-7
+  only; `node --check` clean on `nav.js`, `quiz-bank.js`, and `srs.js`).
+  A repo-wide search for "2026-11-20" and "2026-11-19" found no existing
+  rust/ artifact for either date before this check. Still the correct
+  "daily quiz+kata" for this post-week phase per PLAN.md — `daily.html`
+  keeps serving the existing bank via `assets/srs.js`'s Leitner schedule,
+  and the bank only grows when a new numbered lesson is authored, none due
+  since PLAN.md's lesson table ends at Day 7 — so nothing new was
+  generated, nav.js was untouched, and no bank content was added. Per this
+  run's task briefing, direct `psql`/`bin/query-progress` reads were not
+  attempted (both have failed with permission/approval errors in this
+  session without clearing on retry, and the read-side block has been
+  reproduced on effectively every round since 2026-07-16) — pacing came
+  from `rust/learning-records/0001-baseline-zero-rust-strong-backend.md`
+  (the only record on file, still just the Day-1 baseline, zero
+  completion/quiz signal) alone, same conservative fallback this file has
+  used on every prior blocked-read round. No new learning record beyond
+  the Day-1 baseline.

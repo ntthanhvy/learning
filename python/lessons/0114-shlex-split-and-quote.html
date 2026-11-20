@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 114 · shlex: splitting and quoting shell-style strings</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 114 · ~20 min · 20 Nov 2026</p>
+<h1><code>shlex</code>: splitting and quoting shell-style strings</h1>
+<p class="byline">Day 68's <code>subprocess.run()</code> wants a list of strings, but a command often starts life as one string — typed by a person, read from a config file, pasted from a log. <code>shlex</code> is the standard-library module that turns a command-line-shaped string into that list the same way a shell would (respecting quotes), and does the reverse job too: making one value safe to drop into a shell command string in the first place.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>shlex</code> has zero hits anywhere in the course — Day 68's <code>subprocess</code> lesson teaches the list-of-arguments form and the <code>shell=True</code> injection risk in detail but never mentions the module that bridges between a string and that list. <code>filecmp</code>, <code>mimetypes</code>, and <code>contextvars</code> were also genuinely zero-hit this round; <code>shlex</code> won for connecting directly to two already-taught lessons (68's subprocess, 39's argparse) rather than standing alone. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth) from prior rounds. Day 112 was fresh day 1 of the current three-fresh-then-review cycle and Day 113 was fresh day 2, so today is fresh day 3 — Day 115 should be the next review day, spanning Days 112-114.</div>
+
+<h2>1 · <code>shlex.split()</code>: a string to the argv list Day 68 wants</h2>
+<p>Day 68 built <code>subprocess.run()</code> calls by hand, one list element at a time: <code>["cp", filename, "/tmp/backup"]</code>. But a command often arrives as a single string instead — a user types one line, a config file stores one field, a log records the exact command that ran. <code>shlex.split()</code> parses that string the way a POSIX shell would, splitting on whitespace but keeping a quoted substring together as one piece:</p>
+<pre><code><span class="kw">import</span> shlex
+
+command_line = <span class="str">'cp "my file.txt" /tmp/backup --verbose'</span>
+argv = shlex.split(command_line)
+<span class="kw">print</span>(argv)
+<span class="cm"># confirmed live: ['cp', 'my file.txt', '/tmp/backup', '--verbose']</span></code></pre>
+<p><dfn data-en="shlex.split(s) parses a string the way a POSIX shell would and returns a list of tokens, keeping a quoted substring containing spaces together as one list element -- exactly the list form subprocess.run() expects as its first argument" data-vn="giữ nguyên &quot;shlex.split&quot; — parse 1 string theo kiểu shell POSIX, trả về list token; phần trong dấu nháy có khoảng trắng giữ nguyên thành 1 element, đúng dạng list mà subprocess.run() cần">shlex.split()</dfn> is exactly the missing step between "a command as one string" and the list <code>subprocess.run()</code> takes — notice the quoted <code>"my file.txt"</code> became one list element, <code>'my file.txt'</code>, with the quote marks themselves stripped away, not a literal 4-character split on every space.</p>
+
+<h2>2 · <code>shlex.quote()</code>: the opposite direction, made safe</h2>
+<p>Day 68 flagged <code>shell=True</code>'s danger: building one command string by hand (<code>f"cat {user_input}"</code>) lets shell metacharacters like <code>;</code> inject extra commands. Sometimes a single shell-string really is unavoidable — writing a shell script, logging the exact command for a human to copy-paste, building a line for <code>os.system()</code>. <code>shlex.quote()</code> makes one value safe to embed in that string, wrapping it in quotes (and escaping any quote characters inside it) only when it actually needs protection:</p>
+<pre><code><span class="kw">print</span>(shlex.quote(<span class="str">"hello"</span>))            <span class="cm"># confirmed live: hello  -- no special characters, left alone</span>
+<span class="kw">print</span>(shlex.quote(<span class="str">"my file.txt"</span>))    <span class="cm"># confirmed live: 'my file.txt'  -- space forces quoting</span>
+<span class="kw">print</span>(shlex.quote(<span class="str">"a; rm -rf /"</span>))    <span class="cm"># confirmed live: 'a; rm -rf /'  -- the whole thing becomes one literal argument</span></code></pre>
+<p><dfn data-en="shlex.quote(s) returns s wrapped in quotes (escaping any quote characters already inside it) if a shell would otherwise treat part of it specially, or returns s unchanged if it is already safe as a single shell word -- the inverse problem from split(), making one value safe to put INTO a shell string instead of parsing one back out" data-vn="giữ nguyên &quot;shlex.quote&quot; — bọc s trong dấu nháy (escape dấu nháy có sẵn trong s) nếu shell sẽ hiểu sai 1 phần của nó, hoặc trả lại s nguyên nếu đã an toàn làm 1 từ; ngược với split() — quote() lo việc đưa giá trị AN TOÀN vào 1 chuỗi shell">shlex.quote()</dfn> is exactly the function that would have stopped Day 68's injection example: <code>f"cat {shlex.quote(user_input)}"</code> turns the dangerous <code>"file.txt; rm -rf ."</code> into one literal argument instead of two shell commands — the semicolon stops being special the moment it is inside quotes the shell itself put there.</p>
+
+<div class="callout"><strong>The real fix is still the list form:</strong> <code>shlex.quote()</code> makes a shell *string* safer, but Day 68's list-of-arguments form to <code>subprocess.run()</code> avoids the shell parser entirely and needs no quoting at all. Reach for <code>quote()</code> only when a real shell string is unavoidable — a generated script, a log line, an <code>os.system()</code> call already committed to — not as a substitute for the list form in new <code>subprocess</code> code.</div>
+
+<h2>3 · <code>shlex.join()</code>: the exact inverse of <code>split()</code></h2>
+<p><code>shlex.join(argv)</code> takes a list of strings — the same shape <code>subprocess.run()</code> takes, or Day 39's <code>argparse</code> might have parsed apart — and joins them back into one shell-safe string, quoting each element with <code>shlex.quote()</code> wherever needed:</p>
+<pre><code>argv = [<span class="str">"cp"</span>, <span class="str">"my file.txt"</span>, <span class="str">"/tmp/backup"</span>]
+command_line = shlex.join(argv)
+<span class="kw">print</span>(command_line)
+<span class="cm"># confirmed live: cp 'my file.txt' /tmp/backup</span>
+
+<span class="cm"># confirmed live: splitting that string back apart reproduces the original list exactly</span>
+<span class="kw">print</span>(shlex.split(command_line) == argv)   <span class="cm"># True</span></code></pre>
+<p><code>join()</code> and <code>split()</code> round-trip cleanly, confirmed live above — useful for logging the exact command a script is about to run (or just ran) in a form a human could paste back into a terminal and get the identical result, spaces and all, without hand-rolling the quoting logic the shell itself uses.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has any notion of shell commands or quoting — a pandas pipeline that shells out to an external tool first builds the argument list with plain Python (or <code>shlex</code>, for a string it already has), runs it, then hands the resulting file to <code>pd.read_csv()</code>. Command construction is a stdlib/OS-level job, not a data-frame job. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/114_shlex_split_and_quote.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/114_shlex_split_and_quote.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>shlex.split()</code> to turn one command-line string into an argv list, using <code>shlex.quote()</code> to make a plain value and a dangerous value each safe for a shell string, and using <code>shlex.join()</code> to build a string that splits back to the exact same list.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="shlex.split() parses a string the way a POSIX shell would, keeping a quoted substring together as one list element with the quote marks themselves stripped away -- it is the missing step between a command typed or stored as one string and the list form subprocess.run() expects as its first argument.">
+    <p class="stem">What does <code>shlex.split()</code> give you that a plain <code>.split()</code> call on spaces would not?</p>
+    <button class="opt" data-ok>a quoted substring with spaces inside stays one single list item</button>
+    <button class="opt">a result that always only contains exactly two separate list items</button>
+    <button class="opt">a list already sorted alphabetically by each argument's own first letter</button>
+  </div>
+  <div class="q" data-why="shlex.quote() wraps a value in quotes (escaping any quote characters already inside it) only when a shell would otherwise treat part of it specially, such as the semicolon in 'a; rm -rf /' -- a plain value like 'hello' with no special characters comes back completely unchanged, confirmed live.">
+    <p class="stem">Why did <code>shlex.quote("hello")</code> come back unchanged while <code>shlex.quote("a; rm -rf /")</code> came back wrapped in quotes?</p>
+    <button class="opt" data-ok>quoting is only added when a shell would read part specially</button>
+    <button class="opt">quote() always simply rejects any string containing more than one word</button>
+    <button class="opt">quote() only quotes values that are longer than exactly ten characters</button>
+  </div>
+  <div class="q" data-why="shlex.join(argv) is the exact inverse of shlex.split(): it takes a list of strings and joins them into one shell-safe string, quoting each element wherever needed, such that splitting that string back apart with shlex.split() reproduces the original list exactly -- confirmed live on the cp/my file.txt/tmp/backup example.">
+    <p class="stem">What is the relationship between <code>shlex.join()</code> and <code>shlex.split()</code>?</p>
+    <button class="opt" data-ok>join() builds a string that split() turns back into the identical list</button>
+    <button class="opt">join() and split() both only ever operate on a single fixed-length tuple</button>
+    <button class="opt">join() is simply one old deprecated alias that split() has fully replaced</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/shlex.html"><code>shlex</code></a> docs, especially <code>split()</code>, <code>quote()</code>, and <code>join()</code> in the "Parsing Rules" and module-functions sections.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day114">glossary</a> under Day 114.<br>
+<code>calendar</code> and <code>socket</code> remain open, ruled-out-so-far candidates for a future round (thin content and scope-depth respectively). Day 115 should be the next review day, spanning Days 112-114.<br><br>
+💬 Anything unclear — <code>split()</code> vs <code>quote()</code>'s opposite directions, or why the list form still beats a quoted string? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

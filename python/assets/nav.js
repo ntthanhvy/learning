@@ -234,6 +234,8 @@
       file: "lessons/0112-threading-lock.html" },
     { n: 113, date: "2026-11-19", title: "glob & fnmatch: filename pattern matching",
       file: "lessons/0113-glob-and-fnmatch.html" },
+    { n: 114, date: "2026-11-20", title: "shlex: splitting and quoting shell-style strings",
+      file: "lessons/0114-shlex-split-and-quote.html" },
   ];
 
   const REFS = [

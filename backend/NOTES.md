@@ -11944,3 +11944,142 @@ confirmed the same way; FluentValidation and Polly/.NET resilience
 libraries, both still deliberately out of scope per MISSION.md's
 "concepts first" rule; and the backfill-missing-Lesson-117-NOTES-entry
 gap, still not investigated.
+
+## 2026-11-20 — Lesson 138: rate-limit headers, now in C# too (GetStatistics, CurrentAvailablePermits)
+
+Headless run. Direct DB reads (`psql`, `bin/query-progress`) both failed
+with permission errors this round that did not clear on retry, unlike
+most prior rounds' own `psql`-via-Node workaround — no direct DB
+confirmation was obtained this time. Fell back to the strongest
+available substitute evidence instead of retrying a blocked channel
+further: the repo's git history is a single squashed commit dated
+2026-11-19 ("lessons: 2026-11-19"), meaning nothing has been committed
+for 2026-11-20 in any course yet, and `backend/lessons/` had no
+`0138-*.html` file on disk and `nav.js`'s last entry was still `n: 137,
+date: "2026-11-19"` — both agree with the git-history evidence that
+today's lesson has not yet been generated. Proceeded on that basis per
+this round's own explicit instruction to do so absent direct contrary
+evidence.
+
+Topic picked: Lesson 137 closed out CORS as a C# port last round, and
+this round's own candidate list (left over from Lesson 136/137) named
+five still-Go-only concepts worth the same "now in C# too" treatment —
+audit logging (46), distributed tracing (65), feature flags (70),
+rate-limit response headers (96), and HATEOAS (97). Picked rate-limit
+response headers specifically because Lesson 118 already ported Lesson
+11's token-bucket rate limiter to ASP.NET Core but stopped at the
+bucket itself, leaving Lesson 96's three quota headers
+(`RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset`) as a named,
+scoped, one-lesson-sized gap directly on top of existing coverage,
+rather than a cold-start topic. `grep -i` for
+`GetStatistics()`/`CurrentAvailablePermits` across `backend/lessons/`
+and `glossary.html` came back empty before writing, confirming the gap
+was real and the terms were free of collisions; the pre-existing
+`rate-limit response headers` glossary term from Lesson 96 itself was
+intentionally reused rather than duplicated, since the concept named by
+that term doesn't change crossing languages — only the C# mechanism
+does.
+
+Verification: fetched `learn.microsoft.com/en-us/aspnet/core/performance/
+rate-limit` via `WebFetch`, specifically checking whether the rate
+limiting middleware exposes quota headers automatically or via some
+lease-metadata equivalent on a successful response. It does not — the
+only header-shaping hook shown is `OnRejected` plus
+`MetadataName.RetryAfter`, both scoped to a failed lease. Followed up
+with two more `WebFetch` calls against
+`learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.
+metadataname` and `...ratelimiterstatistics`, confirming verbatim that
+`MetadataName` ships exactly two members (`ReasonPhrase`, `RetryAfter`),
+each documented as "metadata put on a **failed** lease acquisition,"
+and that `RateLimiterStatistics` (returned by `RateLimiter.
+GetStatistics()`) exposes `CurrentAvailablePermits`,
+`CurrentQueuedCount`, `TotalSuccessfulLeases`, and `TotalFailedLeases`
+instead — a limiter-level snapshot, not lease-scoped, confirmed via a
+third `WebFetch` against `...ratelimiter.attemptacquire` that a
+successful lease carries no remaining-count data of its own. This
+three-fetch chain is why the lesson's central claim ("the framework
+doesn't hand you these headers for free, and here's exactly why not")
+is accurate rather than assumed: the absence was checked, not inferred
+from silence. `command -v dotnet`/`go`/`node` were all attempted this
+round (not skipped on assumption) and the sandbox blocked all three
+direct-invocation forms the same way prior rounds have recorded; `node
+--version` (not `command -v node`) resolved directly and was used for
+every scratch check below, consistent with the same no-approval-needed
+distinction noted since Lesson 136.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson138/`, not `/tmp`, same
+constraint as every round since Lesson 133; nothing written to the repo
+besides the three intended files; scratch directory deleted after): (1)
+the lesson's one C# code sample was first drafted referencing
+`this.ConfiguredLimit`, a property never actually defined on the class —
+caught only by re-reading the snippet line by line against the class
+body, not by any automated check, since no C# compiler was reachable
+this round either (same `dotnet` block as above); fixed by adding a real
+`_configuredLimit` constructor parameter and field before shipping; (2)
+a quiz word-count check per `<div class="q">` block — first draft landed
+badly uneven on all four questions, most strikingly Q2 where the correct
+option was a bare code identifier (`RateLimiter.GetStatistics().
+CurrentAvailablePermits`, 1 "word") against three prose options of 8-10
+words; rewritten as prose for all sixteen options and converged, after
+five rewrite-and-recount passes using a standalone word-count script to
+test candidate text before touching the lesson file, to exactly
+10/10/10/10 on all four questions, exactly one `data-ok` and four
+options per question confirmed the same way; (3) an HTML tag-balance
+check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/
+tr/td/th/thead/tbody — clean (div 8/8, p 15/15, code 57/57, button
+16/16, script 3/3, dfn 2/2, pre 1/1, h2 6/6, h1 1/1, em 2/2, strong 6/6,
+a 5/5, table 1/1, tr 5/5, td 8/8, th 7/7, thead 1/1, tbody 1/1), both
+`dfn` tags confirmed to carry both `data-en=` and `data-vn=`; (4) a
+brace/paren/bracket balance check on the one `<pre><code>` block after
+stripping tags and unescaping HTML entities — balanced (3/3 braces, 9/9
+parens, 2/2 brackets), rechecked after the `this.ConfiguredLimit` fix
+above since that edit changed the paren count; (5) a raw-unescaped-`&`
+scan across the lesson — zero hits; (6) a duplicate-term scan on
+`glossary.html`'s first column before adding the two new rows — zero
+collisions for `GetStatistics()` or `CurrentAvailablePermits`; a
+`<tr>`/`<td>` balance check on `glossary.html` after the two-row
+addition — balanced (423 `<tr>`, 1266 `<td>`, 422 term rows total = 420
+prior + 2 new), plus a second duplicate-term scan afterward — zero
+duplicates; (7) `node --check` against `nav.js`, `gloss.js`, `quiz.js` —
+all clean, both before and after the `nav.js` edit; (8) a basic HTML
+well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 138 in `nav.js` (date 2026-11-20, today's actual
+generation date) right after `n: 137`. Day number used 138, matching
+this file's own day-equals-lesson-number convention, no deviation
+found. `git status --short backend/` confirmed the round's diff is
+scoped to exactly `backend/assets/nav.js`, `backend/reference/
+glossary.html`, and the new `backend/lessons/0138-rate-limit-headers-
+aspnetcore-getstatistics.html`. No new `RESOURCES.md` line added — all
+three fetched pages are `learn.microsoft.com`, already covered by this
+file's standing Lesson-118 entry's pattern, cited inline in the lesson's
+own "Go deeper" section instead. No new `learning-records/` file added —
+the topic came from this round's own standing candidate list, not a new
+observation about the learner; `learning-records/` still has no entry
+newer than Lesson 3, so this round was paced as a normal sequential step
+per the same convention Lesson 137 used. `bin/record-progress backend
+lesson_generated --day 138 --lesson 0138-rate-limit-headers-aspnetcore-
+getstatistics.html --detail '{"by":"github-actions"}'` attempted once at
+the end per this run's own instruction; outcome noted in the run's final
+report.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: a working `RateLimit-Reset` C# port is still open —
+this lesson named why (`RateLimiterStatistics` has no reset-timing
+property; the real number has to come from the app's own configured
+`ReplenishmentPeriod`, which this lesson only pointed at rather than
+wired up as a header) rather than shipping something fabricated;
+`RateLimiterStatistics`'s `CurrentQueuedCount`/`TotalSuccessfulLeases`/
+`TotalFailedLeases` fields, named but not explored; the IETF `RateLimit`
+header-field draft's exact reset-timestamp format, still Lesson 96's own
+unresolved open item; audit logging (Lesson 46), distributed tracing
+(Lesson 65), feature flags (Lesson 70), and HATEOAS (Lesson 97) — the
+other four Go-only concepts from this round's own candidate list, still
+not ported; Go's `select`-statement arbitration rules, still deferred
+many rounds running on fetched-page-truncation grounds; Lesson 49's
+dead-letter queues, still confirmed to have no first-party ASP.NET Core
+angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
+FluentValidation and Polly/.NET resilience libraries, both still
+deliberately out of scope per MISSION.md's "concepts first" rule.

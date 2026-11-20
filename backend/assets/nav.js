@@ -282,6 +282,8 @@
       file: "lessons/0136-jquery-unobtrusive-validation-adapter.html" },
     { n: 137, date: "2026-11-19", title: "CORS, now in C# too",
       file: "lessons/0137-cors-aspnetcore-addcors-usecors.html" },
+    { n: 138, date: "2026-11-20", title: "Rate-limit headers, now in C# too",
+      file: "lessons/0138-rate-limit-headers-aspnetcore-getstatistics.html" },
   ];
 
   const REFS = [

@@ -12803,3 +12803,99 @@
   `bin/record-progress data lesson_generated --day 133 --lesson
   0133-np-round.html --detail '{"by":"claude-sonnet-5"}'` was run
   directly from the repo root to close out this round.
+- 2026-11-20 generation (Lesson 134, headless 06:00 run): direct DB reads
+  (`psql`, `bin/query-progress`) failed with permission errors in this
+  headless run that didn't clear on retry, so no `course_progress` rows
+  could be read this round. Proceeded on git-history evidence instead:
+  the repo's squashed history (single commit dated 2026-11-19) and the
+  absence of any `0134*` file on disk together confirm nothing has been
+  generated for 2026-11-20 yet, so this round was not a duplicate. Ran
+  this round's own fresh scan (per this course's "fresh scan each round"
+  convention) — grepped every lesson body and every glossary row
+  case-insensitively for every `np.[a-z_]*(` call already in use, and
+  separately for `np.trunc(`/`np.fix(`. Found both names had only ever
+  appeared as one-line contrast mentions inside Lessons 130 and 133's own
+  sections, each explicitly deferred by that lesson's own scope line —
+  never given their own exercise anywhere, a real gap teased twice.
+  Picked `np.trunc()`: it completes the four-rounding-direction family
+  (`floor`/`ceil`/`trunc`/`round`) Lessons 130 and 133 already built
+  two-thirds of, continuing the Lesson 126-133 elementwise-ufunc arc.
+  Verified directly in a scratch sandbox (numpy 2.5.5, pandas 3.1.1, `uv
+  run --with pandas`) rather than trusting memory: confirmed `np.trunc()`
+  rounds toward zero (chops the fraction), agreeing with `np.floor()` on
+  positive inputs and `np.ceil()` on negative inputs, but diverging from
+  `np.round()`'s nearest-integer rule once the fraction is closer to the
+  far neighbor (on `-1.7`: floor/ceil/trunc/round give
+  `-2.0`/`-1.0`/`-1.0`/`-2.0`); confirmed the usual int64-no-op,
+  Index-preserving, NaN-passthrough, object-dispatch, and
+  complex-`TypeError` rules all match the Lessons 129-133 pattern.
+  Confirmed a genuinely new, current finding beyond just closing the
+  scope-line gap: `np.fix()` returns bit-identical results to
+  `np.trunc()` on every input tested, but now raises a
+  `DeprecationWarning` on every call in the installed numpy version
+  (2.5.5) — captured directly via `warnings.catch_warnings`, message
+  text "numpy.fix is deprecated. Use numpy.trunc instead, which is
+  faster and follows the Array API standard." Confirmed via `type()`
+  that `np.trunc` is a true `numpy.ufunc` while `np.fix` is a
+  `numpy._ArrayFunctionDispatcher` (a plain Python wrapper calling
+  `np.trunc` internally) — the mechanical reason behind the deprecation,
+  not just a style preference. Confirmed `Series.trunc()`/`Series.fix()`
+  both raise `AttributeError` — pandas defines neither, continuing the
+  naming-gap lineage from Lessons 126-131 (only Lesson 133's
+  `Series.round()` is the standing exception). Did not build out the
+  Array API standard itself beyond naming it as the deprecation's stated
+  reason, out of scope per `MISSION.md`'s "no deep NumPy internals" line.
+  Added exactly two new glossary rows, "np.trunc() / np.fix()" then
+  "ufunc" (the first time this course names the ufunc-vs-plain-function
+  distinction explicitly, even though Lessons 126-133 all relied on it
+  implicitly), directly after Lesson 133's "np.round()" entry — confirmed
+  via a scripted scan of every first-column term (210 rows total after
+  adding, 209 data rows plus the header) that neither term was already
+  present, zero duplicates found; `tr`/`td`/`th` balance confirmed
+  211/211, 630/630, 3/3. Also included an explicit `.interview` callout
+  div in this lesson, matching this course's standing rule. Verification
+  performed mechanically via a scratch directory `.scratch-data-134/`
+  created at the repo root (deleted after, never tracked by git, matching
+  every prior round's own precedent): (1) a quiz-word-count script found
+  the first draft mismatched across all three questions (9/9/10, 10/11/10,
+  9/9/11) and, after a few rounds of wording trims, confirmed exactly
+  8/8/8, 10/10/10, and 10/10/10 option words across the three questions,
+  one `data-ok` per question throughout; (2) an HTML tag-balance script
+  caught a real bug on the first pass — the Section 1 callout div had an
+  extra unmatched `</p>` left over from an earlier edit (no matching `<p>`
+  open inside that div, the same bug class Lesson 133 hit), fixed by
+  removing the stray closing tag — after the fix, fully balanced:
+  html/head/body 1/1, div 6/6, p 17/17, code 87/87, pre 5/5, h1 1/1, h2
+  6/6, strong 5/5, button 9/9, script 3/3, dfn 2/2, span 26/26, em 1/1, a
+  2/2, title 1/1, zero raw unescaped `&` outside the lesson's own `cd
+  ~/learning/data && uv run ...` shell command inside its own
+  `<pre><code>` block (matching every prior round's own precedent for
+  that exact exception); exactly 2 `<dfn>`-carrying tags, both with
+  `data-en`/`data-vn`, matching the two new glossary rows added. `node
+  --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse
+  as valid JavaScript, both before and after adding one `n: 134` entry
+  and one `0134-np-trunc-and-fix` file reference to `nav.js`. The first
+  run of the shipped (unsolved) `practice/134_np_trunc_and_fix.py`, run
+  directly from its real `practice/` location via `uv run --with pandas
+  python3`, printed exactly 2 ✗ with no raw traceback, as expected.
+  Building the solved copy inside `.scratch-data-134/` (deleted after,
+  never tracked by git) printed both ✓ and "All green" on the first
+  attempt, no further fixes needed. Re-ran the shipped file directly from
+  `practice/` again afterward and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. This round's own fresh scan closed the last two names left
+  open by Lessons 130/133's own scope lines — tomorrow's round owes a
+  brand new fresh scan with nothing pre-committed, per this course's
+  standing convention. No new `data/learning-records/` entry was added —
+  routine lesson, no new completion/quiz signal since mid-October.
+  `git status --short` after all edits confirmed only the intended
+  `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0134-np-trunc-and-
+  fix.html`, new `data/practice/134_np_trunc_and_fix.py`, and this file).
+  The scratch directory `.scratch-data-134/` was deleted after
+  verification, at the repo root but never tracked by git. Direct DB
+  reads (`psql`, `bin/query-progress`) were not retried again beyond the
+  initial failed attempts noted above — see this round's own
+  `bin/record-progress` attempt result below (run once, for real, to
+  close out this round; if it failed, that failure does not invalidate
+  this lesson).

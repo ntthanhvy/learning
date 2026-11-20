@@ -274,6 +274,8 @@
       file: "lessons/0132-np-minimum-and-maximum.html" },
     { n: 133, date: "2026-11-19", title: "np.round(): rounding to the nearest even digit, not the nearest half",
       file: "lessons/0133-np-round.html" },
+    { n: 134, date: "2026-11-20", title: "np.trunc(): the fourth rounding direction, and np.fix()'s retirement",
+      file: "lessons/0134-np-trunc-and-fix.html" },
   ];
 
   const REFS = [

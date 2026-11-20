@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 138 · Rate-limit headers, now in C# too (GetStatistics, CurrentAvailablePermits)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 138 · ~20 min</p>
+<h1>Rate-limit headers, now in C# too (GetStatistics, CurrentAvailablePermits)</h1>
+<p class="byline">Lesson 96 added three headers to Lesson 11's Go token bucket — <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code> — so a client could see its quota trending toward zero on ordinary successful responses, not just learn about it the moment it gets a <code>429</code>. Lesson 118 ported the bucket itself to ASP.NET Core's rate limiting middleware, but never the headers. Today closes that gap — and the honest version of this port is a little surprising: the framework doesn't hand you those headers for free.</p>
+
+<h2>1 · What <code>OnRejected</code> actually exposes, and what it doesn't</h2>
+<p>Lesson 118's <code>OnRejected</code> callback reads <code>context.Lease.TryGetMetadata(MetadataName.RetryAfter, ...)</code> to copy a real retry hint onto a rejected response. It's tempting to assume a sibling call exists for the successful case — some <code>MetadataName.Remaining</code> you could read on every response the same way. It doesn't. The <code>MetadataName</code> class ships exactly two members, and Microsoft's own reference is explicit about when each applies: <code>ReasonPhrase</code> is "metadata put on a <strong>failed</strong> lease acquisition to specify the reason the lease failed," and <code>RetryAfter</code> is "metadata put on a <strong>failed</strong> lease acquisition to specify when to retry acquiring a lease." Both are failure-only. A successful <code>RateLimitLease</code> — the object you get back when a request is allowed through — carries no remaining-count metadata at all.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> it's natural to assume a mature framework feature "obviously" has a one-line accessor for something this common — the same instinct that reaches for a prop no component actually exposes. ASP.NET Core's rate limiting middleware was built to answer "allow or reject, and if rejected, when to retry" — a yes/no gate, not a quota-reporting API. Lesson 96's headers were never that gate's job in Go either; they were a deliberate addition wrapped around it. The C# port needs the same deliberate addition, just with a different building block underneath.</div>
+
+<h2>2 · The real gauge: <code>GetStatistics()</code>, not lease metadata</h2>
+<p>The number does exist — just on the limiter itself, not the lease. Every <code>RateLimiter</code> (the type backing each partition) exposes a <dfn data-en="an abstract method on System.Threading.RateLimiting.RateLimiter returning a RateLimiterStatistics snapshot -- CurrentAvailablePermits, CurrentQueuedCount, TotalSuccessfulLeases, TotalFailedLeases -- read at any point, independent of any single lease" data-vn="GetStatistics() (giữ nguyên) — method abstract trên System.Threading.RateLimiting.RateLimiter, trả về snapshot RateLimiterStatistics -- CurrentAvailablePermits, CurrentQueuedCount, TotalSuccessfulLeases, TotalFailedLeases -- đọc được bất cứ lúc nào, không phụ thuộc 1 lease cụ thể nào">GetStatistics()</dfn> method, returning a snapshot whose <dfn data-en="a property on RateLimiterStatistics (the object GetStatistics() returns) giving the number of permits the limiter could grant right now if asked -- for a token bucket limiter, this is the same number as Lesson 96's Go RateLimit-Remaining" data-vn="CurrentAvailablePermits (giữ nguyên) — property trên RateLimiterStatistics (object GetStatistics() trả về), cho biết số permit limiter có thể cấp ngay lúc này nếu được hỏi -- với token bucket limiter, đây chính là số mà Lesson 96's Go RateLimit-Remaining báo">CurrentAvailablePermits</dfn> is exactly Lesson 96's "tokens left right now" — read straight off the limiter, no lease required:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> RateLimitHeadersFilter : IEndpointFilter
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> PartitionedRateLimiter&lt;HttpContext&gt; _limiter;
+    <span class="kw">private</span> <span class="kw">readonly</span> <span class="dt">int</span> _configuredLimit; <span class="cm">// TokenLimit from the same AddTokenBucketLimiter call, kept alongside</span>
+    <span class="kw">public</span> RateLimitHeadersFilter(PartitionedRateLimiter&lt;HttpContext&gt; limiter, <span class="dt">int</span> configuredLimit)
+        =&gt; (_limiter, _configuredLimit) = (limiter, configuredLimit);
+
+    <span class="kw">public</span> <span class="kw">async</span> ValueTask&lt;<span class="kw">object</span>?&gt; InvokeAsync(
+        EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        <span class="kw">var</span> response = ctx.HttpContext.Response;
+        <span class="kw">var</span> stats = _limiter.GetStatistics(ctx.HttpContext); <span class="cm">// snapshot for this request's own partition</span>
+
+        <span class="kw">if</span> (stats <span class="kw">is</span> <span class="kw">not</span> <span class="kw">null</span>)
+        {
+            response.Headers[<span class="st">"RateLimit-Limit"</span>] = _configuredLimit.ToString();
+            response.Headers[<span class="st">"RateLimit-Remaining"</span>] = stats.CurrentAvailablePermits.ToString();
+        }
+        <span class="kw">return</span> <span class="kw">await</span> next(ctx); <span class="cm">// runs after UseRateLimiter already decided allow/reject</span>
+    }
+}</code></pre>
+<p>Two things fall out of this shape that Lesson 96's Go version never had to think about. First, <code>GetStatistics</code> takes the partition's resource key as a parameter (here, the <code>HttpContext</code> the global limiter partitions on) — it reports one partition's numbers, the same per-API-key split Lesson 118's <code>PartitionedRateLimiter</code> already keeps separately per key. Second, <code>RateLimit-Reset</code> has no <code>GetStatistics</code> equivalent at all: the token bucket limiter's reset timing is derived from its own <code>ReplenishmentPeriod</code> configuration — a value the app already set when calling <code>AddTokenBucketLimiter</code>, computed at the call site rather than read off any live object.</p>
+
+<h2>3 · Why this sits in a filter, not inside <code>OnRejected</code></h2>
+<p><code>OnRejected</code> only runs on the request that gets turned away — Lesson 96's own point about <code>Retry-After</code> exactly repeats here one layer up: anything that fires only at rejection is already too late to help a client pace itself beforehand. Setting these two headers has to happen on every response, success or not, which means it belongs in something that always runs — an <code>IEndpointFilter</code> registered after <code>UseRateLimiter</code>, the same filter shape Lesson 121's idempotency port used for a different "wrap every call" need. <code>GetStatistics()</code> being decoupled from any single lease is what makes that possible: the filter can ask "what's the state right now" on a response that was never rejected at all, something <code>OnRejected</code>'s lease-scoped metadata could never answer.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 96: Go</th><th>Lesson 138: C#</th></tr></thead>
+<tbody>
+<tr><th>Where the remaining count comes from</th><td><code>bucket.check()</code>'s own return value, computed inline</td><td><code>RateLimiter.GetStatistics(key).CurrentAvailablePermits</code></td></tr>
+<tr><th>Tied to one request's lease?</th><td>no — the bucket struct is read directly</td><td>no — a limiter-level snapshot, independent of any lease</td></tr>
+<tr><th>Where the headers get set</th><td>inside the same hand-written middleware</td><td>a separate <code>IEndpointFilter</code>, after <code>UseRateLimiter</code> has run</td></tr>
+<tr><th>RateLimit-Reset source</th><td>computed from the bucket's own refill math</td><td>no runtime accessor — derived from the configured <code>ReplenishmentPeriod</code> at the call site</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="interview">
+<p><strong>Q: "Our C# API has a 429 with Retry-After, but partners say they get no warning before it. Why can't we just read the remaining count off OnRejected?"</strong> A strong answer, out loud: <em>"OnRejected only fires on the one request that already got rejected — by definition too late to warn anyone. ASP.NET Core's MetadataName type only has RetryAfter and ReasonPhrase, and both docs say explicitly those are failed-lease-only; there's no remaining-count metadata on a successful lease at all. The actual number lives on the limiter itself — RateLimiter.GetStatistics() returns CurrentAvailablePermits — so I'd add a small endpoint filter that reads that on every response, win or lose, and sets RateLimit-Limit/RateLimit-Remaining the way Lesson 96 already does by hand in our Go services."</em> The signal: naming that the gap is lease-scoped versus limiter-scoped state, not a missing callback.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>RateLimiter.GetStatistics()</code> and <code>RateLimiterStatistics.CurrentAvailablePermits</code> as the C# source for Lesson 96's <code>RateLimit-Remaining</code>/<code>RateLimit-Limit</code> headers, read inside an <code>IEndpointFilter</code> running after <code>UseRateLimiter</code>. It does not cover a working <code>RateLimit-Reset</code> port (no runtime accessor exists for it; the lesson only names where that number would have to come from instead), <code>RateLimiterStatistics</code>'s <code>CurrentQueuedCount</code>/<code>TotalSuccessfulLeases</code>/<code>TotalFailedLeases</code> fields beyond naming them, or the IETF <code>RateLimit</code> header-field draft's exact reset-timestamp format (Lesson 96's own open item, still unresolved).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Microsoft's own MetadataName reference states plainly that both ReasonPhrase and RetryAfter are metadata put on a failed lease acquisition -- neither one is available on a successful lease, so there is no built-in way to read a remaining-quota number off OnRejected's lease metadata.">
+    <p class="stem">What do MetadataName.ReasonPhrase and MetadataName.RetryAfter have in common?</p>
+    <button class="opt" data-ok>both only ever appear as metadata on one failed lease</button>
+    <button class="opt">both only ever appear as metadata on a successful lease</button>
+    <button class="opt">both report back the exact same single numeric value here</button>
+    <button class="opt">both require installing a totally separate brand new package here</button>
+  </div>
+  <div class="q" data-why="RateLimiter.GetStatistics() returns a RateLimiterStatistics snapshot whose CurrentAvailablePermits property reports the number of permits the limiter could grant right now -- read directly off the limiter itself, independent of any one request's lease.">
+    <p class="stem">Where does a live remaining-permit count actually come from in ASP.NET Core?</p>
+    <button class="opt" data-ok>a live snapshot from GetStatistics()'s own CurrentAvailablePermits field right here</button>
+    <button class="opt">a hidden field quietly stored inside each rejected lease object</button>
+    <button class="opt">parsing the Retry-After response header value back out by hand</button>
+    <button class="opt">a brand new database table the middleware quietly auto-creates once</button>
+  </div>
+  <div class="q" data-why="OnRejected only runs on the one request that already got turned away, which is too late for a client to act on -- the same gap Lesson 96 named for Go's Retry-After. Setting quota headers on every response, not just the rejected one, requires something that always runs, like an IEndpointFilter.">
+    <p class="stem">Why does setting rate-limit quota headers belong in a filter, not inside OnRejected?</p>
+    <button class="opt" data-ok>OnRejected only ever runs on the one rejected request itself</button>
+    <button class="opt">IEndpointFilter code always runs meaningfully faster than any given middleware</button>
+    <button class="opt">OnRejected cannot legally read any lease metadata object at all</button>
+    <button class="opt">filters are required by ASP.NET Core for every registered endpoint</button>
+  </div>
+  <div class="q" data-why="This lesson's own scope line names the gap directly: RateLimiterStatistics exposes no reset-timing property at all, so a RateLimit-Reset header has to be derived from the limiter's own configured ReplenishmentPeriod value set at the AddTokenBucketLimiter call site, not read off any live runtime object.">
+    <p class="stem">Why does this lesson not show a working RateLimit-Reset port?</p>
+    <button class="opt" data-ok>no runtime accessor for reset timing exists on the statistics</button>
+    <button class="opt">RateLimit-Reset is actually fully quite unnecessary information for any client</button>
+    <button class="opt">ASP.NET Core quietly rejects that one specific header name outright</button>
+    <button class="opt">computing it would require a totally separate background worker process</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.metadataname">Microsoft Learn: MetadataName Class</a> confirms both <code>ReasonPhrase</code> and <code>RetryAfter</code> as failed-lease-only metadata, verbatim; <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.ratelimiterstatistics">Microsoft Learn: RateLimiterStatistics Class</a> is the primary source for <code>CurrentAvailablePermits</code>, <code>CurrentQueuedCount</code>, <code>TotalSuccessfulLeases</code>, and <code>TotalFailedLeases</code>, read via <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.ratelimiter.getstatistics">RateLimiter.GetStatistics()</a>. RESOURCES.md's standing <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit">Rate limiting middleware in ASP.NET Core</a> citation (Lesson 118) still covers <code>AddRateLimiter</code>/<code>PartitionedRateLimiter</code>/<code>OnRejected</code> themselves in full, not duplicated here. Lesson 96's own header-naming-convention note (GitHub/Stripe/Twitter's older <code>X-RateLimit-*</code> spelling versus the newer unprefixed form) still applies unchanged to this C# port.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 96's rate-limit headers and Lesson 118's ASP.NET Core token-bucket port. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 138 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 134 · np.trunc(): the fourth rounding direction, and np.fix()'s retirement</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 134 · ~20 min · 20 Nov 2026</p>
+<h1>np.trunc(): the fourth rounding direction, and np.fix()'s retirement</h1>
+<p class="byline">This round's own fresh scan grepped every lesson body and every glossary row case-insensitively for <code>np.trunc(</code> and <code>np.fix(</code>: both names only ever appeared as one-line contrast mentions inside Lessons 130 and 133's own sections, each explicitly deferred by that lesson's own scope line ("does not cover <code>np.trunc()</code>/<code>np.fix()</code> themselves beyond the one contrast line above") — never given their own exercise anywhere. A real, twice-teased gap, not a narrowing of something already taught. <code>np.trunc()</code> is the pick: it completes the four-rounding-direction family (<code>floor</code>/<code>ceil</code>/<code>trunc</code>/<code>round</code>) Lessons 130 and 133 already built two-thirds of, and this round's own scratch check turned up a second, more current reason to teach it now — <code>np.fix()</code> is freshly deprecated in the installed numpy version.</p>
+
+<h2>1 · The fourth direction: toward zero, not toward a neighbor</h2>
+<p>Lesson 130 taught <code>np.floor()</code> (toward negative infinity) and <code>np.ceil()</code> (toward positive infinity); Lesson 133 taught <code>np.round()</code> (toward the nearest integer, ties to even). <dfn data-en="a NumPy function that rounds each element toward zero, elementwise -- confirmed directly to simply drop the fractional part, the same operation as casting a float to int but staying a float" data-vn="giữ nguyên 'np.trunc()' — làm tròn từng phần tử VỀ HƯỚNG SỐ 0, elementwise; xác nhận trực tiếp: chỉ đơn giản CẮT bỏ phần thập phân, giống ép kiểu float sang int nhưng kết quả vẫn là float">np.trunc(a)</dfn> is the fourth direction: it rounds toward <strong>zero</strong>, confirmed directly (numpy 2.5.5) — it simply chops off the fractional part, with no neighbor comparison at all.</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+np.trunc(<span class="kw">1.7</span>)    <span class="cm"># 1.0  -- chops the fraction, doesn't round UP to 2 like ceil would</span>
+np.trunc(-<span class="kw">1.7</span>)   <span class="cm"># -1.0 -- chops toward zero, doesn't round DOWN to -2 like floor would</span></code></pre>
+<p>Confirmed directly, the full four-way split only shows up on a negative number — on a positive number, <code>trunc()</code> and <code>floor()</code> happen to agree (both just drop the fraction when it's already headed toward zero):</p>
+<pre><code><span class="kw">x</span> = -<span class="kw">1.7</span>
+np.floor(<span class="kw">x</span>)   <span class="cm"># -2.0 -- toward -infinity (away from zero)</span>
+np.ceil(<span class="kw">x</span>)    <span class="cm"># -1.0 -- toward +infinity; happens to land on the same value as trunc here</span>
+np.trunc(<span class="kw">x</span>)   <span class="cm"># -1.0 -- toward zero, chops the fraction</span>
+np.round(<span class="kw">x</span>)   <span class="cm"># -2.0 -- toward the nearest integer (-1.7 is closer to -2 than to -1)</span></code></pre>
+<p>Confirmed directly, this is why <code>ceil(-1.7)</code> and <code>trunc(-1.7)</code> agree at <code>-1.0</code> here but <code>round(-1.7)</code> disagrees at <code>-2.0</code>: nearest-integer and toward-zero are different rules that only sometimes land on the same answer, confirmed directly to diverge the moment the fractional part is closer to the far neighbor than the near one (checked separately on <code>-1.2</code>: <code>trunc</code> and <code>round</code> agree at <code>-1.0</code> there, <code>ceil</code> also agrees — only <code>floor</code> splits off). Picking the right one is a real interview question, not a style choice: truncating a price to whole dollars silently loses the cents in the lost direction, flooring always costs the customer, rounding is "fair" on average.</p>
+
+<div class="callout"><strong>Confirmed directly, int-dtype and Index rules match the rest of the family:</strong> an <code>int64</code> Series under <code>np.trunc()</code> is a true no-op (values and dtype both unchanged, the same rule Lessons 130/133's <code>floor()</code>/<code>ceil()</code>/<code>round()</code> follow — there is no fraction to chop, so nothing happens). A Series' own Index is kept. <code>NaN</code> passes through unchanged. <code>object</code>-dtype input dispatches through Python and works; complex input raises <code>TypeError</code> immediately — all confirmed directly, all matching the established pattern from Lessons 129-133.</div>
+
+<h2>2 · np.fix(): same answer, but deprecated as of this numpy version</h2>
+<p>Confirmed directly (numpy 2.5.5), <code>np.fix(a)</code> returns bit-identical results to <code>np.trunc(a)</code> on every input tested — same toward-zero rule, same int no-op, same NaN passthrough. But calling it now raises a <code>DeprecationWarning</code> on every call, confirmed directly by capturing it with <code>warnings.catch_warnings</code>:</p>
+<pre><code>np.fix(<span class="kw">2.5</span>)
+<span class="cm"># DeprecationWarning: numpy.fix is deprecated. Use numpy.trunc instead,</span>
+<span class="cm"># which is faster and follows the Array API standard.</span></code></pre>
+<p>Confirmed directly from the two functions' own types, this isn't cosmetic: <code>np.trunc</code> is a true <dfn data-en="a NumPy ufunc -- a compiled, elementwise function that supports broadcasting, dtype casting rules, and an out= parameter directly, implemented in C for speed" data-vn="giữ nguyên 'ufunc' — hàm NumPy biên dịch sẵn (C), chạy elementwise, tự broadcast, có out=, tốc độ cao hơn hàm Python thường bọc quanh nó">ufunc</dfn> (same family as <code>np.floor</code>/<code>np.ceil</code>/<code>np.round</code>), while <code>np.fix</code> is a plain Python function that calls <code>np.trunc</code> internally — one extra layer of overhead for a historical name that predates the Array API standard numpy is now aligning to. The deprecation message says exactly that: faster, and standard-compliant. <code>Series.trunc()</code> and <code>Series.fix()</code> both raise <code>AttributeError</code>, confirmed directly — pandas defines neither, continuing the naming-gap lineage from Lessons 126-131 (only <code>Series.round()</code>, Lesson 133's one exception, has a matching pandas method in this whole family).</p>
+<pre><code>prices = pd.Series([<span class="kw">19.99</span>, -<span class="kw">4.50</span>, <span class="kw">100.01</span>])
+np.trunc(prices)   <span class="cm"># [19.0, -4.0, 100.0] -- Index kept, toward-zero on each</span>
+prices.trunc()      <span class="cm"># AttributeError -- no pandas method; np.trunc(prices) is the only spelling</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.trunc() and np.fix(), and which should I use?"</strong> A strong answer, out loud: <em>"They compute the same thing — both round toward zero, just chopping the fractional part, unlike floor (always toward negative infinity) or round (toward the nearest integer, ties to even). The difference is only that np.fix() is now deprecated in current NumPy — it's a thin Python wrapper around np.trunc() kept for backward compatibility, and the deprecation notice says to use np.trunc() directly because it's a true compiled ufunc and faster. I'd default to np.trunc() in any new code and only recognize np.fix() if I saw it in an older codebase."</em> The signal: naming that they're numerically identical first, then correctly placing the real difference at "which one is current," not inventing a numeric difference that doesn't exist.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.trunc()</code>'s confirmed toward-zero rounding direction, completing the <code>floor</code>/<code>ceil</code>/<code>trunc</code>/<code>round</code> four-way family from Lessons 130 and 133; the confirmed int-dtype no-op, Index-preserving, NaN-passthrough, and object/complex dtype rules matching that same family; and <code>np.fix()</code>'s confirmed numerical equivalence to <code>np.trunc()</code> plus its confirmed <code>DeprecationWarning</code> in the installed numpy version (2.5.5), including the confirmed ufunc-vs-plain-function distinction behind that deprecation. It does not cover the Array API standard itself beyond naming it as the deprecation's stated reason, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/134_np_trunc_and_fix.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/134_np_trunc_and_fix.py</code></pre>
+<p>Exercise 1 confirms the Section 1 rule: <code>np.trunc()</code> rounds toward zero on both a positive and a negative input, and the four-way <code>floor</code>/<code>ceil</code>/<code>trunc</code>/<code>round</code> comparison on <code>-1.7</code> lands on four values with exactly two of them equal. Exercise 2 confirms the Section 2 behavior: <code>np.fix()</code> matches <code>np.trunc()</code> value-for-value, and an <code>int64</code> Series is a true no-op under <code>np.trunc()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.trunc(-1.7) is -1.0 (chops the fraction, rounds toward zero), not -2.0. np.floor(-1.7) is -2.0 (toward negative infinity) and np.round(-1.7) is -2.0 (nearest integer, -1.7 is closer to -2), so both of those land on -2.0 while trunc alone lands on -1.0.">
+    <p class="stem">What does <code>np.trunc(-1.7)</code> return, and why does it differ from <code>np.floor(-1.7)</code>?</p>
+    <button class="opt" data-ok>-1.0, it rounds toward zero, not negative infinity</button>
+    <button class="opt">-2.0, it rounds toward negative infinity, like floor</button>
+    <button class="opt">-1.0, it rounds to whichever neighbor is even</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via warnings.catch_warnings: np.fix(2.5) raises a DeprecationWarning in the installed numpy version (2.5.5) recommending np.trunc() instead, stated as faster and Array-API-standard-compliant. The two functions return numerically identical results on every input tested -- the difference is only which one is current, not a computed-value difference.">
+    <p class="stem">Calling <code>np.fix(2.5)</code> now raises a <code>DeprecationWarning</code>. What exactly changed about the computed result?</p>
+    <button class="opt" data-ok>nothing, the result is identical, only the recommended spelling changed</button>
+    <button class="opt">np.fix() now rounds up instead of toward zero in numpy</button>
+    <button class="opt">np.fix() now raises instead of returning any value at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: Series.trunc() and Series.fix() both raise AttributeError -- pandas defines neither method, continuing the naming-gap pattern from Lessons 126-131 (np.roll, np.sign, np.vectorize, np.abs/sqrt, np.floor/ceil, np.log/exp all lack a matching Series method). Series.round() from Lesson 133 is the one confirmed exception in this whole family, not the rule.">
+    <p class="stem">Does <code>Series.trunc()</code> exist in pandas, matching the pattern most of Lessons 126-133 already found?</p>
+    <button class="opt" data-ok>no, AttributeError, matching most of this whole family except round()</button>
+    <button class="opt">yes, it exists and matches np.trunc() exactly, same as round()</button>
+    <button class="opt">yes, but only works on DataFrame columns, never on Series</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.trunc.html"><code>numpy.trunc()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the toward-zero rule directly; the <code>np.fix()</code> deprecation notice and its exact wording are confirmed directly in this lesson's own scratch sandbox (numpy 2.5.5) via <code>warnings.catch_warnings</code>, not quoted from a docs page, since a deprecation this recent may not be reflected in every cached doc yet.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.trunc()</code>/<code>np.fix()</code> and <code>ufunc</code> are new today, added right after Lesson 133's <code>np.round()</code> entry.<br>
+<strong>Next lesson:</strong> this round's fresh scan closed the last two names left open by Lessons 130/133's own scope lines — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the four rounding directions, the fix() deprecation, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

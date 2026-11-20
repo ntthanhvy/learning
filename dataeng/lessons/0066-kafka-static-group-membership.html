@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 66 · Kafka static group membership: a restart that skips the rebalance</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 66 · ~20 min · 20 Nov 2026</p>
+<h1>Kafka static group membership: a restart that skips the rebalance</h1>
+<p class="byline">Today's tangible win: <code>scripts/consume_order_events.py</code> gets two new config keys, <code>group.instance.id</code> and a widened <code>session.timeout.ms</code> — and your own <code>kafka-consumer-groups.sh --describe</code> output proves that restarting the consumer quickly now reclaims its exact partitions with zero reassignment, instead of triggering the full rebalance Day 34 showed happening on every membership change.</p>
+
+<div class="callout"><strong>Before today — check Day 34 actually landed:</strong> today edits the exact consumer config Day 34's two-instance test exercised, so confirm that file and topic are both in place:
+<pre><code>grep -n "GROUP_ID" scripts/consume_order_events.py
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+Expected: <code>GROUP_ID = "warehouse-loader"</code> printed, and <code>PartitionCount: 3</code>. If either is missing, finish Day 6 (the consumer) or Day 5 (the topic) first — today adds two config keys to an existing <code>Consumer({...})</code> call, not a new file.</div>
+
+<h2>1 · The cost Day 34 showed but didn't name</h2>
+<p>Day 34 ran two consumers in the same group, killed one, and watched the group coordinator hand its partitions to the survivor — a real rebalance, proven live with <code>kafka-consumer-groups.sh --describe</code>. That lesson's own build step waited a fixed 12 seconds after the kill specifically to clear <code>session.timeout.ms</code> (10 seconds, confluent-kafka's default), the point at which the coordinator judges a silent member dead. Nothing in that lesson asked the next question: what if the consumer that died comes right back — a deploy, a container restart, a crash-and-restart within a few seconds — rather than actually being gone for good?</p>
+<p>By default, Kafka cannot tell those two cases apart. A consumer that stops sending heartbeats looks identical to the coordinator whether it is dead forever or just restarting — all the coordinator sees is silence past <code>session.timeout.ms</code>. So a routine restart of this course's one-instance <code>warehouse-loader</code> consumer pays the same price Day 34's kill-and-reassign did: every partition it owned gets rebalanced away and then, once the restarted process rejoins, rebalanced again to hand them back. Two rebalances, each briefly pausing consumption on every affected partition, to accomplish nothing — the exact same process ends up owning the exact same partitions it had before.</p>
+
+<h2>2 · Static membership: give the coordinator a name, not just a heartbeat</h2>
+<p>A <dfn data-en="a Kafka consumer config (group.instance.id) that gives a consumer a fixed, self-chosen identity inside its group, persisting across that process's restarts -- when a statically-assigned member rejoins within a grace period, the group coordinator rebinds it to the partitions it already owned instead of running a full rebalance, because the departure already looked like a timeout, not a graceful leave" data-vn="giữ nguyên &quot;static group membership&quot; — group.instance.id gán cho consumer 1 identity cố định, tự chọn, giữ nguyên qua các lần restart của chính process đó; nếu member có identity tĩnh rejoin lại trong thời gian ân hạn, coordinator gắn lại đúng các partition nó đã sở hữu trước đó thay vì chạy rebalance toàn bộ">static group membership</dfn> consumer sets <code>group.instance.id</code> to a fixed string it chooses itself, instead of relying purely on the dynamic member ID Kafka assigns fresh every time a process joins. The coordinator remembers which partitions belong to which <code>group.instance.id</code>. When a process carrying that same ID disappears and reappears before its membership record expires, the coordinator treats it as the same member returning — not a new one joining — and hands back exactly what it already owned, no reassignment negotiation needed anywhere in the group.</p>
+<p>The timing changed, too, and it's worth being precise about which timer does what now:</p>
+<table class="gloss">
+<tr><th>Membership</th><th>What <code>session.timeout.ms</code> governs</th></tr>
+<tr><td>Dynamic (Day 34's default)</td><td>The heartbeat-missed clock only — once it expires, the member is dropped and its partitions are reassigned immediately, for good.</td></tr>
+<tr><td>Static (today, <code>group.instance.id</code> set)</td><td>Both the heartbeat-missed clock <em>and</em> the full grace window to rejoin — the slot sits reserved, not reassigned, until this same timer also expires with no rejoin. There is no separate, longer timer for the grace window; raising this one value is the only lever.</td></tr>
+</table>
+<p>That's why today's config widens <code>session.timeout.ms</code> from Day 34's 10-second default to something closer to a real restart's duration: too short, and a legitimate restart still misses its own grace window and rebalances anyway; too long, and a genuinely dead consumer's partitions sit unreassigned — reachable only by nobody — for that whole window. 45 seconds is a reasonable portfolio-scale number for a container restart; a production system would tune it against real deploy timing, not guess.</p>
+<div class="callout"><strong>Bridge from Day 55:</strong> static membership is a different lever from <code>partition.assignment.strategy</code>. Day 55's <code>cooperative-sticky</code> assignor minimizes how many partitions move <em>during</em> a rebalance that is already happening. Static membership is about avoiding triggering that rebalance at all for a same-process restart. Both can run at once — they solve adjacent but different problems.</div>
+
+<h2>3 · Build: add <code>group.instance.id</code>, then restart and watch nothing move</h2>
+<p>Edit <code>scripts/consume_order_events.py</code>'s <code>Consumer({...})</code> call — the poll loop, <code>INSERT_SQL</code> and commit-after-write from Day 6 are unchanged, this is config only:</p>
+<pre><code><span class="cm"># scripts/consume_order_events.py -- two new keys on the existing Consumer()</span>
+consumer = Consumer(
+    {
+        <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+        <span class="str">"group.id"</span>: GROUP_ID,
+        <span class="str">"group.instance.id"</span>: <span class="str">"warehouse-loader-1"</span>,
+        <span class="str">"session.timeout.ms"</span>: <span class="kw">45000</span>,
+        <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+    }
+)</code></pre>
+<p>Start the consumer, confirm its assignment, then kill and restart it quickly — well inside the new 45-second window — and compare the group's partition ownership before and after:</p>
+<pre><code>uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_PID=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+kill -9 $CONSUMER_PID
+sleep 5    <span class="cm"># well under the new 45s session.timeout.ms</span>
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_PID=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected — the same three partitions, the same <code>CONSUMER-ID</code> prefix tied to <code>warehouse-loader-1</code>, in both <code>--describe</code> calls, with no <code>Rebalancing</code> state printed in between (the dynamic-membership version of this exact sequence on Day 34 would instead show the partitions briefly reassignable, then reassigned back, with the group passing through a rebalance both times):</p>
+<pre><code>GROUP             TOPIC         PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID                   HOST         CLIENT-ID
+warehouse-loader  order_events  0          8               8               0    warehouse-loader-1-rdkafka-1  /172.18.0.1  rdkafka-...
+warehouse-loader  order_events  1          4               4               0    warehouse-loader-1-rdkafka-1  /172.18.0.1  rdkafka-...
+warehouse-loader  order_events  2          4               4               0    warehouse-loader-1-rdkafka-1  /172.18.0.1  rdkafka-...</code></pre>
+<p>Clean up:</p>
+<pre><code>kill -9 $CONSUMER_PID</code></pre>
+
+<h2>4 · Verify: same partitions, no duplicate rows, confirmed both ways</h2>
+<p>The same idempotent-write proof Days 6 and 34 already ran still applies — static membership changes <em>whether a rebalance happens</em>, not whether a redelivered message is possible, so the safety net stays exactly as necessary as before:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code>, unchanged from Day 34's version of this same check. Separately, confirm the config itself is well-formed before trusting any of the above against a real broker:</p>
+<pre><code>uv run python3 -m py_compile scripts/consume_order_events.py</code></pre>
+<p><strong>Checked live this round, not against a real broker (no reachable Kafka this sandbox round, the same standing gap recent Kafka rounds have each named):</strong> a scratch <code>Consumer({...})</code> dict carrying exactly today's two new keys (<code>group.instance.id</code>, a widened <code>session.timeout.ms</code>) alongside Day 6's existing <code>bootstrap.servers</code>/<code>group.id</code> was constructed for real with a freshly-installed <code>confluent-kafka==2.16.2</code> client (librdkafka 2.16.0) — the <code>Consumer()</code> call succeeded with no config-rejection error, confirming both keys are accepted librdkafka config, not typos or made-up names. <code>py_compile</code> on that scratch file was clean. The actual rebalance-avoidance behavior above — that a same-instance-id rejoin within the grace window skips reassignment — rests on Apache Kafka's own documented static-membership protocol (KIP-345), not on a live two-process test this round, since no broker was reachable to run Section 3's kill-and-restart sequence for real. Confirm Section 3's actual <code>--describe</code> output in your own environment before quoting the "no rebalance" claim verbatim in an interview.</p>
+
+<h2>5 · What this doesn't fix</h2>
+<p>Static membership only helps the case where the <em>same</em> process identity returns in time. It does nothing for a consumer that is actually gone for good — that still rebalances, exactly as Day 34 showed, once <code>session.timeout.ms</code> expires with no rejoin. It also doesn't shrink that expiry window's cost: for up to <code>session.timeout.ms</code>, a statically-assigned member's partitions are reserved but unread by anyone else, so lag can grow during a slow restart in a way it wouldn't if the group rebalanced immediately. The trade is explicit: fewer needless rebalances during ordinary restarts, in exchange for a longer window where a truly dead consumer's partitions sit idle before anyone else picks them up. For this course's single-consumer <code>warehouse-loader</code> group, that trade is clearly worth it — a routine restart is far more common here than a permanent failure, and nothing downstream is latency-sensitive enough to notice a 45-second gap.</p>
+
+<div class="interview">
+<p><strong>Q: "Your Kafka consumer rebalances every time you redeploy it, even though it's the exact same consumer coming right back. How would you avoid that?"</strong> A strong answer, out loud: <em>"By default, Kafka's coordinator can't distinguish a consumer that died for good from one that's about to restart — both just look like missed heartbeats past session.timeout.ms, so both trigger a full rebalance, even though a redeploy ends with the exact same process re-claiming the exact same partitions it already had. The fix is static group membership: set group.instance.id to a fixed value the consumer keeps across restarts. If that same instance ID rejoins before its membership expires, the coordinator rebinds it to its old partitions directly instead of running the join-and-sync rebalance protocol. I'd also widen session.timeout.ms to comfortably cover how long a real restart takes, since for a static member that's also the full grace window before the coordinator gives up and rebalances anyway. The trade-off is that a genuinely dead consumer's partitions now sit idle for that whole window before anyone else picks them up, so you don't set it arbitrarily high — you size it to the deploy, not to infinity."</em> The signal: naming that the coordinator cannot distinguish "restarting" from "dead" without an explicit identity, and stating the trade-off (slower failover) rather than presenting static membership as a strictly free win.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>group.instance.id</code> and its interaction with <code>session.timeout.ms</code> for a single-consumer group restarting quickly, confirmed live only as a valid, accepted config shape against the installed client — not against a real broker's actual rebalance behavior this round. It does not cover the coordinator-side <code>group.min.session.timeout.ms</code>/<code>group.max.session.timeout.ms</code> broker bounds that would clamp an unreasonable client-side value (a broker-tuning concern, past this course's working-level Kafka scope per <code>MISSION.md</code>), fencing a case where two processes briefly carry the same <code>group.instance.id</code> at once (confluent-kafka's client raises a fencing error in that case, but this course's single-process <code>warehouse-loader</code> never runs two copies with the same static ID, unlike Day 34's deliberately-different dynamic IDs), or extending today's single-instance change to Day 34's two-consumer scenario with two distinct static IDs — a natural follow-up, not required for today's one-consumer portfolio pipeline to benefit.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="By default Kafka's group coordinator has no way to tell a consumer that is restarting quickly apart from one that has died for good -- both simply stop sending heartbeats, and both look identical until session.timeout.ms passes. Without a fixed identity to recognize on rejoin, the coordinator treats the returning process as a brand-new member and runs a full rebalance anyway.">
+    <p class="stem">Why does a consumer restart trigger a full rebalance by default, even when the exact same process comes right back?</p>
+    <button class="opt" data-ok>The coordinator cannot tell a restart from death</button>
+    <button class="opt">Kafka always reassigns partitions once daily by clock</button>
+    <button class="opt">Postgres forces a full rebalance after every write</button>
+  </div>
+  <div class="q" data-why="group.instance.id gives a consumer a fixed, self-chosen identity that persists across that process's own restarts. When a process carrying the same instance ID rejoins within the grace window, the coordinator recognizes it as the same member returning and rebinds its old partitions directly, skipping the join-and-sync rebalance negotiation entirely.">
+    <p class="stem">What does setting <code>group.instance.id</code> actually let the coordinator recognize?</p>
+    <button class="opt" data-ok>The one consumer identity, now returning after restart</button>
+    <button class="opt">A new partition, created solely for the consumer</button>
+    <button class="opt">A completely different, wholly unrelated topic, each time</button>
+  </div>
+  <div class="q" data-why="For a static member, session.timeout.ms is the only grace window: it both marks the slot reserved on a missed heartbeat and sets the full deadline for a same-identity rejoin before the coordinator gives up and finally rebalances for real. There is no separate, longer timer -- raising this one value is the only lever that widens the window.">
+    <p class="stem">For a static member, what does raising <code>session.timeout.ms</code> actually widen?</p>
+    <button class="opt" data-ok>The full grace window before a real rebalance happens</button>
+    <button class="opt">The number of partitions that topic can ever have</button>
+    <button class="opt">How many separate consumer groups can exist at once</button>
+  </div>
+  <div class="q" data-why="Static membership only helps when the same identity returns before the grace window expires -- it does nothing to shrink that window's cost. For up to session.timeout.ms, a statically-assigned member's partitions are reserved for it alone and unread by anyone else, so a slow restart (or a consumer that is actually gone for good) leaves those partitions idle for that whole stretch before any reassignment happens.">
+    <p class="stem">What does static group membership trade away in exchange for skipping needless rebalances?</p>
+    <button class="opt" data-ok>A longer wait before a dead member's slot opens</button>
+    <button class="opt">The topic's total partition count, changed forever, everywhere now</button>
+    <button class="opt">Every consumer's own committed offset, reset back to zero</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> are this course's standing citation for consumer group and rebalance mechanics since Day 5, and cover static membership's rejoin behavior in the same section Day 34 already used for the coordinator and rebalance protocol — not fetched fresh live this round (no working <code>WebFetch</code> tool, the same recurring gap prior rounds have named), so confirm the exact grace-window wording against the live page before quoting it verbatim in an interview. The <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a>, already this course's primary source for Days 5–6/34/50/55/58, cover <code>group.instance.id</code> and <code>session.timeout.ms</code> as plain consumer config — confirmed live this round by constructing a real <code>Consumer({...})</code> with both keys against the installed <code>confluent-kafka==2.16.2</code> client with no rejection.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 66.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty-two rounds, 35-66) — still worth a human granting it once. A natural follow-up named but not built this round: extending today's static ID to Day 34's two-consumer scenario, each with its own fixed <code>group.instance.id</code>, to show the grace window holding even when one of two members restarts while the other keeps serving its own partitions. With today's round, Kafka has had the most recent fresh-gap attention; a future round's gap-scan should weigh dbt or Airflow next, or whichever named TODO or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why session.timeout.ms is the only lever for a static member's grace window, or where the line falls between "fewer rebalances" and "slower failover"? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

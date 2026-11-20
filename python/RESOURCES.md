@@ -107,6 +107,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 112 — `threading.Lock`'s `acquire()`/`release()`/`locked()`, the guarantee that only one blocked thread proceeds when the lock turns unlocked, `with lock:` as the idiomatic release-on-exception-too spelling, the deadlock trap of acquiring the same plain `Lock` twice from one thread, and `RLock` as the documented reentrant escape hatch the "RLock Objects" section covers immediately after.
 - [Docs: `pathlib.Path.glob`/`rglob`](https://docs.python.org/3/library/pathlib.html#pathlib.Path.glob) · [`fnmatch`](https://docs.python.org/3/library/fnmatch.html)
   Use for: Day 113 — `Path.glob()`/`Path.rglob()` for shell-style wildcard search over a real directory tree, the `**` recursive-wildcard segment as the one piece of glob syntax allowed to cross a `/` boundary, and `fnmatch()`/`fnmatchcase()` for testing one filename string already in hand against the same pattern syntax, including the OS-dependent case-normalization `fnmatch()` applies and `fnmatchcase()` always skips.
+- [Docs: `shlex`](https://docs.python.org/3/library/shlex.html)
+  Use for: Day 114 — `shlex.split()` for parsing a command-line-shaped string into the argument list `subprocess.run()` (Day 68) expects, respecting quoted substrings; `shlex.quote()` for making one value safe to embed in a shell command string, the fix Day 68's `shell=True` injection example needed; and `shlex.join()` as the exact inverse of `split()`, confirmed to round-trip back to the original list.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

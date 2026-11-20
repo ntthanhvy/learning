@@ -7682,3 +7682,124 @@ along the Phase 2 spine, adapted to the learning records.
   (64); a future round's gap-scan should weigh Kafka next, or whichever
   named TODO or learner signal turns up first, rather than assuming any one
   of the three by default.
+
+- 2026-11-20 (headless 06:00 run, Day 66 generated): sixty-sixth lesson,
+  `0066-kafka-static-group-membership.html`. Idempotency check via direct DB
+  read (`psql`, `bin/query-progress`) failed with permission errors that did
+  not clear on retry this round, per this round's orchestrator note. Relied
+  instead on the git-history signal (repo squashed to a single 2026-11-19
+  commit, proving nothing generated yet for 2026-11-20 in any course) plus a
+  direct on-disk check that `lessons/0066-*.html` did not already exist
+  before writing it. Read `MISSION.md` in full (unmodified), `PLAN.md`'s full
+  Phase 2 spine, the single baseline learning record (still the only one on
+  file, still no newer signal to act on), `RESOURCES.md`, `assets/nav.js`,
+  and Days 34, 50, 55, 58 and 62 in full (the Kafka consumer-group/delivery
+  thread) before picking anything.
+  **Topic choice:** Day 65's own closing note said Kafka should get a future
+  round's fresh-gap attention, after two of the prior three rounds (63, 65)
+  went to dbt against Airflow's one (64). Checked the Kafka thread for a
+  named, already-scoped gap first (the "a named TODO beats an unscanned
+  guess" convention recent rounds have each used) and found none sitting
+  unbuilt: Day 58's own closing note already marked the rebalance-callback
+  trio (`on_assign`/`on_revoke`/`on_lost`) and this course's delivery-
+  semantics vocabulary as fully built; Day 62's named follow-ups (scheduling
+  the replay via Airflow, dead-letter-count alerting) were either blocked on
+  an unmet precondition or already built on Day 46. With no open named TODO,
+  fell back to a fresh scan of `PLAN.md`'s Kafka spine (2b) crossed against
+  what Day 34's rebalancing lesson actually built: Day 34 showed a kill
+  triggering a real rebalance after `session.timeout.ms` (10s default)
+  elapsed, but never asked what happens when the same consumer *restarts*
+  quickly rather than dying for good — a gap in the built lessons, not named
+  explicitly by any prior closing note, found by rereading Day 34's own
+  content rather than its summary. Grepped every lesson for `static
+  membership`, `group.instance.id` and `static group` first — zero hits,
+  confirming this genuinely hadn't been built. Picked it over other
+  PLAN.md 2b vocabulary-only items (Kafka Streams/Flink boundary, Connect
+  internals beyond Day 23) because it is working-level, portfolio-relevant
+  (fewer disruptive rebalances on a routine consumer restart/redeploy), and
+  builds directly on three already-shipped lessons (34, 55, 58) rather than
+  opening new vocabulary-only ground. No pandas, no Python-language
+  teaching (one `Consumer({...})` config edit, reusing Day 6/34's existing
+  script structure, not new language ground), no API/idempotency
+  re-derivation (the lesson explicitly reuses Day 6/34's existing idempotent-
+  write argument rather than re-deriving it, one `<em>` aside noting the
+  safety net is unchanged) — none applied or needed this round.
+  **Content:** two new config keys on the existing `consume_order_events.py`
+  `Consumer({...})` call, `group.instance.id` and a widened
+  `session.timeout.ms` (45s), framed against Day 34's own rebalance proof.
+  Section 2 draws a precise distinction prior rounds hadn't needed: with
+  static membership, `session.timeout.ms` governs *two* things at once
+  (heartbeat-missed detection, and the full rejoin grace window), not two
+  separate timers — worth stating carefully since a first draft's table
+  framed it as if there were a second, longer timer, caught and corrected
+  before shipping. Section 5 and the scope line name the trade-off
+  explicitly (slower failover for a truly dead consumer) rather than
+  presenting static membership as a free win, matching this course's own
+  "name what the fix doesn't cover" convention.
+  **Verification:** no reachable Kafka broker this sandbox round either (the
+  standing gap recent Kafka rounds have each named). What was confirmed live
+  this round: a scratch `Consumer({...})` dict carrying the exact two new
+  keys plus Day 6's existing `bootstrap.servers`/`group.id`, constructed for
+  real against a freshly-installed `confluent-kafka` client (resolved to
+  2.16.2, with librdkafka 2.16.0 — a minor version ahead of this course's
+  pinned 2.15.1, config-key compatibility unaffected since `group.instance.id`
+  has been a stable librdkafka config key for years, well before 2.15) —
+  the `Consumer()` call succeeded with no config-rejection error, confirming
+  both keys are real, accepted config and not typos. Separately, the exact
+  Python snippet from Section 3 was copied into a scratch file under
+  `.scratch-dataeng-66-final/` at the repo root (deleted after; confirmed via
+  `ls -d` returning "No such file or directory" post-cleanup) and run with
+  `uv run python3 -m py_compile` (clean) and then for real with `uv run
+  --with confluent-kafka python3 ...` (constructed and printed successfully).
+  What was **not** confirmed live: the actual no-rebalance-on-rejoin
+  behavior itself (Section 3's kill-and-restart `--describe` sequence)
+  rests on Kafka's own documented static-membership protocol (KIP-345), not
+  a live two-process test this round, since no broker was reachable — flagged
+  explicitly in the lesson's own verification callout and in the scope line,
+  same as the parse-vs-run limit prior rounds have each named for their own
+  gap. No dbt snippet in this lesson (pure Kafka/Python), so no `dbt parse`
+  step applied this round, the same shape prior pure-Kafka/Airflow rounds
+  (16, 17, 18, 34, 50, 55, 58, 62, 64) each used.
+  Quiz word counts verified with a small Node script (the same workaround
+  recent rounds used), stripping HTML tags and counting whitespace-split
+  tokens per option. Took several word-for-word edit passes across all four
+  questions (this lesson has four, one more than most recent rounds) to
+  reach a clean 8/8/8, 8/8/8, 9/9/9, 9/9/9 split, re-running the script after
+  each edit — caught and fixed an apostrophe-contraction miscount
+  (`member's` counted as one token, not two) partway through by switching to
+  the script's own count rather than hand-counting. HTML structure verified
+  via paired open/close tag counts on every tag that appears (`div` 8/8, `p`
+  24/24, `code` 65/65, `button` 12/12, `script` 3/3, `dfn` 1/1, `pre` 7/7,
+  `h2` 8/8, `h1` 1/1, `em` 5/5, `strong` 6/6, `a` 3/3, `span` 10/10, `table`
+  1/1, `tr` 3/3, `th` 2/2, `td` 4/4) and a bare-`&` regex scan — zero bare `&`
+  found.
+  Grepped the whole glossary for `static group membership`, `group.instance.id`
+  and `static membership` before writing the new `<dfn>` — zero hits,
+  confirming the term is genuinely new. `reference/glossary.html` re-checked
+  after appending Day 66's section: `h2` 65/65, `table` 65/65, `tr` 227/227,
+  `td` 486/486, `th` 195/195, zero bare `&`, and a duplicate-term scan across
+  all 162 terms in the first column — zero duplicates. `node --check` clean
+  on `nav.js` after today's edit.
+  Added one new glossary term, `static group membership`, under a new Day 66
+  section.
+  Added no new `RESOURCES.md` line: today's primary sources are the Apache
+  Kafka Design docs (already this course's standing citation since Day 5)
+  and the confluent-kafka Python client docs (already Days 5-6/34/50/55/58's
+  primary source), both reused for a new angle rather than duplicated.
+  Registered Lesson 66 in `assets/nav.js` right after the `n: 65` entry,
+  dated 2026-11-20.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from rereading a already-shipped lesson's own content for an unnamed gap,
+  not a new durable fact about the learner distinct from the single
+  2026-09-14 baseline record on file, the same reasoning recent rounds have
+  each used when the baseline stays the only signal available.
+  **Next up:** a concrete, named follow-up this round did not build:
+  extending today's static-ID config to Day 34's two-consumer scenario (two
+  distinct `group.instance.id` values) to show the grace window holding even
+  when only one of two members restarts. The `airflow db migrate`/`airflow
+  dags test` approval-gate block remains the standing, unresolved environment
+  limitation (now thirty-two rounds, 35-66) — still worth a human granting it
+  once. With today's round, Kafka has had the most recent fresh-gap
+  attention; a future round's gap-scan should weigh dbt or Airflow next, or
+  whichever named TODO or learner signal turns up first, rather than
+  assuming any one of the three by default.

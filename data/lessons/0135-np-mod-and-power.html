@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 135 · np.mod()/np.remainder() vs np.fmod(): the sign trap, plus np.power()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 135 · ~20 min · 21 Nov 2026</p>
+<h1>np.mod() and np.fmod(): same division, two different sign rules — plus np.power()</h1>
+<p class="byline">This round's own fresh scan grepped every lesson body and every glossary row case-insensitively for every <code>np.[a-z_]*(</code> call already in use, then separately for <code>np.mod(</code>, <code>np.remainder(</code>, <code>np.fmod(</code>, <code>np.divmod(</code>, <code>np.power(</code>: zero hits anywhere — the whole arithmetic-remainder/exponent family is a genuine, untouched gap, not a narrowing of something already taught. The elementwise-ufunc arc from Lessons 126-134 (abs/sqrt/floor/ceil/log/exp/minimum/maximum/round/trunc/fix) is now complete; this is a fresh branch of the same family, picked because the sign rule for negative-number modulo is a classic "predict the output" interview trap per <code>MISSION.md</code>'s own framing.</p>
+
+<h2>1 · np.mod(): the % operator's NumPy twin, elementwise on arrays</h2>
+<p>Confirmed directly (numpy 2.5.5), <dfn data-en="a NumPy ufunc that computes the elementwise remainder of division, following Python's own floor-division sign rule -- the result always has the same sign as the DIVISOR, not the dividend" data-vn="giữ nguyên 'np.mod()' — tính PHẦN DƯ của phép chia, elementwise, theo đúng quy tắc floor-division của Python: dấu kết quả LUÔN theo dấu của SỐ CHIA (divisor), không theo dấu số bị chia">np.mod(a, b)</dfn> is literally the same function as <code>np.remainder(a, b)</code> — confirmed directly via <code>np.mod is np.remainder</code>, which returns <code>True</code> — and it matches Python's own <code>%</code> operator and pandas' <code>Series.mod()</code> exactly:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+np.mod(<span class="kw">7</span>, <span class="kw">3</span>)     <span class="cm"># 1  -- the ordinary case, no sign trap</span>
+np.mod(-<span class="kw">7</span>, <span class="kw">3</span>)    <span class="cm"># 2  -- NOT -1; result takes the SIGN OF THE DIVISOR (3, positive)</span>
+-<span class="kw">7</span> % <span class="kw">3</span>          <span class="cm"># 2  -- plain Python % agrees exactly</span>
+np.mod(<span class="kw">7</span>, -<span class="kw">3</span>)    <span class="cm"># -2 -- divisor is negative now, so the remainder flips negative too</span></code></pre>
+<p>Confirmed directly, this is the trap: anyone coming from C, Java, or JavaScript expects <code>%</code> to follow the sign of the <em>dividend</em> (the number being divided) — those languages compute truncated division, so <code>-7 % 3</code> is <code>-1</code> there. Python and NumPy instead compute <strong>floored</strong> division, where the remainder always has the divisor's sign. Both are "correct" by their own language's rule; the trap is assuming the C-style answer while reading or writing NumPy code.</p>
+
+<h2>2 · np.fmod(): the C-style sibling that disagrees on exactly this case</h2>
+<p>Confirmed directly, NumPy ships both rules as separate functions. <dfn data-en="a NumPy ufunc that computes the elementwise remainder of division following the C-style truncated-division rule -- the result takes the sign of the DIVIDEND (the number being divided), unlike np.mod()/np.remainder() which take the sign of the divisor" data-vn="giữ nguyên 'np.fmod()' — cũng tính phần dư, nhưng theo quy tắc chia-cắt-cụt kiểu ngôn ngữ C: dấu kết quả theo dấu SỐ BỊ CHIA (dividend), ngược với np.mod()/np.remainder() theo dấu số chia">np.fmod(a, b)</dfn> disagrees with <code>np.mod()</code> on exactly the mixed-sign case above:</p>
+<pre><code>np.fmod(-<span class="kw">7</span>, <span class="kw">3</span>)   <span class="cm"># -1  -- takes the sign of -7 (the dividend), the C-style answer</span>
+np.mod(-<span class="kw">7</span>, <span class="kw">3</span>)    <span class="cm"># 2   -- takes the sign of 3 (the divisor) instead -- same inputs, different answer</span></code></pre>
+<div class="callout"><strong>Confirmed directly, divide-by-zero does not raise either:</strong> <code>np.mod(5, 0)</code> and <code>np.fmod(5, 0)</code> both return <code>0</code> (not <code>NaN</code>, not <code>inf</code>) with a <code>RuntimeWarning</code> ("divide by zero encountered in remainder"/"...in fmod") — confirmed directly via <code>warnings.catch_warnings</code>. On a float dividend, <code>np.mod()</code> works fine on fractions too (<code>np.mod(5.5, 2)</code> is <code>1.5</code>), and <code>NaN</code> passes through unchanged with no warning. On an <code>int64</code> array, the result dtype stays <code>int64</code> — confirmed directly, no upcast to float, matching the floor()/ceil()/trunc()/round() family's int-preserving rule, not sqrt()/log()/exp()'s always-upcast rule.</div>
+
+<h2>3 · np.divmod() and np.power(): quotient-plus-remainder in one call, and the fractional-exponent NaN trap</h2>
+<p>Confirmed directly, <code>np.divmod(a, b)</code> returns a tuple of <code>(floor_divide(a, b), mod(a, b))</code> in one call — the NumPy spelling of Python's built-in <code>divmod()</code>, elementwise:</p>
+<pre><code>np.divmod(-<span class="kw">7</span>, <span class="kw">3</span>)   <span class="cm"># (-3, 2) -- floor(-7/3) is -3, and mod(-7,3) is 2 from Section 1</span></code></pre>
+<p><dfn data-en="a NumPy ufunc that raises each element of the first array to the power of the matching element of the second, elementwise -- confirmed directly to return NaN (with a RuntimeWarning) on a negative base with a non-integer float exponent, since the real-valued result does not exist" data-vn="giữ nguyên 'np.power()' — lấy lũy thừa elementwise (cơ số mảng 1, số mũ mảng 2); xác nhận trực tiếp: cơ số ÂM với số mũ là float không phải số nguyên (ví dụ 1/3) trả về NaN kèm RuntimeWarning, vì kết quả thực không tồn tại — KHÔNG tự động ra căn bậc 3 thực như kỳ vọng">np.power(a, b)</dfn> is the elementwise sibling of <code>**</code> (and <code>Series.pow()</code>, confirmed directly to match exactly). The trap, confirmed directly: a negative base with a fractional float exponent returns <code>NaN</code>, not the real-valued root someone might expect:</p>
+<pre><code>np.power(<span class="kw">2</span>, <span class="kw">10</span>)        <span class="cm"># 1024 -- the ordinary case</span>
+np.power(-<span class="kw">8.0</span>, <span class="kw">1</span>/<span class="kw">3</span>)   <span class="cm"># nan, RuntimeWarning: invalid value encountered in power</span>
+<span class="cm"># -8 ** (1/3) "should" be -2 (the real cube root), but NumPy only ever</span>
+<span class="cm"># evaluates a float exponent via the general a**b formula, which has no</span>
+<span class="cm"># real solution for a negative base -- it does not special-case integer-</span>
+<span class="cm"># valued roots like 1/3 to recover the real cube root</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What does -7 % 3 give you in Python, and would that surprise someone coming from Java or C?"</strong> A strong answer, out loud: <em>"It's 2, not -1. Python and NumPy's np.mod()/np.remainder() use floored division, where the remainder always takes the sign of the divisor — here the divisor is 3, positive, so the remainder is positive too. C, Java, and JavaScript instead use truncated division, where the remainder takes the sign of the dividend, so -7 % 3 would be -1 there. NumPy actually ships both: np.mod() for the Python-style answer, np.fmod() for the C-style one — so if I'm porting numeric code from C, I'd reach for np.fmod() to match the original behavior exactly, not assume np.mod() is a drop-in."</em> The signal: naming the actual numeric answer first, then correctly attributing the difference to floored-vs-truncated division, not just "different rounding."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.mod()</code>'s and <code>np.remainder()</code>'s confirmed identity (<code>np.mod is np.remainder</code>) and floored-division sign rule, matching Python's <code>%</code> and <code>Series.mod()</code> exactly; the confirmed C-style truncated-division sign rule of <code>np.fmod()</code>, and the exact mixed-sign input where the two families disagree; the confirmed divide-by-zero behavior (returns <code>0</code> with a <code>RuntimeWarning</code>, not <code>NaN</code>/<code>inf</code>); the confirmed int64-preserving dtype rule; <code>np.divmod()</code> as the combined quotient-plus-remainder call; and <code>np.power()</code>'s confirmed <code>NaN</code> trap on a negative base with a fractional float exponent. It does not cover complex-number exponentiation (where a negative base with a fractional exponent does have a solution) or <code>np.float_power()</code> beyond its existence, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/135_np_mod_and_power.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/135_np_mod_and_power.py</code></pre>
+<p>Exercise 1 confirms the Section 1/2 rule: <code>np.mod(-7, 3)</code> and <code>np.fmod(-7, 3)</code> disagree (<code>2</code> vs <code>-1</code>), and <code>np.mod</code> is the identical object as <code>np.remainder</code>. Exercise 2 confirms the Section 3 behavior: <code>np.divmod(-7, 3)</code> returns <code>(-3, 2)</code>, and <code>np.power(-8.0, 1/3)</code> is <code>NaN</code>, not the real cube root <code>-2</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.mod(-7, 3) is 2, matching Python's own -7 % 3. np.mod()/np.remainder() use floored division, where the remainder always takes the sign of the divisor (3, positive here) -- not the sign of the dividend (-7), which is the C-style rule np.fmod() follows instead (giving -1 on this same input).">
+    <p class="stem">What does <code>np.mod(-7, 3)</code> return, and which value's sign does the result follow?</p>
+    <button class="opt" data-ok>2, taking the sign of the divisor, not the dividend</button>
+    <button class="opt">-1, taking the sign of the dividend, not the divisor</button>
+    <button class="opt">-2, truncating straight toward zero instead, like plain true_divide would</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.fmod(-7, 3) returns -1, following the C-style truncated-division rule where the remainder takes the sign of the dividend (-7, negative). This disagrees with np.mod(-7, 3), which returns 2 by taking the sign of the divisor instead -- same two inputs, two different valid answers depending on which rule is used.">
+    <p class="stem"><code>np.fmod(-7, 3)</code> disagrees with <code>np.mod(-7, 3)</code>. What does <code>np.fmod()</code> return here, and why?</p>
+    <button class="opt" data-ok>-1, since it follows the C-style sign-of-dividend rule</button>
+    <button class="opt">2, it always matches np.mod() on any input</button>
+    <button class="opt">0, dividing by any smaller divisor always zeros</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via warnings.catch_warnings: np.power(-8.0, 1/3) returns NaN with a RuntimeWarning (invalid value encountered in power), not the real cube root -2. NumPy evaluates a float exponent via the general formula for a**b, which has no real solution for a negative base and a non-integer exponent -- it does not detect that 1/3 corresponds to an integer root and recover the real answer.">
+    <p class="stem">What does <code>np.power(-8.0, 1/3)</code> return, and why isn't it <code>-2</code> (the real cube root)?</p>
+    <button class="opt" data-ok>NaN, since no real-valued solution exists for this</button>
+    <button class="opt">-2.0, since NumPy detects integer roots automatically here</button>
+    <button class="opt">8.0, since negative bases are silently treated positive</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.mod.html"><code>numpy.mod()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.fmod.html"><code>numpy.fmod()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) document the floored-vs-truncated sign distinction directly in their own "Notes" sections; the exact divide-by-zero return value and the <code>np.power()</code> fractional-exponent NaN behavior are confirmed directly in this lesson's own scratch sandbox (numpy 2.5.5) via <code>warnings.catch_warnings</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.mod()</code>/<code>np.remainder()</code>, <code>np.fmod()</code>, and <code>np.power()</code> are new today, added right after Lesson 134's <code>ufunc</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed the whole arithmetic-remainder/exponent gap it found — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the floored-vs-truncated sign rule, the power() NaN trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

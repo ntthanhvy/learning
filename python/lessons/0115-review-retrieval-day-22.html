@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 115 · Review day 22: retrieval across Days 112-114</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 115 · ~20 min · 21 Nov 2026</p>
+<h1>Review day 22: retrieval across Days 112-114</h1>
+<p class="byline">Day 111 (review day 21) covered Days 108, 109, and 110. Since then, three fresh days ran in a row — Day 112 (<code>threading.Lock</code>), Day 113 (<code>glob</code> &amp; <code>fnmatch</code>), Day 114 (<code>shlex</code>) — and Day 114's own closing notes named this exact span as the next review day. This is that review — a twenty-second retrieval day, covering exactly Days 112, 113, and 114.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 114 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth, respectively — <code>socket</code> edges into Phase 2b/FastAPI territory Days 21-25 and 73/108/109 already touch conceptually). No stronger untouched fresh gap turned up this round, and the course's own settled cadence (three fresh days, then a review day: Days 108-110 → review 111, Days 112-114 → review here) says today pays down retrieval instead of forcing a fourth fresh day. The next fresh day starts its topic search from scratch, though it can re-check <code>calendar</code>/<code>socket</code> quickly first.</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 112 &mdash; <code>threading.Lock</code>.</strong> Why does an unprotected shared counter updated by several threads end up lower than the expected total, and what does <code>with lock:</code> guarantee that a manual <code>lock.acquire()</code>/<code>lock.release()</code> pair does not, by default?</p>
+<div class="callout">Fold-out answer: without a lock, two threads can both read the same old counter value before either writes its update back, so one thread's write overwrites the other's instead of building on it — confirmed live, the widened-gap demo lost most of its increments (8000 expected, 2003 actual). <code>with lock:</code> calls <code>lock.acquire()</code> on entry and <code>lock.release()</code> on exit <strong>guaranteed, even if an exception escapes the block</strong> — confirmed live, a <code>ValueError</code> raised inside still left <code>lock.locked()</code> reporting <code>False</code> right after. The manual spelling works the same way when nothing goes wrong, but a forgotten <code>release()</code> on an exception path leaves the lock stuck forever.</div>
+
+<p><strong>Day 113 &mdash; <code>glob</code> &amp; <code>fnmatch</code>.</strong> Why does <code>root.glob("*.csv")</code> miss a matching file sitting inside a subdirectory of <code>root</code>, while <code>root.rglob("*.csv")</code> finds it — and what happens when <code>Path.glob()</code> is called with a pattern that matches nothing at all?</p>
+<div class="callout">Fold-out answer: a plain <code>*</code> in a glob pattern never crosses a <code>/</code> boundary, so <code>glob("*.csv")</code> only looks inside the one directory it's called on. <code>rglob("*.csv")</code> is <code>glob("**/*.csv")</code> written out — <code>**</code> is the one piece of glob syntax allowed to cross a <code>/</code> boundary, so <code>rglob()</code> walks into every subdirectory at every depth applying the same pattern. A pattern matching nothing returns an empty result, confirmed live — <code>list(root.glob("*.xyz"))</code> is <code>[]</code>, never an exception, unlike Day 13's <code>Path.read_text()</code> on a missing file.</div>
+
+<p><strong>Day 114 &mdash; <code>shlex</code>.</strong> What does <code>shlex.split()</code> give you that a plain <code>.split()</code> call on spaces would not, and what is the relationship between <code>shlex.join()</code> and <code>shlex.split()</code>?</p>
+<div class="callout">Fold-out answer: <code>shlex.split()</code> parses a string the way a POSIX shell would, so a quoted substring containing spaces stays together as one list element with the quote marks stripped away — confirmed live, <code>shlex.split('cp "my file.txt" /tmp/backup --verbose')</code> returned <code>['cp', 'my file.txt', '/tmp/backup', '--verbose']</code>, not a naive 4-way split on every space. <code>shlex.join(argv)</code> is the exact inverse: it builds one shell-safe string from a list, quoting each element only where needed, such that <code>shlex.split()</code> on that string reproduces the original list exactly — confirmed live on the same <code>cp</code>/<code>my file.txt</code>/<code>/tmp/backup</code> example.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 112-114's manual thread locking, filename pattern matching, and shell-string splitting/quoting, none of which has a <code>DataFrame</code> or <code>ndarray</code> equivalent. Each original lesson's own boundary callout (NumPy releasing the GIL internally rather than needing manual locks; pattern matching staying a stdlib/OS-level job that still hands matched paths to <code>pd.read_csv()</code> one at a time; command construction being the same stdlib-level job) is recalled by name only, not re-demonstrated.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for making several threads take turns safely around one risky block of code, a tool for finding files by shape instead of walking a tree by hand, and a tool for moving between a command typed as one string and the list form <code>subprocess.run()</code> actually wants. Three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: Day 112 finally built the exact tool Days 73, 108, and 111 had only ever described in words (<code>threading.Lock</code>, after three rounds of naming it without demonstrating <code>.acquire()</code>/<code>.release()</code> running) — closing a loop two review cycles left open. Days 113 and 114 both extend an already-taught lesson rather than standing alone: <code>glob</code>/<code>fnmatch</code> builds directly on Day 13's <code>pathlib.Path</code>, and <code>shlex</code> bridges directly between Day 68's <code>subprocess</code> argument lists and Day 39's <code>argparse</code>-shaped strings. None of the three needed a single new concept from outside what Days 13, 39, 68, and 73 had already set up — only a new stdlib tool applied to an old, familiar problem.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. The standing fresh-gap candidates remain on record from Day 114's own notes &mdash; <code>calendar</code> and <code>socket</code>, thin content and scope-depth respectively &mdash; and no other genuinely untouched stdlib corner turned up this round. Worth a full gap-scan from scratch next round rather than assuming this is exhaustive.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/115_review_retrieval_day_22.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/115_review_retrieval_day_22.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 112, 113, and 114. Exercises: reproducing a protected shared counter with <code>threading.Lock</code> and <code>with lock:</code> so several threads land on exactly the right total every time, building a small directory tree and using <code>Path.rglob()</code> to find a pattern at every depth that a plain <code>Path.glob()</code> would miss, and round-tripping a command string through <code>shlex.split()</code> and back through <code>shlex.join()</code> to confirm the list comes back out unchanged.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="with lock: calls lock.acquire() on entry and lock.release() on exit, guaranteed even if an exception escapes the block -- confirmed live, a ValueError raised inside still left lock.locked() reporting False right after. The manual acquire()/release() pair works the same way only when nothing goes wrong; a forgotten release() on an exception path leaves the lock stuck forever, freezing every other thread waiting on it.">
+    <p class="stem">What does <code>with lock:</code> guarantee that manual <code>lock.acquire()</code>/<code>lock.release()</code> does not, by default?</p>
+    <button class="opt" data-ok>release() still runs even when an exception escapes the block body itself</button>
+    <button class="opt">every other waiting thread wakes up in the exact order it arrived</button>
+    <button class="opt">the protected shared counter gets reset back to zero on each call</button>
+  </div>
+  <div class="q" data-why="A plain * in a glob pattern never crosses a / boundary, so Path.glob('*.csv') only looks inside the one directory it's called on. Path.rglob('*.csv') is glob('**/*.csv') written out -- the ** segment is the one piece of glob syntax allowed to cross a / boundary, so rglob() walks into every subdirectory at every depth applying the same pattern.">
+    <p class="stem">Why does <code>root.glob("*.csv")</code> miss a matching file inside a subdirectory of <code>root</code>, while <code>root.rglob("*.csv")</code> finds it?</p>
+    <button class="opt" data-ok>a plain star never crosses a slash, but rglob's ** does cross it</button>
+    <button class="opt">glob() only searches files that were recently modified during the whole current session</button>
+    <button class="opt">rglob() is simply a newer alias name that fixed an old glob() bug</button>
+  </div>
+  <div class="q" data-why="shlex.join(argv) is the exact inverse of shlex.split(): it builds one shell-safe string from a list of strings, quoting each element only where needed, such that splitting that string back apart with shlex.split() reproduces the original list exactly -- confirmed live on the cp/my file.txt/tmp/backup example from Day 114.">
+    <p class="stem">What is the relationship between <code>shlex.join()</code> and <code>shlex.split()</code>?</p>
+    <button class="opt" data-ok>join() builds a string that split() turns back into the identical list</button>
+    <button class="opt">join() and split() both only ever operate on one single fixed-length tuple</button>
+    <button class="opt">join() is simply one old deprecated alias that split() has fully replaced</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/threading.html#lock-objects"><code>threading</code> — Lock Objects</a> for Day 112, <a href="https://docs.python.org/3/library/pathlib.html#pathlib.Path.glob"><code>pathlib.Path.glob</code></a>/<a href="https://docs.python.org/3/library/fnmatch.html"><code>fnmatch</code></a> for Day 113, and <a href="https://docs.python.org/3/library/shlex.html"><code>shlex</code></a> for Day 114), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day112">112</a>, <a href="../reference/glossary.html#day113">113</a>, <a href="../reference/glossary.html#day114">114</a>).<br>
+Standing fresh-gap candidates remain on record &mdash; <code>calendar</code> and <code>socket</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

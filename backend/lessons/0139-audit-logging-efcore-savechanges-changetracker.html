@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 139 · Audit logging, now in C# too (ChangeTracker, SaveChangesAsync)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 139 · ~20 min</p>
+<h1>Audit logging, now in C# too (ChangeTracker, SaveChangesAsync)</h1>
+<p class="byline">Lesson 46 built an audit log the hand-written way: a second <code>INSERT</code>, written out explicitly, in the same transaction as the state change it records. That works in any language, but it means remembering to write that second line at every single call site that changes something auditable — easy to forget once, and a forgotten audit row is a silent gap. EF Core's answer is different: instead of writing the audit insert by hand each time, override <code>SaveChangesAsync</code> once and let the framework's own change tracker tell you what just changed.</p>
+
+<h2>1 · <code>ChangeTracker</code> already knows what changed, before you ask</h2>
+<p>Every <code>DbContext</code> keeps a running list of every entity it has loaded or added, each tagged with an <dfn data-en="an enum on EntityEntry recording what EF Core believes is true about a tracked entity relative to the database -- Added, Modified, Deleted, or Unchanged -- computed by comparing the entity's current property values against the snapshot EF Core took when it started tracking it" data-vn="EntityState (giữ nguyên) — enum trên EntityEntry, ghi lại EF Core đang nghĩ gì về 1 entity được track so với database -- Added, Modified, Deleted, hoặc Unchanged -- tính bằng cách so sánh giá trị property hiện tại với snapshot EF Core chụp lúc bắt đầu track">EntityState</dfn>: <code>Added</code>, <code>Modified</code>, <code>Deleted</code>, or <code>Unchanged</code>. Microsoft's own change-detection reference is explicit about when this state is current: <code>DbContext.SaveChanges</code> and <code>SaveChangesAsync</code> call <code>ChangeTracker.DetectChanges()</code> automatically, "to ensure that all changes are detected before updating the database" — by the time <code>SaveChangesAsync</code> actually runs, every tracked entity's state already reflects exactly what's about to be written, no extra step required to ask for it.</p>
+<p>That's the opening Lesson 46's Go version never had. A raw SQL <code>UPDATE</code> statement doesn't know, as a matter of language semantics, that it changed exactly the <code>status</code> column on account 42 — the Go code had to say so explicitly, by hand, building its own <code>change</code> JSON. EF Core's tracker already has that answer sitting in memory for every entity about to be saved, which is what makes writing the audit row automatically, once, actually possible.</p>
+
+<h2>2 · One override, not one insert per call site</h2>
+<p>Overriding <code>SaveChangesAsync</code> on the <code>DbContext</code> itself means every caller who already calls <code>SaveChangesAsync</code> — which is everyone, since that's the only way EF Core persists anything — gets audit rows for free, with no second statement to remember:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> AppDbContext : DbContext
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> ICurrentActor _actor; <span class="cm">// Lesson 4's authenticated caller, injected once via the constructor
+</span>
+    <span class="kw">public</span> AppDbContext(DbContextOptions&lt;AppDbContext&gt; options, ICurrentActor actor) : <span class="kw">base</span>(options)
+        =&gt; _actor = actor;
+
+    <span class="kw">public</span> DbSet&lt;Account&gt; Accounts =&gt; Set&lt;Account&gt;();
+    <span class="kw">public</span> DbSet&lt;AuditLog&gt; AuditLogs =&gt; Set&lt;AuditLog&gt;();
+
+    <span class="kw">public</span> <span class="kw">override</span> <span class="kw">async</span> Task&lt;<span class="dt">int</span>&gt; SaveChangesAsync(CancellationToken ct = <span class="kw">default</span>)
+    {
+        <span class="kw">var</span> rows = <span class="kw">new</span> List&lt;AuditLog&gt;();
+        <span class="kw">foreach</span> (<span class="kw">var</span> entry <span class="kw">in</span> ChangeTracker.Entries&lt;Account&gt;())
+        {
+            <span class="kw">if</span> (entry.State != EntityState.Modified) <span class="kw">continue</span>; <span class="cm">// Added/Deleted skipped for this snippet's scope
+</span>            <span class="kw">var</span> changed = entry.Properties
+                .Where(p =&gt; p.IsModified)
+                .ToDictionary(p =&gt; p.Metadata.Name, p =&gt; p.CurrentValue);
+            rows.Add(<span class="kw">new</span> AuditLog
+            {
+                ActorId = _actor.Id,
+                Action = <span class="st">"account.update"</span>,
+                EntityType = <span class="st">"account"</span>,
+                EntityId = entry.Entity.Id,
+                Change = JsonSerializer.Serialize(changed),
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+        }
+        AuditLogs.AddRange(rows); <span class="cm">// queued into the SAME SaveChanges call, same transaction
+</span>        <span class="kw">return</span> <span class="kw">await</span> <span class="kw">base</span>.SaveChangesAsync(ct);
+    }
+}</code></pre>
+<p>Two details carry the whole idea. <code>entry.Properties.Where(p =&gt; p.IsModified)</code> is the C# answer to Lesson 46's hand-built <code>change</code> JSON — instead of the caller deciding what changed, <code>PropertyEntry.IsModified</code> reports it per property, read straight off the tracker. And calling <code>AuditLogs.AddRange(rows)</code> before <code>base.SaveChangesAsync(ct)</code> is what keeps Lesson 46's atomicity guarantee: the queued audit rows and the account update ride inside the exact same <code>SaveChangesAsync</code> call, so EF Core's own single implicit transaction covers both — nothing changes about <em>why</em> that matters, only how the two writes get queued together.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the same shape as a Redux middleware that inspects every dispatched action before it reaches the reducer, rather than every component remembering to log its own actions by hand. <code>SaveChangesAsync</code> is EF Core's one chokepoint every write passes through — overriding it once is the backend version of "put the logic in the middleware, not in every component."</div>
+
+<h2>3 · What this buys, and what it costs</h2>
+<p>The win over Lesson 46's version: nobody writing a new feature can forget the audit insert, because there's no insert left to remember — it happens inside the chokepoint every save already passes through. The cost is the one this override pattern always has: it only fires for changes that go through <em>this</em> <code>DbContext</code>'s <code>SaveChangesAsync</code>. A bulk update run as raw SQL, or a migration, or a different service writing to the same table, bypasses the tracker entirely and produces no audit row — the same "only catches what goes through the one chokepoint" caveat Lesson 118's C# rate limiter already named for per-instance state. An automatic audit log is only as complete as the paths that are guaranteed to flow through it.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 46: Go</th><th>Lesson 139: C#</th></tr></thead>
+<tbody>
+<tr><th>Where the audit insert is written</th><td>explicitly, inline, at each call site that changes something auditable</td><td>once, inside an overridden <code>SaveChangesAsync</code></td></tr>
+<tr><th>How "what changed" is known</th><td>built by hand into a <code>map[string]string</code> before marshaling</td><td>read off <code>PropertyEntry.IsModified</code>/<code>CurrentValue</code> via the tracker</td></tr>
+<tr><th>Atomicity with the state change</th><td>same transaction, two explicit <code>Exec</code> calls</td><td>same <code>SaveChangesAsync</code> call, EF Core's own implicit transaction</td></tr>
+<tr><th>Risk of a forgotten audit row</th><td>yes — a new call site can forget the second insert</td><td>no, for anything using this <code>DbContext</code> — but bypassing it (raw SQL, a migration) still skips it silently</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="interview">
+<p><strong>Q: "We're on EF Core — would you still hand-write an audit insert at every call site like our Go services do?"</strong> A strong answer, out loud: <em>"No — I'd override SaveChangesAsync on the DbContext once, loop ChangeTracker.Entries for the entity types that need auditing, and read PropertyEntry.IsModified and CurrentValue to build the change record, the same way our Go code builds its change JSON by hand today. Queuing the audit rows before calling base.SaveChangesAsync keeps them in the same transaction, so the atomicity guarantee doesn't change. The real trade-off to flag: this only catches writes that go through this DbContext — a raw SQL bulk update or a migration would still bypass it silently, so it's not a substitute for checking where else the table gets written."</em> The signal: naming the chokepoint-only limitation unprompted, not just describing the override.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers overriding <code>SaveChangesAsync</code> and reading <code>ChangeTracker.Entries&lt;TEntity&gt;()</code>/<code>EntityEntry.State</code>/<code>PropertyEntry.IsModified</code> to build an audit row automatically, for the <code>Modified</code> case specifically. It does not cover handling <code>Added</code>/<code>Deleted</code> states in the same loop (a straightforward extension of the same pattern, left out only for snippet length), EF Core's lower-level <code>ISavingChangesInterceptor</code> mechanism (a separate, more plumbing-heavy way to hook the same moment, useful when the audit logic needs to live outside the <code>DbContext</code> itself), or change-tracking proxies/notification entities (a different, opt-in change-detection strategy unrelated to audit logging specifically).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Microsoft's own change-detection reference states that SaveChanges and SaveChangesAsync call ChangeTracker.DetectChanges() automatically, specifically to ensure all changes are detected before the database is updated -- so by the time an overridden SaveChangesAsync runs, every tracked entity's state already reflects what is about to be written.">
+    <p class="stem">Why can an overridden <code>SaveChangesAsync</code> trust <code>ChangeTracker.Entries()</code> without calling <code>DetectChanges()</code> itself first?</p>
+    <button class="opt" data-ok>SaveChangesAsync already calls DetectChanges automatically, first thing, every single time</button>
+    <button class="opt">EntityState values are actually fixed once, permanently, at first creation</button>
+    <button class="opt">DetectChanges only ever matters for entities already marked as Deleted</button>
+    <button class="opt">ChangeTracker quietly refreshes itself once nightly, on some fixed timer</button>
+  </div>
+  <div class="q" data-why="PropertyEntry.IsModified reports, per property, whether that specific value changed since the tracked snapshot was taken -- this is the direct C# equivalent of Lesson 46's Go code building its own change map by hand before marshaling it to JSON.">
+    <p class="stem">What is the C# equivalent of Lesson 46's hand-built Go <code>change</code> map?</p>
+    <button class="opt" data-ok>reading each property's own IsModified flag directly off that entry itself here</button>
+    <button class="opt">a brand new column added directly onto the Account table entirely now</button>
+    <button class="opt">parsing the raw generated SQL text that EF Core happens to emit</button>
+    <button class="opt">a separate nightly job that diffs two entire full backup snapshots daily</button>
+  </div>
+  <div class="q" data-why="Queuing the new AuditLog rows via AddRange before calling base.SaveChangesAsync keeps both the state change and the audit insert inside the exact same SaveChangesAsync call, so EF Core's own implicit transaction covers both writes together -- the same atomicity guarantee Lesson 46 got from wrapping two explicit Exec calls in one transaction.">
+    <p class="stem">Why does queuing audit rows before calling <code>base.SaveChangesAsync(ct)</code> preserve Lesson 46's atomicity guarantee?</p>
+    <button class="opt" data-ok>both writes ride inside that one, exact same SaveChangesAsync call itself here</button>
+    <button class="opt">EF Core silently retries any single insert that happens to fail here</button>
+    <button class="opt">AuditLog rows are only ever written after the full commit succeeds anyway</button>
+    <button class="opt">PropertyEntry objects themselves are already fully durable and persistent anyway, always, truly</button>
+  </div>
+  <div class="q" data-why="Overriding SaveChangesAsync only intercepts writes that actually flow through that DbContext's own SaveChangesAsync call -- a raw SQL bulk update, a migration, or a different service writing the same table all bypass the tracker and the override entirely, producing no audit row and no warning that one is missing.">
+    <p class="stem">What is the real limitation of the automatic <code>SaveChangesAsync</code>-override approach?</p>
+    <button class="opt" data-ok>writes bypassing that one single, exact DbContext's SaveChangesAsync skip it entirely silently</button>
+    <button class="opt">it only ever works correctly for exactly one single entity type here</button>
+    <button class="opt">it requires a totally separate, paid Microsoft licensing tier instead right here</button>
+    <button class="opt">it cannot run inside any method that is also marked as async</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/change-tracking/change-detection">Microsoft Learn: Change Detection and Notifications</a> is the primary source for <code>ChangeTracker.DetectChanges()</code> running automatically inside <code>SaveChanges</code>/<code>SaveChangesAsync</code>, and for its own worked example overriding <code>SaveChangesAsync</code> to loop <code>ChangeTracker.Entries&lt;TEntity&gt;()</code> and read each entry's <code>State</code> — the same shape this lesson's snippet follows, extended with <code>PropertyEntry.IsModified</code> for the per-field change data. <a href="https://learn.microsoft.com/en-us/ef/core/logging-events-diagnostics/interceptors">Microsoft Learn: Interceptors</a> covers the alternative <code>ISavingChangesInterceptor</code> hook named in this lesson's scope line, not explored further here. RESOURCES.md's standing EF Core citations (Lessons 106, 119, 120) still cover eager loading, tracking vs. no-tracking, and the outbox pattern's own EF Core shape; Lesson 46's own PostgreSQL Data Definition and Kleppmann citations still cover the audit-log table design and the event-sequence framing, unchanged by this port.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 46's audit log design and Lesson 120's EF Core outbox-pattern port. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 139 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

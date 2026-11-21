@@ -12083,3 +12083,131 @@ dead-letter queues, still confirmed to have no first-party ASP.NET Core
 angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
 FluentValidation and Polly/.NET resilience libraries, both still
 deliberately out of scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-21 — Lesson 139: audit logging, now in C# too (ChangeTracker, SaveChangesAsync)
+
+Headless run. Orchestrator-level DB check already summarized for this
+round: the most recent `backend` row was `lesson_generated` day=138,
+lesson=`0138-rate-limit-headers-aspnetcore-getstatistics.html`, recorded
+2026-11-20, and nothing recorded for backend on 2026-11-21 yet. Confirmed
+directly on disk too: no `lessons/0139-*.html` file existed before this
+round, and `nav.js`'s last entry was still `n: 138, date: "2026-11-20"` —
+both agree it was safe to proceed with day 139.
+
+Topic picked: Lesson 138's own candidate list named four still-Go-only
+concepts worth the same "now in C# too" treatment — audit logging (46),
+distributed tracing (65), feature flags (70), and HATEOAS (97). Picked
+audit logging specifically because it has the cleanest, most distinct
+C#-native mechanism of the four: EF Core's change tracker already knows
+what changed on every tracked entity before `SaveChangesAsync` runs,
+which is a genuinely different shape from Lesson 46's Go version (a
+hand-built `change` JSON written at every call site) rather than a
+thin restatement of the same code in a different syntax. `grep -i` for
+`ChangeTracker.Entries`/`EntityState`/`ISavingChangesInterceptor` across
+`backend/lessons/` and `glossary.html` came back empty before writing,
+confirming the gap was real and the terms were free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/ef/core/change-tracking/
+change-detection` via `WebFetch`, specifically checking for a worked
+example overriding `SaveChangesAsync` and reading `ChangeTracker.
+Entries<TEntity>()`. Confirmed verbatim: the exact `PostTag`/
+`EntityState.Added` override example (including its `ChangeTracker.
+AutoDetectChangesEnabled` aside, not used in this lesson's own snippet),
+the stated rule that "`SaveChanges` and `SaveChangesAsync`... call
+`ChangeTracker.DetectChanges()`... to ensure that all changes are
+detected before updating the database," and the `EntityState` enum's
+four values (`Added`/`Modified`/`Deleted`/`Unchanged`). A second
+`WebFetch` against `learn.microsoft.com/en-us/ef/core/logging-events-
+diagnostics/interceptors` confirmed the alternative `ISavingChanges
+Interceptor` hook named in this lesson's own scope line as explicitly
+out of scope, not explored further. This lesson's `PropertyEntry.
+IsModified`/`Metadata.Name`/`CurrentValue` members are not directly
+quoted from either fetched page but are standard, well-documented EF
+Core `PropertyEntry` members consistent with the fetched pages' own
+`EntityEntry`-centric examples. `command -v dotnet`/`go`/`node` were all
+attempted this round (not skipped on assumption) and the sandbox blocked
+all three direct-invocation forms the same way prior rounds have
+recorded; `node --version` (not `command -v node`) resolved directly and
+was used for every scratch check below, consistent with the same
+no-approval-needed distinction noted since Lesson 136.
+
+A real bug was caught and fixed only by hand re-reading the snippet
+against the base class signature, not by any compiler (none was
+reachable this round either): the first draft declared `public override
+async Task<int> SaveChangesAsync(long actorId, CancellationToken ct =
+default)` — invalid C#, since `DbContext.SaveChangesAsync` has no
+`actorId` parameter to override against. Fixed by changing the method
+back to the real base signature (`SaveChangesAsync(CancellationToken ct
+= default)`) and threading the actor in through a constructor-injected
+`ICurrentActor` field instead, which is both valid C# and a more
+realistic shape for how Lesson 4's authenticated-caller context would
+actually reach a `DbContext`.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson139/`, then
+`_scratch_lesson139b/` after the `actorId` fix, not `/tmp`, same
+constraint as every round since Lesson 133; nothing written to the repo
+besides the three intended files; both scratch directories deleted
+after): (1) a quiz word-count check per `<div class="q">` block — first
+draft landed uneven on all four questions (Q1 7/9/9/9, Q2 9/10/11/10, Q3
+9/11/10/9, Q4 8/10/10/10), converged after six rewrite-and-recount passes
+using a standalone word-count script to test candidate option text
+before touching the lesson file, to exactly 10/10/10/10 (Q1) and
+12/12/12/12 (Q2, Q3, Q4), exactly one `data-ok` and four options per
+question confirmed the same way; (2) an HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean (div 8/8, p
+16/16, code 59/59, button 16/16, script 3/3, dfn 1/1, pre 1/1, h2 6/6, h1
+1/1, em 4/4, strong 4/4, a 3/3), the one `dfn` tag confirmed to carry
+both `data-en=` and `data-vn=`; (3) a brace/paren/bracket balance check
+on the one `<pre><code>` block after stripping tags and unescaping HTML
+entities — balanced (4/4 braces, 15/15 parens, 0/0 brackets), rechecked
+after the `actorId` fix since that edit changed the paren count (14/14
+before, 15/15 after); the stripped code was also read back in full and
+hand-checked line by line against the corrected base-class signature;
+(4) a raw-unescaped-`&` scan across the lesson — zero hits; (5) a
+duplicate-term scan on `glossary.html`'s first column before adding the
+one new row — zero collisions for `EntityState`; a `<tr>`/`<td>` balance
+check on `glossary.html` after the one-row addition — balanced (424
+`<tr>`, 1269 `<td>`, 423 term rows total = 422 prior + 1 new), plus a
+second duplicate-term scan afterward — zero duplicates; (6) `node
+--check` against `nav.js`, `gloss.js`, `quiz.js` — all clean, both before
+and after the `nav.js` edit; (7) a basic HTML well-formedness check (one
+`<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags in
+gloss/quiz/nav order) — clean.
+
+Registered Lesson 139 in `nav.js` (date 2026-11-21, today's actual
+generation date) right after `n: 138`. Day number used 139, matching
+this file's own day-equals-lesson-number convention, no deviation found.
+`git status --short backend/` confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, this
+`backend/NOTES.md` entry, and the new `backend/lessons/0139-audit-
+logging-efcore-savechanges-changetracker.html`. No new `RESOURCES.md`
+line added — both fetched pages are `learn.microsoft.com`, already
+covered by this file's standing EF Core citations' pattern (Lessons 106,
+119, 120), cited inline in the lesson's own "Go deeper" section instead.
+No new `learning-records/` file added — the topic came from Lesson 138's
+own standing candidate list, not a new observation about the learner;
+`learning-records/` still has no entry newer than Lesson 3, so this
+round was paced as a normal sequential step per the same convention
+every recent round has used. `bin/record-progress backend
+lesson_generated --day 139 --lesson 0139-audit-logging-efcore-
+savechanges-changetracker.html --detail '{"by":"claude-sonnet-5"}'`
+attempted once at the end per this run's own instruction; outcome noted
+in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking fresh
+next time: handling `Added`/`Deleted` states in the same
+`SaveChangesAsync` override loop (named this round as this lesson's own
+out-of-scope next step, a straightforward extension); EF Core's
+`ISavingChangesInterceptor` mechanism, named but not explored, useful
+when audit logic needs to live outside the `DbContext` itself;
+change-tracking proxies/notification entities, a different opt-in
+change-detection strategy unrelated to audit logging specifically;
+distributed tracing (65), feature flags (70), and HATEOAS (97) — the
+other three Go-only concepts from Lesson 138's own candidate list, still
+not ported; Go's `select`-statement arbitration rules, still deferred
+many rounds running on fetched-page-truncation grounds; Lesson 49's
+dead-letter queues, still confirmed to have no first-party ASP.NET Core
+angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
+FluentValidation and Polly/.NET resilience libraries, both still
+deliberately out of scope per MISSION.md's "concepts first" rule.

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 67 · Closing Day 64's TODO: an on_failure_callback on check_kafka_lag</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 67 · ~20 min · 21 Nov 2026</p>
+<h1>Closing Day 64's TODO: an <code>on_failure_callback</code> on <code>check_kafka_lag</code></h1>
+<p class="byline">Today's tangible win: <code>check_kafka_lag</code> — the gate Day 64 wired between <code>load_raw</code> and <code>dbt_build</code> — gets Day 61's exact <code>on_failure_callback</code> mechanism attached to it, so a consumer group that's badly behind doesn't just silently block <code>dbt_build</code> in the Airflow UI, it prints a named alert the moment the gate itself fails. Reusing Day 61's hook, confirmed live this round, on a <code>BashOperator</code> rather than the <code>dbt_build</code> <code>BashOperator</code> it was first proven on.</p>
+
+<div class="callout"><strong>Before today — confirm Day 64's gate is in place:</strong> today adds one keyword argument to <code>check_kafka_lag</code>; it adds no new task and touches no other task's wiring.
+<pre><code>cd dags &amp;&amp; uv run --with "apache-airflow==3.3.1" python3 -c "
+import food_delivery_pipeline as m
+print('upstream of dbt_build:', sorted(t.task_id for t in m.dbt_build.upstream_list))
+"</code></pre>
+Expected: <code>upstream of dbt_build: ['check_kafka_lag']</code>. If that prints <code>['load_raw']</code> instead, finish Day 64 first — today assumes <code>check_kafka_lag</code> already sits between <code>load_raw</code> and <code>dbt_build</code> with the default <code>all_success</code> trigger rule, exactly as that lesson left it.</div>
+
+<h2>1 · The gap: a gate that blocks, but pages nobody</h2>
+<p>Day 64 wired <code>check_kafka_lag</code> as a <em>quality gate</em> — a task upstream of <code>dbt_build</code> whose failure stops <code>dbt_build</code> from starting at all, using Airflow's default <code>all_success</code> trigger rule. That lesson's own closing section named the gap it deliberately left open: "<code>check_kafka_lag</code>'s failure is visible in the Airflow UI and in <code>dbt_build</code> simply never starting, but nothing pages a human yet — Day 61's <code>on_failure_callback</code> mechanism would attach here directly if that's ever wanted." Nobody has to be staring at the Airflow UI for a blocked pipeline to matter; a pipeline that silently stops running daily marts is exactly the kind of failure a person should hear about without having to go looking for it.</p>
+<p>Day 61 already built that hook once, on <code>dbt_build</code>, and confirmed from Airflow 3.3.1's own installed source that it fires once a task instance has truly run out of retries and lands in the terminal <code>FAILED</code> state — distinct from <code>on_retry_callback</code>, which fires on an attempt that still has another try coming. Today is not a new mechanism: it is the same <code>on_failure_callback</code> keyword argument, attached to a second task in the same DAG, closing the exact gap Day 64 named rather than opening new Airflow vocabulary.</p>
+
+<h2>2 · Why <code>check_kafka_lag</code> needs this more than most tasks would</h2>
+<p>Recall Day 64's other deliberate choice: <code>check_kafka_lag</code> gets <code>retries=0</code>, because a stuck consumer's lag rarely clears within the few seconds a retry would wait. That decision has a direct consequence for today's callback: on <code>dbt_build</code> (<code>retries=2</code>), <code>on_failure_callback</code> only fires after two retries have already failed — there is a window where <code>on_retry_callback</code> alone has already told someone something is wrong. On <code>check_kafka_lag</code> (<code>retries=0</code>), the very first failed attempt <em>is</em> the final one: <code>is_eligible_to_retry()</code> has nothing to grant, the task instance goes straight to <code>FAILED</code>, and <code>on_failure_callback</code> is the only hook that will ever fire for this task — a <dfn data-en="an Airflow task configured with retries=0, so its first failed attempt is already its final one: is_eligible_to_retry() has no budget left to grant, the task instance lands straight in the terminal FAILED state, and on_failure_callback is the only state-change hook that attempt can ever reach, with no prior on_retry_callback warning" data-vn="giữ nguyên &quot;zero-retry task&quot; — task Airflow có retries=0, nên lần fail đầu tiên cũng chính là lần cuối cùng: is_eligible_to_retry() không còn gì để cấp, task instance đi thẳng vào trạng thái FAILED cuối cùng, và on_failure_callback là hook duy nhất lần thử đó có thể bao giờ chạm tới, không có cảnh báo on_retry_callback nào trước đó">zero-retry task</dfn> has no earlier warning to lean on, which is exactly why today's gap mattered more here than it might have on a task with retries already cushioning the first failure.</p>
+<table class="gloss">
+<tr><th>Task</th><th><code>retries</code></th><th>First failure lands in</th><th>Only alert hook that can ever fire first</th></tr>
+<tr><td><code>dbt_build</code> (Day 7/35/61)</td><td>2</td><td><code>UP_FOR_RETRY</code> (twice, before <code>FAILED</code>)</td><td><code>on_retry_callback</code>, before <code>on_failure_callback</code> ever gets a turn</td></tr>
+<tr><td><code>check_kafka_lag</code> (Day 64/67)</td><td>0</td><td><code>FAILED</code>, immediately</td><td><code>on_failure_callback</code> — nothing fires before it</td></tr>
+</table>
+
+<h2>3 · Build: the same callback shape, a second task</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 64 added <code>check_kafka_lag</code> to. Add one function next to Day 61's <code>log_dbt_build_failure</code>, and one keyword argument on the existing <code>check_kafka_lag</code> task:</p>
+<pre><code><span class="kw">def</span> log_dbt_build_failure(context):
+    <span class="cm"># Day 61 -- unchanged</span>
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">print</span>(<span class="str">f"FINAL FAILURE for {ti.task_id} after {ti.try_number} attempt(s): {context['exception']!r}"</span>)
+
+
+<span class="kw">def</span> log_kafka_lag_failure(context):
+    <span class="cm"># new today -- check_kafka_lag has retries=0, so this fires on the very</span>
+    <span class="cm"># first (and only) failed attempt; there is no on_retry_callback first</span>
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">print</span>(<span class="str">f"GATE FAILED: {ti.task_id} blocked dbt_build after {ti.try_number} attempt(s): {context['exception']!r}"</span>)
+    <span class="cm"># TODO: same honest TODO shape as Day 61's own log_dbt_build_failure --</span>
+    <span class="cm"># replace with a real page/alert call once this course picks a non-paid</span>
+    <span class="cm"># notification channel (per MISSION.md's "no paid services" constraint).</span>
+
+
+<span class="cm"># inside the existing `with DAG(...) as dag:` block:</span>
+check_kafka_lag = BashOperator(
+    task_id=<span class="str">"check_kafka_lag"</span>,
+    bash_command=<span class="str">"uv run --with confluent-kafka python3 /opt/scripts/check_consumer_lag.py"</span>,
+    on_failure_callback=log_kafka_lag_failure,  <span class="cm"># new today</span>
+)</code></pre>
+<p>Nothing about <code>check_kafka_lag</code>'s <code>bash_command</code>, its lack of <code>retries</code>, or its default <code>all_success</code> trigger rule changes. The callback observes a terminal state that was already going to happen — it does not change whether the gate blocks <code>dbt_build</code>, only what happens, additionally, once it does.</p>
+
+<h2>4 · Verify: the DAG parses, then a forced failure proves the hook fires on this task too</h2>
+<p>Same module-import check Days 35, 45, 46, 47, 54, 56, 61 and 64 each used, since the live-scheduler path is still blocked (one attempt made this round at <code>airflow db migrate</code>, same approval-gate result as every round 35 through 66):</p>
+<pre><code>cd dags &amp;&amp; uv run --with "apache-airflow==3.3.1" python3 -c "
+import food_delivery_pipeline as m
+print('check_kafka_lag on_failure_callback:', m.check_kafka_lag.on_failure_callback)
+print('check_kafka_lag retries:', m.check_kafka_lag.retries)
+print('dbt_build on_failure_callback unchanged:', m.dbt_build.on_failure_callback)
+"</code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>check_kafka_lag on_failure_callback: [&lt;function log_kafka_lag_failure at 0x...&gt;]
+check_kafka_lag retries: 0
+dbt_build on_failure_callback unchanged: [&lt;function log_dbt_build_failure at 0x...&gt;]</code></pre>
+<p>That confirms the wiring, not the behavior. To confirm the behavior without the blocked scheduler, this round reused Day 61's exact proof: forcing <code>airflow.sdk.execution_time.task_runner.finalize()</code> directly with a real <code>TaskInstanceState.FAILED</code> and a real exception, this time against a stand-in for <code>check_kafka_lag</code> instead of <code>dbt_build</code>:</p>
+<pre><code><span class="kw">from</span> airflow.sdk.execution_time <span class="kw">import</span> task_runner <span class="kw">as</span> tr
+<span class="kw">from</span> airflow.utils.state <span class="kw">import</span> TaskInstanceState
+
+err = ValueError(<span class="str">"lag exceeds threshold: 1842 > 1000"</span>)
+context = {<span class="str">"exception"</span>: err, <span class="str">"task_instance"</span>: ti}
+tr.finalize(ti, TaskInstanceState.FAILED, context, log, error=err)</code></pre>
+<p>Output, captured exactly:</p>
+<pre><code>GATE FAILED: check_kafka_lag blocked dbt_build after 1 attempt(s): ValueError('lag exceeds threshold: 1842 > 1000')</code></pre>
+<p><code>ti.try_number</code> prints <code>1</code> here, never higher, confirmed by also forcing <code>TaskInstanceState.UP_FOR_RETRY</code> on the same stand-in task and finding Airflow refuses to even reach that branch meaningfully for a task with <code>retries=0</code> — <code>is_eligible_to_retry()</code> has nothing to grant with zero retries configured, so <code>FAILED</code> is the only terminal state this task can ever land in on its first bad exit, reconfirming Section 2's table rather than just asserting it.</p>
+<div class="callout"><strong>Checked as a direct source-level call this round, not a live scheduler (same honest-disclosure convention Days 17, 35, 41, 45, 46, 47, 50, 54, 55, 56, 58, 61 and 64 each used):</strong> this sandbox has no reachable Airflow metadata database, and one attempt this round at <code>airflow db migrate</code> hit the same interactive-approval gate logged every round since Day 35 (now thirty-three rounds, 35-67) — not retried a second time, per this course's own convention. What was confirmed live instead: the DAG module import (real output, shown above, against a scratch copy carrying every prior round's settings — Days 7/35/45/46/47/51/54/56/61/64 — plus today's one new keyword argument), and <code>finalize()</code> itself invoked directly against a minimal stand-in task/task-instance pair standing in for <code>check_kafka_lag</code> specifically (not <code>dbt_build</code>, which Day 61 already used), producing the exact printed line quoted above. The edited DAG file itself was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm no other task's behavior moved — Day 64's wiring and Day 61's own callback on <code>dbt_build</code> are both still exactly where those lessons left them:</p>
+<pre><code>cd dags &amp;&amp; uv run --with "apache-airflow==3.3.1" python3 -c "
+import food_delivery_pipeline as m
+print('upstream of dbt_build:', sorted(t.task_id for t in m.dbt_build.upstream_list))
+print('dbt_build retries:', m.dbt_build.retries)
+"</code></pre>
+<p>Expected: <code>upstream of dbt_build: ['check_kafka_lag']</code> and <code>dbt_build retries: 2</code>, unchanged from Day 64 and Day 35 — today only adds one keyword argument to one existing task. Commit <code>dags/food_delivery_pipeline.py</code>.</p>
+
+<h2>5 · What this closes, and what is still a <code>print</code></h2>
+<p>This is the same move Day 58 made for Day 55's deferred <code>on_lost</code>, Day 61 made for Day 35's deferred <code>on_failure_callback</code>, Day 62 made for Day 41's deferred replay, and Day 64 made for Day 37's deferred DAG wiring: find a lesson's own named, concrete, unbuilt next step and build exactly that. The difference today is narrower than any of those: Day 64 named two next steps in the same sentence, and today closes only the first — the callback. <code>LAG_THRESHOLD = 1000</code> still lives as a hardcoded constant inside Day 37's script, not an Airflow <code>Variable</code> the way Day 38's growth-check cursor is. That is a real, separate change (editing the script's own constant and the DAG's environment, not adding a callback keyword), not a second half of today's work folded in for convenience.</p>
+<p>Both of this DAG's failure-prone tasks now alert the same way: <code>dbt_build</code> since Day 61, <code>check_kafka_lag</code> since today. Neither call sends anything anywhere yet — both are a <code>print</code>, the same honest TODO shape Day 45 first left on <code>check_dead_letters</code> and Day 61 repeated on <code>dbt_build</code>, because this course has no paid notification service in scope per <code>MISSION.md</code>. The moment this portfolio picks a free channel (a Slack incoming webhook is the likely candidate, per Day 61's own note), both functions change in exactly the same way, at the same time, because they already share the identical hook.</p>
+
+<div class="interview">
+<p><strong>Q: "You've got a quality gate in your DAG that blocks a downstream dbt build on bad data. How do you make sure a human actually finds out when it fires, instead of just checking the Airflow UI?"</strong> A strong answer, out loud: <em>"I attach an on_failure_callback to the gate task itself — the same hook I'd use on any task, since it fires once that task instance has genuinely run out of retries and landed in a final FAILED state. For a gate I've deliberately given zero retries, because its failure mode doesn't self-heal, that callback fires on the very first bad exit — there's no earlier on_retry_callback warning to lean on, so the failure callback is the only alert hook that task will ever get. Today that callback is just a print with the exception's real repr, the same honest placeholder I used on the build task itself, because wiring a real paging integration is a separate decision this portfolio hasn't made yet. The useful part is that it's the identical mechanism on both tasks, so swapping the print for a real Slack call later is one change, not two."</em> The signal: connecting a task's retries setting to which callback can fire first, not treating on_failure_callback as interchangeable with on_retry_callback regardless of configuration.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers attaching Day 61's exact <code>on_failure_callback</code> mechanism to <code>check_kafka_lag</code>, and the consequence of that task's <code>retries=0</code> setting on which callback can ever fire first. It does not change Day 37's lag-check script, Day 64's trigger rule or task ordering, or Day 61's own callback on <code>dbt_build</code> — all three stay exactly as those lessons left them. It also does not move <code>LAG_THRESHOLD</code> into an Airflow <code>Variable</code> (Day 64's other named next step, a separate change to the script and its environment, not today's), send a real notification anywhere (still a <code>print</code>, same as Day 61's), or touch <code>on_retry_callback</code>/<code>on_success_callback</code>/<code>on_skipped_callback</code> (vocabulary Day 61 already scoped out, unchanged here).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="check_kafka_lag has retries=0, set deliberately on Day 64 because a stuck consumer's lag rarely clears within the few seconds a retry would wait. With zero retries configured, is_eligible_to_retry() has nothing to grant, so the very first failed attempt lands straight in the terminal FAILED state -- there is no UP_FOR_RETRY attempt first, and therefore no on_retry_callback firing before on_failure_callback gets its turn.">
+    <p class="stem">Why does <code>check_kafka_lag</code>'s first failure go straight to <code>on_failure_callback</code>, with nothing firing first?</p>
+    <button class="opt" data-ok>retries=0 means that first failed attempt is already final</button>
+    <button class="opt">BashOperator tasks simply cannot ever support on_retry_callback at all</button>
+    <button class="opt">Airflow 3 fully removed on_retry_callback from every single task</button>
+  </div>
+  <div class="q" data-why="Day 64 already set check_kafka_lag's own retries to 0 and its trigger rule to the default all_success, both deliberate choices from that lesson, left untouched. Today's only change is one new keyword argument, on_failure_callback, reusing Day 61's exact mechanism on a second task rather than altering anything about how or whether the gate itself blocks dbt_build.">
+    <p class="stem">What does today's change actually add to <code>check_kafka_lag</code>?</p>
+    <button class="opt" data-ok>one new keyword argument adding a fresh on_failure_callback hook, nothing else</button>
+    <button class="opt">a brand new retries count, raised from zero up to two</button>
+    <button class="opt">a switch away from all_success over to Day 45's own rule</button>
+  </div>
+  <div class="q" data-why="Day 64 named two separate next steps in one sentence: an on_failure_callback on check_kafka_lag, and moving LAG_THRESHOLD into an Airflow Variable via Day 38's cursor pattern. Today closes only the first. The Variable move is a different kind of change entirely -- editing Day 37's script constant and the task's environment, not adding a callback keyword -- and stays open for a future round.">
+    <p class="stem">Of Day 64's two named next steps, which one does today's lesson leave open?</p>
+    <button class="opt" data-ok>moving LAG_THRESHOLD itself into a real Airflow Variable</button>
+    <button class="opt">attaching any failure callback to check_kafka_lag at all</button>
+    <button class="opt">wiring check_kafka_lag anywhere into the real DAG itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs (already Days 35/45/46/61's primary source) document <code>on_failure_callback</code> and <code>retries</code> at the API-reference level; not re-fetched live this round either (no working <code>WebFetch</code> tool, the same gap Days 17, 23, 26, 31, 34, 35, 45, 54, 56, 58 and 61 each hit) — today's specific claim (that a <code>retries=0</code> task's first failure is also its final one, decided by <code>is_eligible_to_retry()</code>) was confirmed instead by reading <code>airflow.sdk.execution_time.task_runner</code>'s installed source directly, the same module Day 61's own primary citation already named, and calling its <code>finalize()</code> function by hand against a stand-in for this specific task. Confirm the documented parameter list against the live page before quoting it in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 67.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty-three rounds, 35-67) — still worth a human granting it once, including for today's own thread: confirming a real scheduler run actually fires <code>check_kafka_lag</code>'s callback on a genuine lag failure, not just a hand-forced <code>finalize()</code> call. Day 64's other named next step is still open: moving <code>LAG_THRESHOLD</code> into an Airflow <code>Variable</code> via Day 38's cursor pattern, a script-and-environment change rather than a callback. With today's round, Airflow has had the most recent fresh-gap attention; a future round's gap-scan should weigh dbt or Kafka next, or whichever named TODO or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why a task's own retries count decides which alert hook can fire first, or where the Variable move from Day 38 would actually plug in? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

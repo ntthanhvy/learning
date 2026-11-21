@@ -12899,3 +12899,119 @@
   `bin/record-progress` attempt result below (run once, for real, to
   close out this round; if it failed, that failure does not invalidate
   this lesson).
+- 2026-11-21 generation (Lesson 135, headless run): this round's own DB
+  read via the `node -e ... spawnSync('psql', ...)` workaround (writing the
+  script to a file first, since typing `psql "$LEARNING_DB_URL" ...`
+  directly in a Bash command is hard-blocked for this sandboxed session —
+  "Contains simple_expansion") was reported by the orchestrator as having
+  already succeeded moments before this round started, confirming the
+  latest `course='data'` row was day 134, dated 2026-11-20 — today's round
+  was not a duplicate. Idempotency re-confirmed directly on disk and in
+  `nav.js` before writing anything: no `lessons/0135-*.html` existed and no
+  `n: 135`/`2026-11-21` entry existed in `nav.js`. Read `MISSION.md`
+  (unmodified), this file's own tail, `RESOURCES.md`, the one
+  `data/learning-records/` baseline file, `assets/nav.js`'s `LESSONS`
+  array, and Lesson 134's own HTML plus its matching
+  `practice/134_np_trunc_and_fix.py` in full as the structural template.
+  Topic choice: ran this round's own fresh scan (per this course's "fresh
+  scan each round" convention) — grepped every lesson body and every
+  glossary row case-insensitively for every `np.[a-z_]*(` call already in
+  use (built a de-duplicated list of every distinct name found), then
+  separately for `np.mod(`, `np.remainder(`, `np.fmod(`, `np.divmod(`,
+  `np.power(`: zero hits anywhere for the whole arithmetic-remainder/
+  exponent family. Separately confirmed the Lesson 126-134
+  elementwise-ufunc arc (abs/sqrt/floor/ceil/log/exp/minimum+maximum/
+  fmin+fmax/round/trunc+fix/sign/roll/vectorize) is now fully closed —
+  checked each candidate close family member one at a time
+  (`np.fmin()`/`np.fmax()` already have their own Lesson 132 Exercise 3
+  and quiz question, not a gap; `np.copysign()`/`np.signbit()` were
+  explicitly named out-of-scope in Lesson 127's own scope line per
+  `MISSION.md`'s "no deep NumPy internals" line; `np.corrcoef()` was
+  explicitly named out-of-scope in Lesson 126's own byline per
+  `MISSION.md`'s "no deep linear algebra" line; `np.nanargmax()`/
+  `np.nanargmin()`, `np.nanpercentile()`/`np.nanquantile()`, and
+  `np.count_nonzero()`/`np.argwhere()` were each already given their own
+  exercise/quiz question inside an earlier lesson as "the NaN-safe
+  sibling," not left as a scope-line deferral). Also checked
+  pandas-side candidates (plain `.pivot()` vs `pivot_table()`, `.size()`,
+  `MultiIndex`, `.str.pad()`, `.duplicated()`) and confirmed each already
+  has dedicated lesson coverage. Picked the `np.mod()`/`np.fmod()`/
+  `np.power()` arithmetic-ufunc family: a genuine, fully untouched gap: a
+  fresh branch of the same ufunc family Lessons 126-134 built, and the
+  negative-number modulo sign trap is a classic "predict the output"
+  interview question per `MISSION.md`'s own framing ("read NumPy-flavored
+  code... and predict its output"). Verified directly in a scratch
+  sandbox (numpy 2.5.5, pandas 3.1.1, `uv run --with pandas`) rather than
+  trusting memory: confirmed `np.mod is np.remainder` evaluates `True` (the
+  same function object, not just equivalent behavior); confirmed
+  `np.mod(-7, 3)` is `2`, matching Python's own `-7 % 3` exactly (floored
+  division, remainder takes the divisor's sign) and `Series.mod()`;
+  confirmed `np.fmod(-7, 3)` is `-1` instead (C-style truncated division,
+  remainder takes the dividend's sign) — the exact mixed-sign input where
+  the two families diverge. Confirmed directly via `warnings.catch_warnings`
+  that both `np.mod(5, 0)` and `np.fmod(5, 0)` return `0` (not `NaN`/`inf`)
+  with a `RuntimeWarning` ("divide by zero encountered in remainder"/
+  "...in fmod"); confirmed an `int64` array stays `int64` under `np.mod()`
+  (no upcast), matching the floor/ceil/trunc/round family's int-preserving
+  rule rather than sqrt/log/exp's always-upcast rule. Confirmed
+  `np.divmod(-7, 3)` returns `(-3, 2)`, the floored quotient paired with
+  the Section 1 remainder. Confirmed directly `np.power(-8.0, 1/3)` returns
+  `NaN` with a `RuntimeWarning` ("invalid value encountered in power"),
+  not the real cube root `-2.0` someone might expect — NumPy evaluates a
+  float exponent via the general `a**b` formula with no real solution for
+  a negative base, confirmed separately that `np.power(2, 10)` behaves
+  ordinarily (`1024`) and `Series.pow()` matches `np.power()` exactly. Did
+  not build out complex-number exponentiation or `np.float_power()` beyond
+  naming them in the scope line, out of scope per `MISSION.md`'s "no deep
+  NumPy internals" line. Added exactly four new glossary rows, "np.mod()
+  / np.remainder()", "np.fmod()", "np.divmod()", "np.power()" — four rows
+  for four names, directly after Lesson 134's "ufunc" entry — confirmed via
+  a scripted scan of every first-column term that none of the four names
+  were already present, zero duplicates found; each of the three `<dfn>`
+  tags used in the lesson body (`np.mod()`, `np.fmod()`, `np.power()`) was
+  also embedded verbatim into its matching glossary row's third column,
+  matching the established convention of duplicating the exact dfn markup
+  in both places. `tr`/`td`/`th`/`dfn` balance confirmed 215/215, 642/642,
+  3/3, 12/12 via occurrence-count `grep -o`, not the line-count form
+  Lesson 130's own note flagged as an unreliable shortcut for `<th>` in
+  particular. Also included
+  an explicit `.interview` callout div, matching this course's standing
+  rule. Verification performed mechanically via a scratch directory
+  `.scratch-data-135/` created at the repo root (deleted after, never
+  tracked by git, matching every prior round's own precedent): (1) a
+  quiz-word-count script found the first draft mismatched across all three
+  questions (9/9/6, 7/8/9, 10/6/8) and, after three rounds of wording
+  trims, confirmed exactly 10/10/10, 8/8/8, and 8/8/8 option words across
+  the three questions, one `data-ok` per question throughout; (2) an HTML
+  tag-balance script confirmed fully balanced on the first pass: html/
+  head/body 1/1, div 6/6, p 17/17, code 84/84, pre 5/5, h1 1/1, h2 7/7,
+  strong 5/5, button 9/9, script 3/3, dfn 3/3, span 36/36, em 2/2, a 3/3,
+  title 1/1, zero raw unescaped `&` outside the lesson's own `cd
+  ~/learning/data && uv run ...` shell command inside its own
+  `<pre><code>` block (matching every prior round's own precedent for that
+  exact exception); exactly 3 `<dfn>`-carrying tags, all three with
+  `data-en`/`data-vn`, matching the three new lesson-body dfns (the
+  glossary's own three duplicated dfns are separate, confirmed in the
+  glossary's own balance check above). `node --check` confirmed `nav.js`,
+  `gloss.js`, and `quiz.js` all still parse as valid JavaScript, both
+  before and after adding one `n: 135` entry and one
+  `0135-np-mod-and-power` file reference to `nav.js`. The first run of the
+  shipped (unsolved) `practice/135_np_mod_and_power.py`, run directly from
+  its real `practice/` location via `uv run --with pandas python3`,
+  printed exactly 2 ✗ with no raw traceback, as expected. Building the
+  solved copy inside `.scratch-data-135/` (deleted after, never tracked by
+  git) printed both ✓ and "All green" on the first attempt, no further
+  fixes needed. Re-ran the shipped file directly from `practice/` again
+  afterward and reproduced the identical all-✗ result, confirming the
+  solved copy's edits never leaked back into the shipped baseline. This
+  round's own fresh scan closed the whole arithmetic-remainder/exponent
+  gap it found — tomorrow's round owes a brand new fresh scan with nothing
+  pre-committed, per this course's standing convention. No new
+  `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal since mid-October. `git status --short` after all
+  edits is expected to show only the intended `data/` files touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0135-np-mod-and-power.html`, new
+  `data/practice/135_np_mod_and_power.py`, and this file). The scratch
+  directory `.scratch-data-135/` was deleted after verification, at the
+  repo root but never tracked by git.

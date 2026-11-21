@@ -276,6 +276,8 @@
       file: "lessons/0133-np-round.html" },
     { n: 134, date: "2026-11-20", title: "np.trunc(): the fourth rounding direction, and np.fix()'s retirement",
       file: "lessons/0134-np-trunc-and-fix.html" },
+    { n: 135, date: "2026-11-21", title: "np.mod()/np.remainder() vs np.fmod(): the sign trap, plus np.power()",
+      file: "lessons/0135-np-mod-and-power.html" },
   ];
 
   const REFS = [

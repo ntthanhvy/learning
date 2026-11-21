@@ -236,6 +236,8 @@
       file: "lessons/0113-glob-and-fnmatch.html" },
     { n: 114, date: "2026-11-20", title: "shlex: splitting and quoting shell-style strings",
       file: "lessons/0114-shlex-split-and-quote.html" },
+    { n: 115, date: "2026-11-21", title: "Review day 22: retrieval across Days 112-114",
+      file: "lessons/0115-review-retrieval-day-22.html" },
   ];
 
   const REFS = [

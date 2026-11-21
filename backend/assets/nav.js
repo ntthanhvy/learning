@@ -284,6 +284,8 @@
       file: "lessons/0137-cors-aspnetcore-addcors-usecors.html" },
     { n: 138, date: "2026-11-20", title: "Rate-limit headers, now in C# too",
       file: "lessons/0138-rate-limit-headers-aspnetcore-getstatistics.html" },
+    { n: 139, date: "2026-11-21", title: "Audit logging, now in C# too",
+      file: "lessons/0139-audit-logging-efcore-savechanges-changetracker.html" },
   ];
 
   const REFS = [

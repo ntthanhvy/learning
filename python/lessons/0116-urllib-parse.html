@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 116 · urllib.parse: taking a URL apart and putting one together</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 116 · ~20 min · 22 Nov 2026</p>
+<h1><code>urllib.parse</code>: taking a URL apart and putting one together</h1>
+<p class="byline">Day 16's FastAPI handlers get path and query parameters handed to them already parsed — the framework does that work for you on the way in. But plenty of real code sits on the <em>other</em> side: building a URL to call another service, logging the exact request that went out, or parsing a URL string that arrived as plain text (a webhook payload, a config value, a pasted link). <code>urllib.parse</code> is the standard-library module for both directions, with no framework required.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 115 closed the twenty-second review cycle and named today as fresh day 1 of a new three-fresh-then-review cycle, explicitly not <code>calendar</code> or <code>socket</code> (thin content and scope-depth, the two standing ruled-out candidates). A fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> this round turned up several genuine zero-hit stdlib corners: <code>urllib.parse</code>, <code>selectors</code>, <code>signal</code>, <code>sched</code>, <code>stat</code>, <code>tracemalloc</code>, <code>platform</code>, <code>ipaddress</code>, <code>mimetypes</code>, <code>binascii</code>, <code>codecs</code>, and <code>unicodedata</code>. One early candidate, <code>tomllib</code>, turned out <strong>not</strong> to be a clean gap on closer inspection — Day 10's own practice file already imports and uses it to parse a <code>pyproject.toml</code> fixture, even though the lesson prose names it only once in passing. <code>urllib.parse</code> won over the remaining candidates for connecting directly to two already-taught lessons rather than standing alone: Day 16's FastAPI path/query params (parsed automatically by the framework, never shown by hand) and Day 68's <code>shlex.quote()</code>-style "make this safe to embed in a string" problem, here solved for URLs instead of shell commands.</div>
+
+<h2>1 · <code>urlparse()</code>: breaking a URL string into its named pieces</h2>
+<p>A URL is not one opaque string — it has a fixed shape: a scheme, a host, a path, and (often) a query string after a <code>?</code>. <code>urlparse()</code> reads that shape out directly instead of hand-rolling a split on <code>://</code> and <code>?</code>:</p>
+<pre><code><span class="kw">from</span> urllib.parse <span class="kw">import</span> urlparse
+
+url = <span class="str">"https://api.example.com/search?q=hello+world&amp;page=2"</span>
+parsed = urlparse(url)
+<span class="kw">print</span>(parsed.scheme)   <span class="cm"># confirmed live: https</span>
+<span class="kw">print</span>(parsed.netloc)   <span class="cm"># confirmed live: api.example.com</span>
+<span class="kw">print</span>(parsed.path)     <span class="cm"># confirmed live: /search</span>
+<span class="kw">print</span>(parsed.query)    <span class="cm"># confirmed live: q=hello+world&amp;page=2</span></code></pre>
+<p><dfn data-en="urlparse(url) splits a URL string into its named pieces -- scheme, netloc (host, and port if present), path, and query (the raw text after ?) -- returned together as one ParseResult object, read by attribute rather than by index" data-vn="giữ nguyên &quot;urlparse&quot; — tách 1 chuỗi URL thành các phần có tên: scheme, netloc (host, kèm port nếu có), path, và query (phần text thô sau dấu ?); trả về 1 object ParseResult, đọc bằng attribute chứ không phải index">urlparse()</dfn> returns a single <code>ParseResult</code> object holding every piece as a named attribute — <code>.query</code> here is still one raw string, <code>"q=hello+world&amp;page=2"</code>, not yet broken into individual key/value pairs; that's the next section's job.</p>
+
+<h2>2 · <code>parse_qs()</code>: the query string as a dict — of lists</h2>
+<p>A query string can repeat the same key more than once (<code>?tag=py&amp;tag=web</code> is legal and common — think multi-select filters). <code>parse_qs()</code> handles that by giving every key a <strong>list</strong> of values, even when there's only one:</p>
+<pre><code><span class="kw">from</span> urllib.parse <span class="kw">import</span> urlparse, parse_qs
+
+url = <span class="str">"https://api.example.com/search?q=hello+world&amp;page=2&amp;tag=py&amp;tag=web"</span>
+qs = parse_qs(urlparse(url).query)
+<span class="kw">print</span>(qs)
+<span class="cm"># confirmed live: {'q': ['hello world'], 'page': ['2'], 'tag': ['py', 'web']}</span>
+<span class="kw">print</span>(<span class="kw">type</span>(qs[<span class="str">"page"</span>]), qs[<span class="str">"page"</span>])
+<span class="cm"># confirmed live: &lt;class 'list'&gt; ['2']  -- a one-item list, not the bare string '2'</span></code></pre>
+<p><dfn data-en="parse_qs(query_string) parses a URL's raw query string into a dict mapping each key to a LIST of its values, because a query string may legally repeat the same key more than once -- even a key that appears only once still maps to a one-item list, never a bare value" data-vn="giữ nguyên &quot;parse_qs&quot; — parse query string thô của URL thành dict, mỗi key map tới 1 LIST các giá trị của nó, vì query string hợp lệ có thể lặp lại cùng 1 key nhiều lần; dù key chỉ xuất hiện 1 lần vẫn map tới list 1 phần tử, không bao giờ là giá trị trần">parse_qs()</dfn> also undoes <code>+</code>-as-space encoding automatically — notice <code>hello+world</code> in the raw query string became the two-word string <code>'hello world'</code>, not a literal plus sign. This is exactly the step Day 16's FastAPI handler never shows: by the time <code>q: str</code> reaches a handler parameter, FastAPI has already done this parsing — <code>parse_qs()</code> is what to reach for when the same URL arrives as a plain string with no framework in front of it.</p>
+
+<h2>3 · <code>urlencode()</code>: a dict to a query string, the write direction</h2>
+<p>Going the other way — building a URL to call another service — starts from ordinary Python values, which need percent-encoding before they're safe to drop into a URL (a space is not a legal character in one):</p>
+<pre><code><span class="kw">from</span> urllib.parse <span class="kw">import</span> urlencode
+
+params = {<span class="str">"q"</span>: <span class="str">"hello world"</span>, <span class="str">"page"</span>: 2}
+<span class="kw">print</span>(urlencode(params))
+<span class="cm"># confirmed live: q=hello+world&amp;page=2</span>
+
+url = <span class="str">"https://api.example.com/search?"</span> + urlencode(params)
+<span class="cm"># confirmed live: https://api.example.com/search?q=hello+world&amp;page=2</span></code></pre>
+<p><dfn data-en="urlencode(dict) builds a URL query string from a plain dict, percent-encoding (and space-to-plus-encoding) every key and value as needed -- the exact inverse of parse_qs(), for the write direction instead of the read direction" data-vn="giữ nguyên &quot;urlencode&quot; — xây query string của URL từ 1 dict thường, tự percent-encode (và đổi space thành +) từng key/value khi cần; ngược hẳn với parse_qs(), lo chiều viết thay vì chiều đọc">urlencode()</dfn> converted the <code>int</code> <code>2</code> to the text <code>"2"</code> and the space in <code>"hello world"</code> to a <code>+</code> automatically — the same encoding <code>parse_qs()</code> expects and reverses, confirmed live by round-tripping <code>parse_qs(urlparse(url).query)</code> back to <code>{'q': ['hello world'], 'page': ['2']}</code>.</p>
+
+<h2>4 · <code>quote()</code>/<code>unquote()</code>: percent-encoding one value by hand</h2>
+<p><code>urlencode()</code> handles a whole dict of query parameters; <code>quote()</code> handles a single raw value — useful for a path segment rather than a query parameter, where <code>urlencode()</code> doesn't apply:</p>
+<pre><code><span class="kw">from</span> urllib.parse <span class="kw">import</span> quote, unquote
+
+<span class="kw">print</span>(quote(<span class="str">"hello world/slash?q"</span>))
+<span class="cm"># confirmed live: hello%20world/slash%3Fq</span>
+<span class="kw">print</span>(quote(<span class="str">"hello world/slash?q"</span>, safe=<span class="str">"/"</span>))
+<span class="cm"># confirmed live: hello%20world/slash%3Fq  -- safe="/" is the default already; / stays literal</span>
+<span class="kw">print</span>(unquote(<span class="str">"hello%20world%2Fslash%3Fq"</span>))
+<span class="cm"># confirmed live: hello world/slash?q</span></code></pre>
+<p><dfn data-en="quote(s) percent-encodes every character in s that isn't safe to appear literally in a URL (turning a space into %20, a ? into %3F, and so on) EXCEPT the characters named in its safe= argument, which defaults to '/' so a path's own slashes are left alone; unquote(s) is the exact inverse, decoding every %XX sequence back to its original character" data-vn="giữ nguyên &quot;quote&quot; — percent-encode từng ký tự trong s không an toàn để xuất hiện trực tiếp trong URL (space thành %20, ? thành %3F,...) TRỪ các ký tự liệt kê trong safe= (mặc định là '/' nên dấu / của path giữ nguyên); unquote(s) ngược hẳn lại, decode từng %XX về đúng ký tự gốc">quote()</dfn> left the <code>/</code> alone in both calls because <code>safe="/"</code> is already <code>quote()</code>'s own default — spelled out explicitly in the second call only to show what the default is actually doing. This is the URL equivalent of Day 68's <code>shlex.quote()</code>: both make one untrusted value safe to embed in a larger string, just for two different syntaxes (a URL's reserved characters here, a shell's metacharacters there) — neither function understands the other's rules.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has any notion of a URL — a pandas pipeline that first downloads data from a paginated API builds each page's URL with <code>urlencode()</code>/<code>quote()</code> (or a dedicated HTTP client's own helpers), fetches it, and only then hands the response body to <code>pd.read_csv()</code> or <code>pd.read_json()</code>. URL construction and parsing is a stdlib/web job, not a data-frame job. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/116_urllib_parse.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/116_urllib_parse.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>urlparse()</code> to pull the scheme/netloc/path out of a URL string, using <code>parse_qs()</code> to read a query string's repeated-key values back as lists, using <code>urlencode()</code> to build a query string from a dict of plain Python values, and using <code>quote()</code>/<code>unquote()</code> to round-trip one raw value through percent-encoding.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="urlparse() returns a ParseResult whose .query attribute is still one raw unsplit string -- it does not break the query string apart into individual key/value pairs. That's parse_qs()'s job in the very next step, run on .query's output.">
+    <p class="stem">After <code>parsed = urlparse(url)</code>, what type of value is <code>parsed.query</code>?</p>
+    <button class="opt" data-ok>one raw string, not yet split apart into individual key/value pairs</button>
+    <button class="opt">a ready-made dict that maps each query key to its value</button>
+    <button class="opt">a list holding every path segment found inside the given URL</button>
+  </div>
+  <div class="q" data-why="parse_qs() always maps every key to a list of values, even a key appearing exactly once, because a query string may legally repeat the same key more than once (such as several ?tag=... pairs) -- confirmed live, qs['page'] came back as ['2'], a one-item list, never the bare string '2'.">
+    <p class="stem">Why does <code>parse_qs()</code> give every key a list of values, even one appearing only once in the URL?</p>
+    <button class="opt" data-ok>because a query string may legally repeat the same key</button>
+    <button class="opt">because every single query parameter is always an integer type</button>
+    <button class="opt">because parse_qs() only ever accepts exactly three keys in total</button>
+  </div>
+  <div class="q" data-why="quote() and shlex.quote() (Day 68) solve the identical shape of problem -- making one untrusted value safe to embed in a larger string -- but for two unrelated syntaxes: quote() percent-encodes a URL's reserved characters, while shlex.quote() escapes a POSIX shell's metacharacters. Neither function understands or protects against the other's rules.">
+    <p class="stem">How does <code>urllib.parse.quote()</code> relate to Day 68's <code>shlex.quote()</code>?</p>
+    <button class="opt" data-ok>same embed-safely goal, but for two unrelated string syntaxes</button>
+    <button class="opt">quote() is simply one alias that fully replaced shlex</button>
+    <button class="opt">shlex.quote() internally calls quote() to do its own escaping</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/urllib.parse.html"><code>urllib.parse</code></a> docs, especially the "URL Parsing" and "Parsing ASCII Encoded Bytes" (<code>quote()</code>/<code>unquote()</code>) sections, and <code>parse_qs()</code>/<code>urlencode()</code> under "URL Quoting".</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day116">glossary</a> under Day 116.<br>
+Cadence note: today is fresh day 1 of a new three-fresh-then-review cycle — Day 117 and 118 should be fresh days 2 and 3, then Day 119 the next review day, spanning Days 116-118. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth respectively); <code>selectors</code>, <code>signal</code>, <code>sched</code>, <code>stat</code>, <code>tracemalloc</code>, <code>platform</code>, <code>ipaddress</code>, <code>mimetypes</code>, <code>binascii</code>, <code>codecs</code>, and <code>unicodedata</code> are fresh zero-hit candidates for a future round.<br><br>
+💬 Anything unclear — <code>urlparse()</code> vs <code>parse_qs()</code>'s two steps, or why <code>quote()</code> and <code>shlex.quote()</code> don't protect against each other's rules? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

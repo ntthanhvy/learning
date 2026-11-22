@@ -12211,3 +12211,132 @@ dead-letter queues, still confirmed to have no first-party ASP.NET Core
 angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
 FluentValidation and Polly/.NET resilience libraries, both still
 deliberately out of scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-22 — Lesson 140: distributed tracing, now in C# too (Activity, ActivitySource)
+
+Headless run. Orchestrator-level state already confirmed for this round:
+highest existing lesson was `0139-audit-logging-efcore-savechanges-
+changetracker.html` (2026-11-21), `nav.js`'s last entry was still `n:
+139, date: "2026-11-21"`, and no `lessons/0140-*.html` file existed on
+disk before this round — safe to proceed with day 140 without a fresh
+DB check.
+
+Topic picked: Lesson 139's own candidate list named three still-Go-only
+concepts worth the same "now in C# too" treatment — distributed tracing
+(65), feature flags (70), and HATEOAS (97) — plus `ISavingChanges
+Interceptor`/`Added`/`Deleted`-state handling as narrower follow-ups to
+139 itself. Picked distributed tracing specifically because .NET has a
+genuinely distinct, first-party mechanism for it (`System.Diagnostics.
+Activity`/`ActivitySource`, automatic `Activity.Current` propagation
+across `await`, and in-box `HttpClient`/ASP.NET Core encoding/decoding
+of the W3C `traceparent` header) that is a real architectural contrast
+with Lesson 65's hand-threaded Go `context.Context` plus manual header
+copy — not a thin syntax restatement — while the `ISavingChanges
+Interceptor`/`Added`-`Deleted` options were judged thinner, narrower
+extensions of 139's own pattern rather than new ground. `grep -i` for
+`ActivitySource`/`Activity.Current`/`traceparent` across `backend/
+lessons/` and `glossary.html` came back empty before writing, confirming
+the gap was real and the terms were free of collisions.
+
+Verification: fetched `learn.microsoft.com/en-us/dotnet/core/
+diagnostics/distributed-tracing` via `WebFetch` first, which turned out
+to be mostly a signpost page (links to OpenTelemetry/Application
+Insights) without the exact API detail needed. Followed up with a
+second `WebFetch` against `learn.microsoft.com/en-us/dotnet/core/
+diagnostics/distributed-tracing-concepts`, which had everything this
+lesson cites: the exact quote that ".NET adopted the term 'Activity'
+many years ago, before the name 'Span' was well established for this
+concept"; the `TraceId`/`SpanId`/`ParentSpanId` field model under the
+W3C TraceContext ID format; the `Activity.Current` paragraph stating it
+"automatically flows along all synchronous calls on a thread and
+follows async calls that are processed on different threads"; and the
+paragraph on in-box libraries (the ASP.NET web server, `System.Net.
+Http`) natively encoding/decoding Activity IDs on HTTP messages, quoted
+verbatim in this lesson's section 3. This lesson's own code sample's
+`SetTag`/`SetStatus`/`PostAsync` method signatures are not directly
+quoted from either fetched page but are standard, well-documented
+members consistent with the fetched pages' own `Activity`-centric
+model; hand-checked against known real overloads (`ActivitySource.
+StartActivity(string)` returns `Activity?`, `Activity.SetStatus
+(ActivityStatusCode, string?)`, `HttpClient.PostAsync(string,
+HttpContent?, CancellationToken)`) since no compiler was reachable this
+round either. `command -v dotnet`/`go` were attempted this round (not
+skipped on assumption) and both required interactive approval with no
+user present, the same outcome every round has hit since Lesson 103;
+`node --version` resolved directly and was used for every scratch check
+below, consistent with the same no-approval-needed distinction noted
+since Lesson 136.
+
+Other verification performed via a throwaway `node` script in a scratch
+directory under the repo root (`_scratch_lesson140/`, not `/tmp`, same
+constraint as every round since Lesson 133; nothing written to the repo
+besides the three intended files; scratch directory deleted after): (1)
+a quiz word-count check per `<div class="q">` block — first draft landed
+uneven on all four questions (Q1 9/10/13/9, Q2 12/12/10/10, Q3 9/10/11/11,
+Q4 12/10/12/10), converged after roughly ten rewrite-and-recount passes
+using a standalone word-count script to test candidate option text
+before touching the lesson file, to exactly 10/10/10/10 (Q1, Q3),
+11/11/11/11 (Q2), and 12/12/12/12 (Q4), exactly one `data-ok` and four
+options per question confirmed the same way; (2) an HTML tag-balance
+check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/
+tr/td/th/thead/tbody — first pass caught a real bug, a stray `</p>` left
+over inside the "Frontend-habit trap" callout `<div>` (which, unlike
+Lesson 139's own callout, was never supposed to wrap a `<p>` at all),
+fixed by removing the stray closing tag; rechecked clean after the fix
+(div 8/8, p 17/17, code 59/59, button 16/16, script 3/3, dfn 2/2, pre
+1/1, h2 7/7, h1 1/1, em 3/3, strong 4/4, a 4/4, table 1/1, tr 5/5, td
+8/8, th 7/7, thead 1/1, tbody 1/1), both `dfn` tags confirmed to carry
+both `data-en=` and `data-vn=`; (3) a brace/paren balance check on the
+one `<pre><code>` block after stripping tags and unescaping HTML
+entities — balanced (4/4 braces, 8/8 parens); (4) a raw-unescaped-`&`
+scan across the lesson — zero hits; (5) a duplicate-term scan on
+`glossary.html`'s first column before adding the two new rows — zero
+collisions for `Activity (.NET)` or `ActivitySource / Activity.Current`;
+a `<tr>`/`<td>` balance check on `glossary.html` after the two-row
+addition — 426 `<tr>` (1 header + 425 term rows = 423 prior + 2 new),
+425 `<td>` (one fewer than `<tr>` because the header row uses `<th>`,
+not `<td>`), plus a second duplicate-term scan afterward — zero
+duplicates; (6) `node --check` against `nav.js`, `gloss.js`, `quiz.js` —
+all clean, both before and after the `nav.js` edit; (7) a basic HTML
+well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 140 in `nav.js` (date 2026-11-22, today's actual
+generation date) right after `n: 139`. Day number used 140, matching
+this file's own day-equals-lesson-number convention, no deviation
+found. `git status --short backend/` confirmed the round's diff is
+scoped to exactly `backend/assets/nav.js`, `backend/reference/
+glossary.html`, this `backend/NOTES.md` entry, and the new `backend/
+lessons/0140-distributed-tracing-aspnetcore-activity-activitysource.
+html`. No new `RESOURCES.md` line added — both fetched pages are
+`learn.microsoft.com`, cited inline in the lesson's own "Go deeper"
+section instead, consistent with every recent C#-port round's
+precedent. No new `learning-records/` file added — the topic came from
+Lesson 139's own standing candidate list, not a new observation about
+the learner; `learning-records/` still has no entry newer than Lesson
+3, so this round was paced as a normal sequential step per the same
+convention every recent round has used, including the two still-
+unconfirmed standing items (Lesson 25's concurrency-vocabulary
+retrieval quiz, Lesson 102's SignalR/WebSocket quiz) which remain open
+but untouched this round, same as prior rounds. `bin/record-progress
+backend lesson_generated --day 140 --lesson 0140-distributed-tracing-
+aspnetcore-activity-activitysource.html --detail
+'{"by":"claude-sonnet-5"}'` ran successfully this round (unlike some
+prior rounds, no DB-permission error surfaced).
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: feature flags (Lesson 70) and HATEOAS (Lesson 97) —
+the two still-Go-only concepts from Lesson 139's own candidate list not
+picked this round; `ISavingChangesInterceptor` and handling `Added`/
+`Deleted` states in the same `SaveChangesAsync` loop, both still named
+as narrower follow-ups to Lesson 139 specifically; `ActivityListener`/
+`DiagnosticListener` and sampling (`ActivityListener.Sample`), named in
+this lesson's own scope line but not explored; actually wiring an
+OpenTelemetry exporter to collect and visualize .NET `Activity` objects,
+also left at the concept level on both the Go and C# sides; Go's
+`select`-statement arbitration rules, still deferred many rounds running
+on fetched-page-truncation grounds; Lesson 49's dead-letter queues,
+still confirmed to have no first-party ASP.NET Core angle; Lesson 35's
+upsert/ON CONFLICT, still confirmed the same way; and FluentValidation
+and Polly/.NET resilience libraries, both still deliberately out of
+scope per MISSION.md's "concepts first" rule.

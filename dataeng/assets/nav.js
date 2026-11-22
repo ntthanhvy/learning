@@ -80,6 +80,7 @@
     { n: 65, date: "2026-11-19", title: "A per-courier delivery-time histogram: the other half of Day 48's gap", file: "lessons/0065-dbt-histogram-by-courier.html" },
     { n: 66, date: "2026-11-20", title: "Kafka static group membership: a restart that skips the rebalance", file: "lessons/0066-kafka-static-group-membership.html" },
     { n: 67, date: "2026-11-21", title: "Closing Day 64's TODO: an on_failure_callback on check_kafka_lag", file: "lessons/0067-airflow-kafka-lag-failure-callback.html" },
+    { n: 68, date: "2026-11-22", title: "Static membership with two consumers: one restarts, the other never notices", file: "lessons/0068-kafka-static-membership-two-consumers.html" },
   ];
 
   const REFS = [

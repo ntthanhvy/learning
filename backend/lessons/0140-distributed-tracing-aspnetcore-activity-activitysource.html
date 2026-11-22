@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 140 · Distributed tracing, now in C# too (Activity, ActivitySource)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 140 · ~20 min</p>
+<h1>Distributed tracing, now in C# too (Activity, ActivitySource)</h1>
+<p class="byline">Lesson 65 built a correlation ID the hand-written way: generate it at the edge, carry it through <code>context.Context</code> inside one process, then manually copy it onto an outbound header at every call site that talks to another service — remembering to do that last step is on the caller, every single time. .NET's answer removes that last step from the caller's job entirely. The runtime itself, plus its in-box HTTP server and client, already know how to carry a trace's identity across both an <code>await</code> and a network hop — no header copy-paste required.</p>
+
+<h2>1 · <code>Activity</code> is .NET's name for what Lesson 65 called a span</h2>
+<p>Lesson 65's section 6 named the generalization beyond a single correlation ID: a full trace is a tree of timed units of work, each one pointing at whichever unit called it. .NET's distributed-tracing docs confirm that .NET has had exactly this model built into the runtime for years, under its own name: "units of work in a trace are represented by instances of <code>System.Diagnostics.Activity</code>... Another common industry name for units of work in a distributed trace are 'Spans'. .NET adopted the term 'Activity' many years ago, before the name 'Span' was well established for this concept." Same tree, same idea as OpenTelemetry's span — .NET just had its own word first.</p>
+<p>Every <dfn data-en="a class in System.Diagnostics representing one timed unit of work in a distributed trace -- .NET's own name for what the wider industry calls a span, predating that term's adoption -- carries a TraceId, its own SpanId, and the SpanId of whichever Activity is its parent" data-vn="Activity (giữ nguyên) — class trong System.Diagnostics đại diện 1 đơn vị công việc có thời gian trong distributed trace, tên riêng của .NET cho cái ngành gọi là span -- có TraceId, SpanId riêng, và SpanId của Activity cha">Activity</dfn> records a globally unique <code>Activity.TraceId</code> shared by the whole tree, its own <code>Activity.SpanId</code>, and <code>Activity.ParentSpanId</code> pointing at whichever Activity started it — the exact three fields Lesson 65 described a span needing, just under .NET's own property names.</p>
+
+<h2>2 · <code>Activity.Current</code> flows across <code>await</code> on its own</h2>
+<p>Lesson 65's Go snippet needed an explicit <code>ctx context.Context</code> parameter threaded through every function in the call chain, because that's the only way a value rides along in Go — nothing flows automatically. .NET's docs describe a different default: "Each thread in a process may have a corresponding Activity object that tracks the work occurring on that thread, accessible via <code>Activity.Current</code>. The current activity automatically flows along all synchronous calls on a thread and <em>follows async calls that are processed on different threads</em>." Start a child <dfn data-en="a class in System.Diagnostics used to create Activity instances -- its StartActivity method begins a new Activity, automatically parenting it to whatever Activity.Current already holds, and automatically restores the prior Activity.Current when the new one is disposed/stopped" data-vn="ActivitySource (giữ nguyên) — class trong System.Diagnostics dùng để tạo Activity -- method StartActivity bắt đầu 1 Activity mới, tự gán làm con của Activity.Current hiện có, và tự khôi phục Activity.Current cũ khi Activity mới bị dispose/stop">ActivitySource</dfn>'s activity anywhere inside a request's <code>async</code> call chain, and it becomes the new <code>Activity.Current</code> for every <code>await</code>ed call underneath it — no parameter to remember to pass, because the runtime's own async machinery carries it.</p>
+<pre><code><span class="kw">private</span> <span class="kw">static</span> <span class="kw">readonly</span> ActivitySource Source = <span class="kw">new</span>(<span class="st">"OrderService"</span>);
+
+<span class="kw">public</span> <span class="kw">async</span> Task&lt;ChargeResult&gt; ChargeCardAsync(<span class="dt">int</span> amountCents, HttpClient billingClient, CancellationToken ct)
+{
+    <span class="kw">using</span> <span class="kw">var</span> activity = Source.StartActivity(<span class="st">"charge-card"</span>);
+    activity?.SetTag(<span class="st">"amount_cents"</span>, amountCents); <span class="cm">// Lesson 13's structured log field, as an Activity tag instead
+</span>
+    <span class="cm">// billingClient is a plain HttpClient; no header set here by hand --
+</span>    <span class="cm">// HttpClient already knows how to encode Activity.Current as a
+</span>    <span class="cm">// traceparent header on the way out.</span>
+    <span class="kw">var</span> resp = <span class="kw">await</span> billingClient.PostAsync(<span class="st">"https://billing.internal/charges"</span>, <span class="kw">null</span>, ct);
+    <span class="kw">if</span> (!resp.IsSuccessStatusCode)
+    {
+        activity?.SetStatus(ActivityStatusCode.Error, <span class="st">$"billing returned {resp.StatusCode}"</span>);
+        <span class="kw">throw</span> <span class="kw">new</span> InvalidOperationException(<span class="st">$"call billing service: {resp.StatusCode}"</span>);
+    }
+    <span class="kw">return</span> ChargeResult.Success;
+}</code></pre>
+<p>Compare this to Lesson 65's <code>chargeCard</code>: no <code>ctx.Value(requestIDKey)</code> lookup, no explicit <code>req.Header.Set("X-Request-ID", requestID)</code> line. The <code>using</code> block's disposal also restores whatever <code>Activity.Current</code> was before this method started, matching Lesson 65's own stack-like call-graph shape automatically rather than by convention.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the same shape as React's Context API threading a value down automatically versus prop-drilling it through every intermediate component by hand. Lesson 65's Go version is the prop-drilling story — every function signature carries <code>ctx</code> on purpose. .NET's <code>Activity.Current</code> is closer to a context provider that the async runtime itself already wired up, so nothing in between has to touch it.</div>
+
+<h2>3 · The network hop: still a header, but nobody writes it by hand</h2>
+<p>Lesson 65 section 4 established the real constraint this doesn't change: no in-process carrier survives a network call on its own. .NET's docs are explicit that the header still has to travel, just not by the app developer's own code: "Unlike many other language runtimes, .NET in-box libraries such as the ASP.NET web server and <code>System.Net.Http</code> natively understand how to decode and encode Activity IDs on HTTP messages... This means that .NET applications that receive and emit HTTP messages participate in flowing distributed trace IDs automatically, with no special coding by the app developer." The header itself is the W3C standard's own <code>traceparent</code> — the same header format Lesson 65 named as the eventual standardized choice — and ASP.NET Core's request pipeline reads it on the way in, starts an Activity whose <code>ParentSpanId</code> points at whatever arrived in that header, and <code>HttpClient</code> writes the current Activity back out as <code>traceparent</code> on any outbound call, both directions handled by the framework rather than application code.</p>
+
+<h2>4 · What this buys, and what it costs</h2>
+<p>The win over Lesson 65's version: a forgotten header copy is no longer possible for any call made through <code>HttpClient</code> inside an ASP.NET Core app, because there's no header-copying code left for a new call site to omit. The cost mirrors Lesson 139's own audit-log caveat exactly: this automatic propagation only covers HTTP calls made through .NET's own in-box client and server. A call to a non-HTTP transport (a message queue, a raw socket), or an outbound call made by some other library that doesn't know about <code>Activity</code>, carries nothing automatically — the trace tree simply stops at that edge, silently, unless something explicitly reads <code>Activity.Current</code> and forwards it by hand the way Lesson 65's Go code always had to.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 65: Go</th><th>Lesson 140: C#</th></tr></thead>
+<tbody>
+<tr><th>Carrier inside one process</th><td><code>context.Context</code>, threaded as an explicit parameter</td><td><code>Activity.Current</code>, flows automatically across sync calls and <code>await</code></td></tr>
+<tr><th>Carrier across a network hop</th><td>app code reads the id and sets the header by hand</td><td><code>HttpClient</code>/ASP.NET Core encode and decode <code>traceparent</code> on their own</td></tr>
+<tr><th>Risk of a forgotten propagation step</th><td>yes — any call site can forget to set the header</td><td>no, for calls through the in-box HTTP client/server — but any other transport still needs it done by hand</td></tr>
+<tr><th>Vocabulary for one unit of work</th><td>span (industry term, via OpenTelemetry)</td><td>Activity (.NET's own older name for the same thing)</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="interview">
+<p><strong>Q: "Our Go services propagate a request ID by hand through context.Context and a header. We're adding a .NET service to the same call graph — does it need the same wiring?"</strong> A strong answer, out loud: <em>"Less than you'd think. .NET's HttpClient and ASP.NET Core already know how to decode and encode the W3C traceparent header automatically, and Activity.Current flows across await on its own, so a plain HTTP call between our .NET service and anything else that understands traceparent needs no extra code. Where it still needs the same care as our Go services is anything that isn't a standard in-box HTTP call — a message queue hop, or a call through a library that doesn't touch Activity — there, I'd read Activity.Current explicitly and forward its TraceId/SpanId by hand, the same discipline the Go code already has everywhere."</em> The signal: knowing exactly where the automation stops, not just that it exists.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Activity</code>/<code>ActivitySource.StartActivity</code>, <code>Activity.Current</code>'s automatic flow across synchronous and <code>async</code>/<code>await</code> calls, and the in-box ASP.NET Core/<code>HttpClient</code> encoding and decoding of the W3C <code>traceparent</code> header. It does not cover actually wiring an OpenTelemetry exporter to collect and visualize these Activities (Lesson 65's own stopping point for the Go side too), <code>ActivityListener</code>/<code>DiagnosticListener</code> (the lower-level collection mechanisms a telemetry library builds on), sampling (<code>ActivityListener.Sample</code>, named in the docs but not explored here), or the older Hierarchical ID format (superseded by W3C TraceContext as .NET's default since .NET 5).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The .NET docs state directly that .NET adopted the term Activity many years before the industry term Span became established for the same concept -- Activity and span name the same tree-of-timed-work-units model that Lesson 65 described in its own generalization section.">
+    <p class="stem">What is the relationship between .NET's <code>Activity</code> and the industry term "span"?</p>
+    <button class="opt" data-ok>the same concept, Activity is simply .NET's own older term</button>
+    <button class="opt">Activity tracks only calls that failed, span tracks only successes</button>
+    <button class="opt">Activity was a short-lived .NET 5 preview, now fully removed</button>
+    <button class="opt">Activity exists only client-side, while span exists only on servers</button>
+  </div>
+  <div class="q" data-why="Lesson 65's Go snippet needed an explicit context.Context parameter threaded through every function because nothing flows automatically in Go. .NET's Activity.Current instead flows automatically along synchronous calls and follows async calls onto whatever thread they resume on, with no parameter needed.">
+    <p class="stem">How does .NET's <code>Activity.Current</code> reach a deeply nested <code>async</code> method, versus Lesson 65's Go <code>context.Context</code>?</p>
+    <button class="opt" data-ok>it flows on its own, with no explicit parameter ever passed</button>
+    <button class="opt">it gets re-read from a database row before every single call</button>
+    <button class="opt">it is copied by hand into every nested method's argument list</button>
+    <button class="opt">it exists only inside synchronous code, never inside any async code</button>
+  </div>
+  <div class="q" data-why="The .NET docs state explicitly that in-box libraries like the ASP.NET web server and System.Net.Http natively understand how to decode and encode Activity IDs on HTTP messages, so .NET apps that receive and emit HTTP messages propagate distributed trace IDs automatically with no special coding by the app developer -- unlike Lesson 65's Go code, which set the outbound header by hand at every call site.">
+    <p class="stem">Why doesn't application code need to set the <code>traceparent</code> header by hand when calling another service through <code>HttpClient</code>?</p>
+    <button class="opt" data-ok>HttpClient and ASP.NET Core already encode and decode it themselves</button>
+    <button class="opt">traceparent headers are optional on every single outbound HTTP request</button>
+    <button class="opt">HttpClient flatly refuses to ever send any custom header whatsoever</button>
+    <button class="opt">ASP.NET Core disables distributed tracing entirely by its own default</button>
+  </div>
+  <div class="q" data-why="The automatic traceparent propagation is specifically a feature of .NET's in-box HTTP server and client. A call made over a different transport, such as a message queue, or through a third-party library that never touches Activity, carries nothing automatically -- the trace tree simply stops at that edge unless something reads Activity.Current and forwards its ids by hand, the same discipline Lesson 65's Go code always needed everywhere.">
+    <p class="stem">What is the real limitation of .NET's automatic trace propagation?</p>
+    <button class="opt" data-ok>it only covers calls made through the in-box HTTP client and server</button>
+    <button class="opt">it requires a totally separate, paid Microsoft licensing tier just to run</button>
+    <button class="opt">it cannot ever run at all inside a method marked as async</button>
+    <button class="opt">it only ever works for exactly one single, hard-coded service name here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/core/diagnostics/distributed-tracing-concepts">Microsoft Learn: Distributed tracing concepts (.NET)</a> is the primary source for the <code>Activity</code>/"Spans" naming note, the <code>TraceId</code>/<code>SpanId</code>/<code>ParentSpanId</code> field model, <code>Activity.Current</code>'s automatic flow across synchronous and async calls, and the exact quote on ASP.NET Core and <code>System.Net.Http</code> natively encoding/decoding Activity IDs on HTTP messages — every claim in this lesson not attributed to Lesson 65 traces back to this one page. The <a href="https://opentelemetry.io/docs/concepts/signals/traces/">OpenTelemetry Traces concept docs</a> cited in Lesson 65 still cover the vendor-neutral span/trace-id vocabulary this lesson maps <code>Activity</code> onto, unchanged by this port; Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a> still frames why observability becomes mandatory once a system stops being one process.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 65's correlation-ID design and Lesson 139's "now in C# too" audit-logging port. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 140 rounds — the honest next step remains a completion signal or a user-named track. Standing candidates for the next "now in C# too" port: feature flags (Lesson 70) and HATEOAS (Lesson 97), both still Go-only.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

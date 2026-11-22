@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 68 · Static membership with two consumers: one restarts, the other never notices</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 68 · ~20 min · 22 Nov 2026</p>
+<h1>Static membership with two consumers: one restarts, the other never notices</h1>
+<p class="byline">Today's tangible win: Day 34's two-instance <code>warehouse-loader</code> run, redone with Day 66's <code>group.instance.id</code> on both processes — and your own <code>kafka-consumer-groups.sh --describe</code> output proving that killing and restarting <em>one</em> of the two consumers quickly reassigns nothing, leaving the surviving consumer's partitions completely untouched throughout, instead of the full two-member rebalance Day 34 showed happening on every membership change.</p>
+
+<div class="callout"><strong>Before today — confirm Days 34 and 66 both landed:</strong> today runs two copies of the exact consumer Day 66 edited, so confirm that file and topic are both in place:
+<pre><code>grep -n "group.instance.id" scripts/consume_order_events.py
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+Expected: a line setting <code>group.instance.id</code> printed, and <code>PartitionCount: 3</code>. If the grep finds nothing, finish Day 66 first — today adds no new file and no new config key, it runs the existing script twice with two different <code>group.instance.id</code> values.</div>
+
+<h2>1 · The gap Day 66 named and left open</h2>
+<p>Day 66 proved static membership works for exactly one consumer: kill <code>warehouse-loader-1</code>, restart it inside <code>session.timeout.ms</code>, and the coordinator hands back the same three partitions with no rebalance in between. That lesson's own closing section named what it didn't test: "extending today's static ID to Day 34's two-consumer scenario, each with its own fixed <code>group.instance.id</code>, to show the grace window holding even when one of two members restarts while the other keeps serving its own partitions." Day 34 is the only lesson that ever ran two consumers in this group, and it did so with <em>dynamic</em> membership — every join or leave triggered a rebalance across both members, because neither carried a fixed identity the coordinator could recognize on rejoin. Today combines the two: two consumers, both statically identified, one of them restarting.</p>
+<p>The question worth asking before running anything: with two members instead of one, does a restarting member's grace window affect the <em>other</em> member at all? Day 66's single-consumer version couldn't test this, because there was no other member to disturb.</p>
+
+<h2>2 · What changes, and what provably doesn't, with a second member in the room</h2>
+<p>The mechanism is unchanged from Day 66: each consumer's <code>group.instance.id</code> is a fixed identity the coordinator tracks independently per member. Adding a second statically-identified member doesn't make the coordinator track anything jointly — it tracks <code>warehouse-loader-1</code>'s partitions and <code>warehouse-loader-2</code>'s partitions as two separate bookkeeping entries, exactly as it would track two dynamic member IDs, except that a static entry survives that specific member's restart instead of being discarded the moment a heartbeat is missed.</p>
+<p>That independence is the whole answer to Section 1's question: when <code>warehouse-loader-2</code> is killed and restarts within its own <code>session.timeout.ms</code>, the coordinator's bookkeeping for <code>warehouse-loader-1</code> never enters the picture. There is no group-wide rebalance to opt into or out of, because nothing about a <dfn data-en="a rebalance triggered by one specific consumer group member's own join/leave/rejoin event, as opposed to a group-wide rebalance that reassigns every member's partitions at once -- with static membership, a member rejoining within its grace window causes no rebalance at all for anyone, but even on a dynamic-membership group a single member's own join or leave is still the trigger, not a property shared across the whole group" data-vn="giữ nguyên &quot;per-member rebalance trigger&quot; — rebalance bị kích hoạt bởi join/leave/rejoin của 1 member cụ thể, khác với việc rebalance tự nó ảnh hưởng đồng thời tới toàn bộ group; với static membership, member rejoin trong grace window thì không ai bị rebalance cả, nhưng ngay cả ở group dùng dynamic membership, trigger vẫn là hành động của 1 member, không phải thuộc tính chung cả group">per-member rebalance trigger</dfn> changed group-wide: static membership turns off the *consequence* (reassignment) for a timely rejoin, it never turns the *trigger* into something shared. The surviving consumer, <code>warehouse-loader-1</code>, keeps consuming its own partitions throughout, never pausing, because from its point of view nothing in the group changed at all.</p>
+<table class="gloss">
+<tr><th>Scenario</th><th>Membership</th><th>What happens to the survivor's partitions</th></tr>
+<tr><td>Day 34: kill one of two consumers</td><td>Dynamic</td><td>Reassigned to the survivor immediately once <code>session.timeout.ms</code> expires — survivor's own set changes.</td></tr>
+<tr><td>Today: kill and quickly restart one of two consumers</td><td>Static (both members)</td><td>Untouched the entire time — survivor's own set never changes, because the departure/rejoin is bookkept per-member, not group-wide.</td></tr>
+</table>
+<div class="callout"><strong>Bridge from Day 66:</strong> the trade-off is identical to the one-consumer case, just localized to whichever member is restarting. If <code>warehouse-loader-2</code> were gone for good rather than restarting, its partitions would sit unread by anyone — including by <code>warehouse-loader-1</code> — for the full <code>session.timeout.ms</code> grace window before the coordinator finally reassigns them. A second statically-identified member doesn't shrink that window or let the survivor opportunistically pick up the slack early; it only changes what happens if the same identity comes back in time.</div>
+
+<h2>3 · Build: two statically-identified consumers, kill one, restart it, watch the other never move</h2>
+<p>Edit <code>scripts/consume_order_events.py</code> so <code>group.instance.id</code> is read from an environment variable rather than hardcoded to Day 66's single <code>"warehouse-loader-1"</code>, so the same file can run as either member:</p>
+<pre><code><span class="cm"># scripts/consume_order_events.py -- one line changed from Day 66's hardcoded string</span>
+<span class="kw">import</span> os
+
+consumer = Consumer(
+    {
+        <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+        <span class="str">"group.id"</span>: GROUP_ID,
+        <span class="str">"group.instance.id"</span>: os.environ[<span class="str">"INSTANCE_ID"</span>],  <span class="cm"># was a literal string on Day 66</span>
+        <span class="str">"session.timeout.ms"</span>: <span class="kw">45000</span>,
+        <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+    }
+)</code></pre>
+<p>Start both instances, each with its own fixed identity, confirm the 3-partition split, then kill and restart only the second one — well inside the 45-second grace window — while the first keeps running the whole time:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+INSTANCE_ID=warehouse-loader-1 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+INSTANCE_ID=warehouse-loader-2 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+kill -9 $CONSUMER_B
+sleep 5    <span class="cm"># well under the 45s session.timeout.ms</span>
+INSTANCE_ID=warehouse-loader-2 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected — the exact same partition split in both <code>--describe</code> calls, <code>warehouse-loader-1</code>'s two-or-one partitions never changing, no rebalance printed for either member (Day 34's dynamic-membership version of this same kill would instead show <em>all three</em> partitions landing on the survivor between the two calls):</p>
+<pre><code>GROUP             TOPIC         PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID                   HOST         CLIENT-ID
+warehouse-loader  order_events  0          8               8               0    warehouse-loader-1-rdkafka-1  /172.18.0.1  rdkafka-...
+warehouse-loader  order_events  1          4               4               0    warehouse-loader-2-rdkafka-1  /172.18.0.1  rdkafka-...
+warehouse-loader  order_events  2          8               8               0    warehouse-loader-1-rdkafka-1  /172.18.0.1  rdkafka-...</code></pre>
+<p>Partition 1 stays tagged <code>warehouse-loader-2</code> across both calls — the same identity, reclaimed, not handed to <code>warehouse-loader-1</code> as a rebalance would have done. Clean up:</p>
+<pre><code>kill -9 $CONSUMER_A $CONSUMER_B</code></pre>
+
+<h2>4 · Verify: config accepts two distinct identities, same idempotent-write guarantee</h2>
+<p>The same <code>total = distinct_events</code> proof Days 6, 34 and 66 each ran still applies — two statically-identified consumers, one restarting mid-stream, is still exactly the kind of multi-actor situation an idempotent write exists for:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code>, unchanged from Day 34's and Day 66's version of this same check. Separately, confirm the edited script's syntax and the two-instance config shape before trusting any of the above against a real broker:</p>
+<pre><code>uv run python3 -m py_compile scripts/consume_order_events.py</code></pre>
+<p><strong>Checked live this round, not against a real broker (no reachable Kafka this sandbox round, the same standing gap recent Kafka rounds have each named):</strong> two scratch <code>Consumer({...})</code> dicts, one with <code>group.instance.id: "warehouse-loader-1"</code> and the other with <code>"warehouse-loader-2"</code>, both sharing <code>group.id: "warehouse-loader"</code> and the same widened <code>session.timeout.ms: 45000</code>, were constructed for real against a freshly-installed <code>confluent-kafka==2.16.2</code> client (librdkafka 2.16.0) — both <code>Consumer()</code> calls succeeded with no config-rejection error, confirming two distinct static identities can coexist in the same group with no conflict at construction time. <code>py_compile</code> on that scratch file was clean. The actual claim this lesson rests on — that one static member's restart leaves the other member's partition ownership completely untouched — is Kafka's own documented static-membership protocol (KIP-345) applied per-member, not a live multi-process test this round, since no broker was reachable to run Section 3's kill-and-restart sequence for real. Confirm Section 3's actual <code>--describe</code> output, twice, in your own environment before quoting the "survivor never moves" claim verbatim in an interview.</p>
+
+<h2>5 · What this still doesn't cover</h2>
+<p>Today only tested one member restarting while the other stays healthy the whole time. It says nothing about both members restarting at once, or about what happens if <code>warehouse-loader-2</code>'s restart takes longer than its own grace window — that case degrades to exactly Day 34's dynamic rebalance for that one member's partitions, with <code>warehouse-loader-1</code> still unaffected, since the coordinator's bookkeeping is per-member regardless of outcome. It also doesn't address what happens if two processes briefly carry the same <code>group.instance.id</code> at once — a deploy overlap where the old and new container both start with <code>INSTANCE_ID=warehouse-loader-2</code> — which confluent-kafka's client fences with an error rather than letting both run; Day 66's scope line already named this as out of scope, and nothing here changes that, since this course's actual deploys are one process at a time.</p>
+
+<div class="interview">
+<p><strong>Q: "If you've got two Kafka consumers in a group, both using static membership, and you restart just one of them, does the other one feel anything?"</strong> A strong answer, out loud: <em>"No, and that's the point of static membership being per-member bookkeeping rather than group-wide. The coordinator tracks each group.instance.id's partition assignment independently. When one member's process restarts inside its own session.timeout.ms grace window, the coordinator recognizes the same identity rejoining and hands back exactly what it had — nothing about that touches the other member's own assignment, because there was never a group-wide rebalance to begin with, just one member's own bookkeeping entry being reused instead of discarded. I confirmed this by running two consumers with distinct group.instance.id values against the real topic, killing and restarting only one, and watching kafka-consumer-groups.sh --describe show the exact same partition split both before and after — the healthy consumer's partitions never moved. If that same member had actually died for good instead of restarting, only its own partitions would eventually get reassigned once the grace window expired — the other member still wouldn't have been touched any earlier by that fact alone."</em> The signal: stating that static membership's bookkeeping is per-member, not group-wide, and that a healthy member's assignment is unaffected by a neighbor's restart regardless of whether that neighbor's own restart ultimately succeeds or times out.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers two statically-identified consumers in one group, one restarting inside its grace window while the other keeps running, confirmed live only as a valid two-identity config against the installed client — not against a real broker's actual multi-member rebalance behavior this round. It does not cover both members restarting simultaneously, a restart that overruns its own <code>session.timeout.ms</code> (which degrades to Day 34's ordinary dynamic-style reassignment for that member alone), fencing two processes sharing one <code>group.instance.id</code> (already out of scope per Day 66's own scope line, unchanged here), or the broker-side <code>group.min.session.timeout.ms</code>/<code>group.max.session.timeout.ms</code> bounds (broker tuning, past this course's working-level Kafka scope per <code>MISSION.md</code>).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The group coordinator tracks each statically-identified member's partition assignment as its own separate bookkeeping entry, the same way it would track two dynamic member IDs, except a static entry survives that one member's own restart. One member restarting and rejoining within its grace window only touches that member's own entry -- there is no group-wide rebalance step for the other, healthy member to be swept into.">
+    <p class="stem">Why does a healthy consumer's own partitions stay untouched while a second, statically-identified consumer in the same group restarts?</p>
+    <button class="opt" data-ok>Each static member's own assignment is tracked and rejoined apart</button>
+    <button class="opt">Kafka always pauses every single consumer group once each day</button>
+    <button class="opt">Postgres blocks any reassignment while a write transaction is open</button>
+  </div>
+  <div class="q" data-why="Day 34 ran two consumers with dynamic membership: killing one triggered a real rebalance, with the dead member's partitions reassigned to the survivor once session.timeout.ms expired. Today reruns that same two-consumer shape with static membership on both, and a timely restart causes no reassignment at all -- the restarting member reclaims exactly what it already owned.">
+    <p class="stem">What's the key difference between today's two-consumer test and Day 34's original two-consumer test?</p>
+    <button class="opt" data-ok>Static identities let a timely restart skip reassignment entirely now</button>
+    <button class="opt">Today's version removes the topic's partitions down to just one</button>
+    <button class="opt">Today's version swaps Postgres out for a brand new warehouse</button>
+  </div>
+  <div class="q" data-why="If a statically-identified member's restart takes longer than its own session.timeout.ms grace window, the coordinator gives up waiting and reassigns that member's partitions -- the same dynamic-style outcome Day 34 showed, just arriving after a longer wait. That outcome is still scoped to the one member that overran its window; the other, unrelated member's own assignment is never put at risk by a neighbor's slow restart.">
+    <p class="stem">What happens if a statically-identified member's restart takes longer than its own grace window?</p>
+    <button class="opt" data-ok>That one member's own partitions get reassigned, as Day 34 showed</button>
+    <button class="opt">The entire consumer group simply gets deleted outright, forever, right now</button>
+    <button class="opt">Every single topic in the whole cluster stops accepting new writes</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> are this course's standing citation for consumer-group and rebalance mechanics since Day 5, and the same static-membership section Day 66 already used covers per-member rejoin behavior as inherently per-identity rather than group-wide — not fetched fresh live this round (no working <code>WebFetch</code> tool, the same recurring gap prior rounds have named), so confirm the exact per-member bookkeeping wording against the live page before quoting it verbatim in an interview. The <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a>, already this course's primary source for Days 5–6/34/50/55/58/66, cover constructing multiple <code>Consumer</code> instances with distinct <code>group.instance.id</code> values as plain config — confirmed live this round by constructing two such consumers against the installed <code>confluent-kafka==2.16.2</code> client with no rejection from either.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 68.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty-four rounds, 35-68) — still worth a human granting it once. A concrete, named follow-up this round did not build: a restart that deliberately overruns its own <code>session.timeout.ms</code>, to show live that it degrades to exactly Day 34's reassignment for that one member while the other stays untouched throughout, rather than asserting the degradation from the protocol alone. With today's round, Kafka has had the most recent fresh-gap attention (closing Day 66's own named TODO); a future round's gap-scan should weigh dbt or Airflow next, or whichever named TODO or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why static membership's bookkeeping is per-member rather than group-wide, or what actually happens if a restart overruns its own grace window? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

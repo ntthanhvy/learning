@@ -109,6 +109,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 113 — `Path.glob()`/`Path.rglob()` for shell-style wildcard search over a real directory tree, the `**` recursive-wildcard segment as the one piece of glob syntax allowed to cross a `/` boundary, and `fnmatch()`/`fnmatchcase()` for testing one filename string already in hand against the same pattern syntax, including the OS-dependent case-normalization `fnmatch()` applies and `fnmatchcase()` always skips.
 - [Docs: `shlex`](https://docs.python.org/3/library/shlex.html)
   Use for: Day 114 — `shlex.split()` for parsing a command-line-shaped string into the argument list `subprocess.run()` (Day 68) expects, respecting quoted substrings; `shlex.quote()` for making one value safe to embed in a shell command string, the fix Day 68's `shell=True` injection example needed; and `shlex.join()` as the exact inverse of `split()`, confirmed to round-trip back to the original list.
+- [Docs: `urllib.parse`](https://docs.python.org/3/library/urllib.parse.html)
+  Use for: Day 116 — `urlparse()` for splitting a URL string into its named pieces (scheme, netloc, path, query), `parse_qs()` for reading a raw query string's values back as lists (handling a repeated key correctly), `urlencode()` as its write-direction inverse for building a query string from a dict, and `quote()`/`unquote()` for percent-encoding a single raw value, the URL equivalent of Day 114's `shlex.quote()`.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

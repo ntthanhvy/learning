@@ -238,6 +238,8 @@
       file: "lessons/0114-shlex-split-and-quote.html" },
     { n: 115, date: "2026-11-21", title: "Review day 22: retrieval across Days 112-114",
       file: "lessons/0115-review-retrieval-day-22.html" },
+    { n: 116, date: "2026-11-22", title: "urllib.parse: taking a URL apart and putting one together",
+      file: "lessons/0116-urllib-parse.html" },
   ];
 
   const REFS = [

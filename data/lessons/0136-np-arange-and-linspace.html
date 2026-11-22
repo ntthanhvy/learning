@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 136 · np.arange() vs np.linspace(): the float-step trap, plus np.zeros()/np.ones()/np.full()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 136 · ~20 min · 22 Nov 2026</p>
+<h1>np.arange() vs np.linspace(): count-by-step vs count-by-endpoints — plus np.zeros()/np.ones()/np.full()</h1>
+<p class="byline">This round's own fresh scan grepped every lesson body and every glossary row case-insensitively for every <code>np.[a-z_]*(</code> call already in use (a de-duplicated list of ~90 distinct names, Lessons 1-135), then separately for every array-creation name: <code>np.arange(</code>, <code>np.linspace(</code>, <code>np.zeros(</code>, <code>np.ones(</code>, <code>np.full(</code>, <code>np.empty(</code>: zero hits anywhere. Every lesson so far has operated on arrays and Series that already existed (loaded from CSV, built from a dict, or returned by another function) — how to <em>construct</em> a plain NumPy array from scratch has never been taught, a genuine and foundational gap, not a narrowing of the elementwise-ufunc arc Lessons 126-135 closed out.</p>
+
+<h2>1 · np.arange(): count by step size, stop is exclusive</h2>
+<p>Confirmed directly (numpy 2.5.5), <dfn data-en="a NumPy function that builds a 1-D array of evenly spaced values from a start up to (but not including) a stop value, advancing by a fixed step each time -- the array-building sibling of Python's own range(), but it accepts float start/stop/step values, unlike range() which only accepts integers" data-vn="giữ nguyên 'np.arange()' — tạo mảng 1 chiều các giá trị cách đều nhau, từ start đến TRƯỚC stop (không bao gồm stop), mỗi bước nhảy step; giống hàm range() có sẵn của Python nhưng nhận được cả start/stop/step là số thực (float), không chỉ số nguyên như range()">np.arange(start, stop, step)</dfn> is the array-building sibling of Python's own <code>range()</code> — same exclusive-stop convention, but it accepts float arguments where <code>range()</code> only accepts integers:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+np.arange(<span class="kw">5</span>)           <span class="cm"># [0 1 2 3 4]      -- one arg: stop only, start defaults to 0</span>
+np.arange(<span class="kw">1</span>, <span class="kw">5</span>)        <span class="cm"># [1 2 3 4]        -- stop (5) is excluded, same as range(1, 5)</span>
+np.arange(<span class="kw">0</span>, <span class="kw">1</span>, <span class="kw">0.1</span>)   <span class="cm"># [0.  0.1 ... 0.9] -- float step works; range() would raise TypeError here</span></code></pre>
+<p>Confirmed directly against the official docs' own wording, this is the documented trap: when <code>step</code> is a non-integer float, "the length of the output... is not always obvious," because the actual number of elements is computed from dividing <code>(stop - start)</code> by <code>step</code>, and that division is subject to ordinary floating-point rounding error. On this machine, <code>np.arange(0, 1.1, 0.1)</code> happened to come out to the expected 11 elements, and <code>np.arange(0, 0.7, 0.1)</code> to the expected 7 — but the individual <em>values</em> inside already show the imprecision that causes the trap elsewhere: <code>np.arange(0, 0.7, 0.1)[-1]</code> prints as <code>0.6000000000000001</code>, not the clean <code>0.6</code> someone would expect, because <code>0.1</code> itself has no exact binary floating-point representation.</p>
+
+<h2>2 · np.linspace(): count by total points, stop is inclusive by default</h2>
+<p>Confirmed directly, <dfn data-en="a NumPy function that builds a 1-D array of a fixed NUMBER of evenly spaced values between a start and a stop, with the stop value included by default -- the documented fix for np.arange()'s float-step imprecision, since the step size is derived once by dividing the range by (count - 1) instead of being repeatedly added" data-vn="giữ nguyên 'np.linspace()' — tạo mảng 1 chiều với SỐ LƯỢNG điểm cố định, cách đều nhau, từ start đến stop; mặc định BAO GỒM cả điểm stop; là cách khắc phục được chính tài liệu NumPy khuyến nghị cho lỗi làm tròn số thực của np.arange(), vì bước nhảy chỉ được tính 1 lần (chia khoảng cách cho (số điểm - 1)) thay vì cộng dồn lặp lại nhiều lần">np.linspace(start, stop, num)</dfn> flips the question: instead of "what step size, stopping before some value," it asks "how many points, including both ends":</p>
+<pre><code>np.linspace(<span class="kw">0</span>, <span class="kw">1</span>, <span class="kw">5</span>)                 <span class="cm"># [0.   0.25 0.5  0.75 1.  ] -- 5 points, 1.0 IS included (inclusive stop)</span>
+np.linspace(<span class="kw">0</span>, <span class="kw">1</span>, <span class="kw">5</span>, endpoint=<span class="kw">False</span>)  <span class="cm"># [0.  0.2 0.4 0.6 0.8]      -- excludes 1.0, now matches arange()'s convention</span>
+np.linspace(<span class="kw">0</span>, <span class="kw">1</span>, <span class="kw">5</span>, retstep=<span class="kw">True</span>)   <span class="cm"># (array([...]), np.float64(0.25)) -- also returns the step size used</span></code></pre>
+<div class="callout"><strong>Confirmed directly against the official docs' own recommendation:</strong> the docs for <code>numpy.arange()</code> state plainly, "it is best to use <code>numpy.linspace</code>" whenever a non-integer step is involved, specifically because <code>linspace()</code> computes its step size exactly once (dividing the total span by <code>num - 1</code>) rather than accumulating it by repeated addition the way <code>arange()</code> effectively does — so rounding error cannot compound across many steps. The two functions answer different questions on purpose: reach for <code>arange()</code> when the step size is what matters (e.g. "every 5th row index"), and <code>linspace()</code> when the total count of points matters (e.g. "20 evenly spaced bin edges for a histogram").</div>
+
+<h2>3 · np.zeros()/np.ones()/np.full(): placeholder arrays, and np.empty()'s uninitialized-memory trap</h2>
+<p>Confirmed directly, <code>np.zeros(shape)</code> and <code>np.ones(shape)</code> both default to <code>float64</code> even though every value is a whole number, and <code>shape</code> can be a plain int (1-D) or a tuple (N-D):</p>
+<pre><code>np.zeros(<span class="kw">3</span>)           <span class="cm"># array([0., 0., 0.]), dtype float64 -- NOT int, even though values are whole</span>
+np.ones((<span class="kw">2</span>, <span class="kw">3</span>))       <span class="cm"># 2x3 array of 1.0s, dtype float64</span>
+np.full((<span class="kw">2</span>, <span class="kw">2</span>), <span class="kw">7</span>)    <span class="cm"># 2x2 array of 7, dtype int64 -- full() infers dtype FROM the fill value instead</span>
+np.full((<span class="kw">2</span>, <span class="kw">2</span>), <span class="kw">7.0</span>)  <span class="cm"># 2x2 array of 7.0, dtype float64 -- same shape, fill value's dtype flips it</span></code></pre>
+<p>Confirmed directly, this is the sharper trap: <dfn data-en="a NumPy function that allocates an array of the given shape WITHOUT initializing its values -- confirmed directly to contain leftover garbage bytes from whatever was previously in that memory, not zeros, making it unsafe to read before every element has been explicitly written" data-vn="giữ nguyên 'np.empty()' — CHỈ cấp phát vùng nhớ đúng kích thước yêu cầu, KHÔNG khởi tạo giá trị gì cả; xác nhận trực tiếp: chứa rác còn sót lại từ vùng nhớ cũ, KHÔNG phải số 0, nên tuyệt đối không được đọc giá trị trước khi tự tay ghi đè hết từng phần tử">np.empty(shape)</dfn> does <em>not</em> fill the array with zeros the way its name might suggest by analogy to <code>np.zeros()</code> — it only reserves memory of the right size and dtype, leaving whatever garbage bytes were already there:</p>
+<pre><code>np.empty(<span class="kw">3</span>)  <span class="cm"># array([6.77313745e-310, 6.77313745e-310, 1.58101007e-322]) -- garbage, re-run and it may differ</span>
+<span class="cm"># np.empty() exists purely as a speed optimization: skipping the zero-fill</span>
+<span class="cm"># write is marginally faster when every element will be overwritten anyway</span>
+<span class="cm"># (e.g. inside a loop) -- reading before writing is undefined behavior</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "I need 50 evenly spaced points between 0 and 10, inclusive of both ends. Would you use arange() or linspace(), and why?"</strong> A strong answer, out loud: <em>"linspace(0, 10, 50) — I know the exact count I want (50), and linspace's stop is inclusive by default, so both endpoints land in the array exactly. If I used arange() instead, I'd have to reverse-engineer a step size from the count, which is exactly the case NumPy's own docs warn produces unpredictable lengths once that step isn't a clean integer — arange()'s stop is also exclusive, so I'd need to nudge the stop value up slightly just to include 10. arange() is the right tool when the step size itself is the meaningful unit, like 'every 0.5 seconds'; linspace() is right when the point count is the meaningful unit."</em> The signal: picking based on which quantity (step vs. count) is actually fixed by the problem, not just defaulting to whichever function is more familiar.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.arange()</code>'s confirmed exclusive-stop convention (matching Python's own <code>range()</code>) and its confirmed float-step imprecision trap, directly per the official docs' own wording recommending <code>np.linspace()</code> as the fix; <code>np.linspace()</code>'s confirmed inclusive-stop-by-default convention, its <code>endpoint=</code> and <code>retstep=</code> parameters, and why its single-division step calculation avoids compounding rounding error; <code>np.zeros()</code>/<code>np.ones()</code>'s confirmed <code>float64</code> default dtype regardless of shape; <code>np.full()</code>'s confirmed dtype-inference-from-fill-value behavior; and <code>np.empty()</code>'s confirmed uninitialized-memory trap. It does not cover <code>np.zeros_like()</code>/<code>np.ones_like()</code>/<code>np.full_like()</code> beyond naming them as the "match an existing array's shape" siblings, <code>np.mgrid`/`np.meshgrid()</code>, or any N-dimensional grid-construction use case, out of scope per <code>MISSION.md</code>'s "no deep NumPy internals" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/136_np_arange_and_linspace.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/136_np_arange_and_linspace.py</code></pre>
+<p>Exercise 1 confirms the Section 1/2 contrast: <code>np.arange(0, 10, 2)</code> excludes <code>10</code> (5 elements), while <code>np.linspace(0, 10, 5)</code> includes <code>10</code> by default (its last element is exactly <code>10.0</code>). Exercise 2 confirms the Section 3 behavior: <code>np.zeros(3)</code> is <code>float64</code>, <code>np.full((2, 2), 7)</code> infers <code>int64</code> from its fill value, and <code>np.empty(3)</code>'s own values are not reliably <code>0</code> (unlike <code>np.zeros()</code>).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.arange(0, 10, 2) produces [0, 2, 4, 6, 8] -- 5 elements, excluding 10, the same exclusive-stop convention as Python's own range(). np.linspace(0, 10, 5) instead produces [0., 2.5, 5., 7.5, 10.] -- its last element IS 10.0, because linspace's stop is inclusive by default (endpoint=True).">
+    <p class="stem">Does <code>np.arange(0, 10, 2)</code>'s output include the value <code>10</code>?</p>
+    <button class="opt" data-ok>No -- arange()'s stop is exclusive, same as Python's range()</button>
+    <button class="opt">Yes -- arange() always includes its own given stop value</button>
+    <button class="opt">Only if step evenly divides the range with no remainder</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official NumPy docs' own wording: when arange()'s step is a non-integer float, the exact output length is not always obvious, because the length is derived by dividing (stop - start) by step, a floating-point division subject to ordinary rounding error. The docs state plainly that linspace() is the recommended fix in that case, since it computes its step size exactly once by dividing the span by (num - 1), rather than accumulating error through repeated addition.">
+    <p class="stem">Per the official docs, why can <code>np.arange()</code> with a non-integer float step produce a surprising array length, and what do the docs recommend instead?</p>
+    <button class="opt" data-ok>Floating-point rounding error in the length math; use np.linspace() instead</button>
+    <button class="opt">arange() silently caps every array at 1000 elements, no exceptions</button>
+    <button class="opt">Integer steps only work; float steps always raise TypeError outright</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.empty(3) does not initialize its values to zero (or anything predictable) -- it only allocates memory of the right size and dtype, leaving whatever garbage bytes were already there. This differs from np.zeros(3), which explicitly writes 0.0 into every element. Reading from np.empty()'s array before writing to every element is undefined behavior.">
+    <p class="stem">What does <code>np.empty(3)</code> actually put into the array it returns?</p>
+    <button class="opt" data-ok>Nothing reliable -- just leftover memory garbage, not zeros</button>
+    <button class="opt">Exactly 0.0 in every slot, just like np.zeros(3) would</button>
+    <button class="opt">NaN in every slot, as an explicit not-yet-set flag</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.arange.html"><code>numpy.arange()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.linspace.html"><code>numpy.linspace()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min each) — the <code>arange()</code> page's own "Notes" section states the float-step length-imprecision warning and the <code>linspace()</code> recommendation directly; the exact <code>np.zeros()</code>/<code>np.full()</code> dtype rules and the <code>np.empty()</code> garbage-memory behavior are confirmed directly in this lesson's own scratch sandbox (numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.arange()</code>, <code>np.linspace()</code>, and <code>np.empty()</code> are new today, added right after Lesson 135's <code>np.power()</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed the array-creation gap it found (<code>arange()</code>/<code>linspace()</code>/<code>zeros()</code>/<code>ones()</code>/<code>full()</code>/<code>empty()</code>) — tomorrow's round owes a brand new fresh scan with nothing pre-committed, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the arange()/linspace() endpoint distinction, the empty() trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

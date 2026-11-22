@@ -286,6 +286,8 @@
       file: "lessons/0138-rate-limit-headers-aspnetcore-getstatistics.html" },
     { n: 139, date: "2026-11-21", title: "Audit logging, now in C# too",
       file: "lessons/0139-audit-logging-efcore-savechanges-changetracker.html" },
+    { n: 140, date: "2026-11-22", title: "Distributed tracing, now in C# too",
+      file: "lessons/0140-distributed-tracing-aspnetcore-activity-activitysource.html" },
   ];
 
   const REFS = [

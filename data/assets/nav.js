@@ -278,6 +278,8 @@
       file: "lessons/0134-np-trunc-and-fix.html" },
     { n: 135, date: "2026-11-21", title: "np.mod()/np.remainder() vs np.fmod(): the sign trap, plus np.power()",
       file: "lessons/0135-np-mod-and-power.html" },
+    { n: 136, date: "2026-11-22", title: "np.arange() vs np.linspace(): the float-step trap, plus np.zeros()/np.ones()/np.full()",
+      file: "lessons/0136-np-arange-and-linspace.html" },
   ];
 
   const REFS = [

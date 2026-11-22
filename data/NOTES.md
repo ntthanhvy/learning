@@ -13015,3 +13015,100 @@
   `data/practice/135_np_mod_and_power.py`, and this file). The scratch
   directory `.scratch-data-135/` was deleted after verification, at the
   repo root but never tracked by git.
+- 2026-11-22 generation (Lesson 136, headless run): confirmed before writing
+  anything that no `lessons/0136-*.html` existed and no `n: 136`/
+  `2026-11-22` entry existed in `nav.js` — not a duplicate run. Read
+  `MISSION.md` (unmodified), this file's own tail, `RESOURCES.md`, and
+  Lesson 135's own HTML plus its matching `practice/135_np_mod_and_power.py`
+  in full as the structural template. Topic choice: ran this round's own
+  fresh scan (per this course's "fresh scan each round" convention) —
+  grepped every lesson body and every glossary row case-insensitively for
+  every `np.[a-z_]*(` call already in use (built a de-duplicated list of
+  roughly 90 distinct names across Lessons 1-135) and every `pd.[a-z_]*(`
+  call, plus `.str.`/`.dt.` accessor methods, then separately checked a list
+  of pandas-side candidates (`explode`, `pipe`, `query`, `nlargest`,
+  `rolling`, `expanding`, `ewm`, `combine_first`, `align`, `where`, `mask`,
+  `clip`, `groupby`, `apply`, `rank`, `shift`, `resample`, `interpolate`,
+  `fillna`, `dropna`, `sample`, etc.) and confirmed each already has
+  dedicated lesson coverage. Checked NumPy array-creation names
+  specifically — `np.arange(`, `np.linspace(`, `np.zeros(`, `np.ones(`,
+  `np.full(`, `np.empty(` — against the full grep list: zero hits anywhere.
+  Every prior lesson had operated on arrays/Series that already existed
+  (from CSV, a dict literal, or another function's return value); how to
+  construct a plain NumPy array from scratch had never been taught — a
+  genuine, foundational gap, not a narrowing of the Lesson 126-135
+  elementwise-ufunc arc. Picked `np.arange()` vs `np.linspace()` as the main
+  pair (the classic "exclusive vs inclusive stop" + float-step-imprecision
+  interview trap), with `np.zeros()`/`np.ones()`/`np.full()`/`np.empty()` as
+  a secondary array-construction family in the same lesson. Verified
+  directly in a scratch sandbox (numpy 2.5.5, pandas 3.1.1, `uv run --with
+  pandas`) rather than trusting memory: confirmed `np.arange(0, 1, 0.1)` has
+  exactly 10 elements on this machine but its own stored values already
+  show float imprecision (e.g. `np.arange(0, 0.7, 0.1)[-1]` prints as
+  `0.6000000000000001`, not clean `0.6`); confirmed the official
+  `numpy.arange()` docs' own wording states the output length "is not
+  always obvious" for a non-integer float step and recommends
+  `numpy.linspace()` instead; confirmed `np.linspace(0, 1, 5)` includes
+  `1.0` as its last element by default (`endpoint=True`), confirmed
+  `endpoint=False` switches it to `arange()`'s exclusive convention, and
+  confirmed `retstep=True` additionally returns the step size used.
+  Confirmed `np.zeros()`/`np.ones()` default to `float64` regardless of
+  shape even for whole-number fills; confirmed `np.full((2,2), 7)` infers
+  `int64` from an int fill value and `np.full((2,2), 7.0)` infers `float64`
+  from a float fill value — dtype inferred from the fill, not a fixed
+  default. Confirmed directly, twice in a row, that `np.empty(3)` returns
+  uninitialized leftover memory garbage (not zeros, not NaN), differing
+  between runs — the trap its name invites by false analogy to
+  `np.zeros()`. Did not build out `np.zeros_like()`/`np.ones_like()`/
+  `np.full_like()` beyond naming them in the scope line, nor
+  `np.meshgrid()`/N-dimensional grid construction, out of scope per
+  `MISSION.md`'s "no deep NumPy internals" line. Added exactly three new
+  glossary rows, "np.arange()", "np.linspace()", "np.empty()" — directly
+  after Lesson 135's "np.power()" entry — confirmed via a scripted scan of
+  every first-column term that none of the three names were already
+  present, zero duplicates found across all 217 terms; each of the three
+  `<dfn>` tags used in the lesson body was also embedded verbatim into its
+  matching glossary row's third column, matching the established
+  duplicate-markup convention. `tr`/`td`/`th`/`dfn`/`table` balance
+  confirmed 218/218, 651/651, 3/3, 15/15, 1/1 via occurrence-count `grep -o`
+  equivalents, not the line-count shortcut flagged as unreliable in earlier
+  rounds' own notes. Also included an explicit `.interview` callout div,
+  matching this course's standing rule. Verification performed mechanically
+  via a scratch directory `.scratch-data-136/` created at the repo root
+  (deleted after, never tracked by git, matching every prior round's own
+  precedent): (1) a quiz-word-count script found the first draft mismatched
+  across all three questions (10/9/10, 9/11/10, 8/9/11) and, after a few
+  rounds of wording trims, confirmed exactly 10/10/10, 10/10/10, and 9/9/9
+  option words across the three questions, one `data-ok` per question
+  throughout; (2) an HTML tag-balance script confirmed fully balanced on
+  the lesson file: html/head/body 1/1, div 6/6, p 17/17, code 87/87, pre
+  5/5, h1 1/1, h2 7/7, strong 4/4, button 9/9, script 3/3, dfn 3/3, span
+  45/45, em 4/4, a 3/3, title 1/1, zero raw unescaped `&` outside the
+  lesson's own `cd ~/learning/data && uv run ...` shell command inside its
+  own `<pre><code>` block (matching every prior round's own precedent for
+  that exact exception); exactly 3 `<dfn>`-carrying tags, all three with
+  `data-en`/`data-vn`, matching the three new lesson-body dfns. `node
+  --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse as
+  valid JavaScript, both before and after adding one `n: 136` entry and one
+  `0136-np-arange-and-linspace` file reference to `nav.js`. The first run of
+  a copy of the shipped (unsolved) `practice/136_np_arange_and_linspace.py`
+  inside `.scratch-data-136/` printed exactly 2 ✗ with no raw traceback, as
+  expected. Filling in the solution inside that same scratch copy printed
+  both ✓ and "All green" on the first attempt, no further fixes needed.
+  Re-ran the real shipped file directly from its `practice/` location
+  afterward and reproduced the identical all-✗ result, confirming the
+  solved scratch copy's edits never leaked back into the shipped baseline.
+  `bin/record-progress data lesson_generated --day 136 --lesson
+  0136-np-arange-and-linspace.html` ran successfully from the repo root.
+  This round's own fresh scan closed the whole array-creation gap it found
+  (`arange()`/`linspace()`/`zeros()`/`ones()`/`full()`/`empty()`) —
+  tomorrow's round owes a brand new fresh scan with nothing pre-committed,
+  per this course's standing convention. No new `data/learning-records/`
+  entry was added — routine lesson, no new completion/quiz signal since
+  mid-October. `git status --short` after all edits is expected to show
+  only the intended `data/` files touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new
+  `data/lessons/0136-np-arange-and-linspace.html`, new
+  `data/practice/136_np_arange_and_linspace.py`, and this file). The
+  scratch directory `.scratch-data-136/` was deleted after verification, at
+  the repo root but never tracked by git.

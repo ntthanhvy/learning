@@ -12340,3 +12340,149 @@ still confirmed to have no first-party ASP.NET Core angle; Lesson 35's
 upsert/ON CONFLICT, still confirmed the same way; and FluentValidation
 and Polly/.NET resilience libraries, both still deliberately out of
 scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-23 — Lesson 141: feature flags, now in C# too (FeatureGate, PercentageFilter)
+
+Headless run. No DB read access this round either (a literal `psql
+"$LEARNING_DB_URL"` is blocked by a static content check, per this
+round's own orchestrator instructions), so paced from file state alone,
+same as the standard fallback several recent rounds have used. Confirmed
+directly on disk: no `lessons/0141-*.html` file existed before this
+round, `nav.js`'s last entry was still `n: 140, date: "2026-11-22"`, and
+neither "141" nor "2026-11-23" appeared anywhere in `nav.js` — safe to
+proceed with day 141 without a DB confirmation.
+
+Topic picked: Lesson 140's own candidate list named exactly two
+still-Go-only concepts worth the same "now in C# too" treatment —
+feature flags (Lesson 70) and HATEOAS (Lesson 97). Picked feature flags
+specifically because it has the clearer, more distinct first-party C#
+mechanism of the two: `Microsoft.FeatureManagement` is Microsoft's own
+library for this exact job, with a declarative config schema,
+`IVariantFeatureManager.IsEnabledAsync`, a `[FeatureGate]` attribute that
+removes the `if`-check from the handler body entirely (gating at the MVC
+pipeline level instead), and built-in `PercentageFilter`/`TargetingFilter`
+feature filters that replace Lesson 70's hand-hashed percentage rollout
+with config. HATEOAS's .NET angle looked thinner by comparison — ASP.NET
+Core has no equivalent first-party hypermedia-link library, so a C# port
+would mostly restate Lesson 97's JSON shape in C# syntax rather than show
+a genuinely different mechanism, the same "thin restatement" bar prior
+rounds (139, 140) have used to deprioritize candidates. `grep -i` for
+`feature flag`/`percentage rollout`/`kill switch`/`FeatureGate`/
+`IVariantFeatureManager`/`TargetingFilter`/`PercentageFilter`/
+`AddFeatureManagement` across `backend/glossary.html` confirmed Lesson
+70's own three terms (`feature flag`, `percentage rollout`, `kill
+switch`) already existed and were intentionally reused rather than
+duplicated, since the concepts those terms name don't change crossing
+languages — only the C# mechanism does; `[FeatureGate]` and
+`TargetingFilter` came back with zero hits, confirming both were genuine
+new terms free of collisions before writing.
+
+Verification: fetched `learn.microsoft.com/en-us/azure/azure-app-
+configuration/use-feature-flags-dotnet-core` via `WebFetch`, which
+redirected to `.../feature-management-dotnet-reference` and returned
+the full reference page (confirmed via a second, more targeted
+`WebFetch` against the non-redirecting `.../feature-management-dotnet-
+reference` URL directly, cited as this lesson's primary source instead
+of the redirecting one). Confirmed verbatim: the `feature_management`/
+`feature_flags`/`id`/`enabled`/`conditions`/`client_filters` JSON schema
+used in this lesson's own `appsettings.json` snippet (including the
+exact `"Microsoft.Percentage"`/`"Value": "5"` filter shape); `services.
+AddFeatureManagement()`'s convention of reading the `feature_management`
+or `FeatureManagement` config section by default; `IsEnabledAsync`
+living on `IVariantFeatureManager`; `FeatureGateAttribute`'s definition
+in the `Microsoft.FeatureManagement.Mvc` namespace and its placement on
+a controller class; and the explicit statement that `PercentageFilter`,
+`TimeWindowFilter`, and `ContextualTargetingFilter` are "added
+automatically when you use the `AddFeatureManagement` method," while
+`TargetingFilter` specifically "is added by using the `WithTargeting`
+method" instead — the one asymmetry this lesson's section 3 and Q2 both
+turn on. A second attempted `WebFetch` against the plain `learn.
+microsoft.com/en-us/dotnet/core/extensions/feature-management` URL
+returned a 404, confirming that URL is not the right path for this
+content (the Azure App Configuration doc tree is), so it was dropped in
+favor of the one that worked. This lesson's `RunNewCheckout`/
+`RunLegacyCheckout`/`View()` calls are this lesson's own placeholder
+method names, not quoted from the fetched page, consistent with Lesson
+70's own Go snippet's `runNewCheckout`/`runLegacyCheckout` placeholders.
+`command -v dotnet`/`go` were both attempted this round and both
+required interactive approval with no user present, the same outcome
+every round has hit since Lesson 103; `node --version` resolved directly
+and was used for every scratch check below, consistent with the same
+no-approval-needed distinction noted since Lesson 136.
+
+Other verification performed via throwaway `node` scripts in a scratch
+directory under the repo root (`_scratch_lesson141/`, not `/tmp`, same
+constraint as every round since Lesson 133; nothing written to the repo
+besides the three intended files; scratch directory deleted after): (1)
+a quiz word-count check per `<div class="q">` block — first draft landed
+uneven on all four questions (Q1 10/9/10/10, Q2 10/10/12/9, Q3
+11/13/11/12, Q4 13/12/13/13), converged after four rewrite-and-recount
+passes using a standalone word-count script to test candidate option
+text before touching the lesson file, to exactly 10/10/10/10 (Q1, Q2,
+Q3) and 12/12/12/12 (Q4), exactly one `data-ok` and four options per
+question confirmed the same way; (2) an HTML tag-balance check across
+div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/td/th/thead/
+tbody — clean on the first pass (div 7/7, p 19/19, code 75/75, button
+16/16, script 3/3, dfn 3/3, pre 3/3, h2 7/7, h1 1/1, em 2/2, strong 4/4,
+a 3/3, table 1/1, tr 5/5, td 8/8, th 7/7, thead 1/1, tbody 1/1), all
+three `dfn` tags confirmed to carry both `data-en=` and `data-vn=`; (3)
+a brace/paren/bracket balance check on all three `<pre><code>` blocks
+after stripping tags and unescaping HTML entities — balanced (block 1:
+6/6 braces, 2/2 brackets; block 2: 2/2 braces, 6/6 parens; block 3: 1/1
+braces, 3/3 parens, 1/1 brackets); the C# in blocks 2 and 3 was also
+hand-checked line by line against the verified `IsEnabledAsync`/
+`FeatureGateAttribute` API shape above, since no C# compiler was
+reachable this round either; (4) a raw-unescaped-`&` scan across the
+lesson — zero hits; (5) a duplicate-term scan on `glossary.html`'s first
+column before adding the two new rows — zero collisions for
+`[FeatureGate]` or `TargetingFilter`; a `<tr>`/`<td>` balance check on
+`glossary.html` after the two-row addition — balanced (428 `<tr>`, 1281
+`<td>`, 427 term rows total = 425 prior + 2 new), plus a second
+duplicate-term scan afterward — zero duplicates; (6) `node --check`
+against `nav.js`, `gloss.js`, `quiz.js` — all clean, both before and
+after the `nav.js` edit; (7) a basic HTML well-formedness check (one
+`<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags in gloss/
+quiz/nav order) — clean.
+
+Registered Lesson 141 in `nav.js` (date 2026-11-23, today's actual
+generation date) right after `n: 140`. Day number used 141, matching
+this file's own day-equals-lesson-number convention, no deviation
+found. `git status --short backend/` confirmed the round's diff is
+scoped to exactly `backend/assets/nav.js`, `backend/reference/
+glossary.html`, this `backend/NOTES.md` entry, and the new `backend/
+lessons/0141-feature-flags-aspnetcore-featuremanagement-featuregate.
+html`. No new `RESOURCES.md` line added — the one fetched page is
+`learn.microsoft.com`, cited inline in the lesson's own "Go deeper"
+section instead, consistent with every recent C#-port round's
+precedent. No new `learning-records/` file added — the topic came from
+Lesson 140's own standing candidate list, not a new observation about
+the learner; `learning-records/` still has no entry newer than Lesson
+3, so this round was paced as a normal sequential step per the same
+convention every recent round has used, including the two still-
+unconfirmed standing items (Lesson 25's concurrency-vocabulary
+retrieval quiz, Lesson 102's SignalR/WebSocket quiz) which remain open
+but untouched this round, same as prior rounds. `bin/record-progress
+backend lesson_generated --day 141 --lesson 0141-feature-flags-
+aspnetcore-featuremanagement-featuregate.html --detail
+'{"by":"claude-sonnet-5"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: HATEOAS (Lesson 97) — the one remaining Go-only
+concept from Lesson 140's own candidate list, now the sole standing
+item, though its .NET angle was judged thinner this round for the
+reason above and may be worth a cold-start C# feature instead of a
+direct port if picked; feature flag variants (returning more than a
+plain on/off value from one flag) and flag-evaluation telemetry, both
+named in the fetched page but out of scope this round; dynamic feature
+providers backed by a database rather than `appsettings.json`, and
+Azure App Configuration's hosted flag management service, both named
+once but not explored; `ContextualTargetingFilter`, named in the fetched
+page as the console-app equivalent of `TargetingFilter` but not covered
+here since this lesson's examples are all ASP.NET Core web requests, not
+console apps; Go's `select`-statement arbitration rules, still deferred
+many rounds running on fetched-page-truncation grounds; Lesson 49's
+dead-letter queues, still confirmed to have no first-party ASP.NET Core
+angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
+FluentValidation and Polly/.NET resilience libraries, both still
+deliberately out of scope per MISSION.md's "concepts first" rule.

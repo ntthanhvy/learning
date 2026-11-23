@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 69 · Airflow dynamic task mapping: one task per city, not one task for all</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 69 · ~20 min · 23 Nov 2026</p>
+<h1>Airflow dynamic task mapping: one task per city, not one task for all</h1>
+<p class="byline">Today's tangible win: a new standalone DAG, <code>city_sla_check</code>, where one <code>@task</code>-decorated function runs once <em>per city</em> — four real task instances, one each for Hanoi, Ho Chi Minh City, Da Nang and Hue — from a single <code>.expand()</code> call over a list only known at run time, not four copy-pasted tasks or a loop written at parse time. Confirmed this round against an installed Airflow 3.3.1: <code>.expand()</code> really does produce a distinct mapped operator (<code>DecoratedMappedOperator</code>, <code>is_mapped: True</code>) whose one upstream dependency is inferred from the function call alone, the same automatic-dependency inference Day 20's plain TaskFlow already showed — just now over a list instead of a single value.</p>
+
+<div class="callout"><strong>Before today — confirm Day 51's DAG still parses:</strong> today adds a brand-new, standalone file, <code>dags/city_sla_check.py</code>, independent of <code>dags/food_delivery_pipeline.py</code> — the same "new file beside the real DAG" shape Day 20's <code>raw_row_count_check.py</code> used. It doesn't touch <code>food_delivery_pipeline.py</code> at all, but confirm that file is still healthy first:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. Fix that first if it prints anything else — today's new file sits beside it, unrelated to whatever broke.</div>
+
+<h2>1 · The gap: four cities, one check, and no good way to write it yet</h2>
+<p>Day 49 built <code>mart_delivery_time_histogram_by_city</code>; Day 1's own seed data fixes this project's cities at exactly four — Hanoi, Ho Chi Minh City, Da Nang, Hue. Imagine a real operational task: check each city's <code>mart_delivery_sla.share_over_45_min</code> and flag any city over threshold, every morning. Every tool this course has built so far for "run this check" writes one task per thing checked, by hand:</p>
+<pre><code><span class="cm"># what this would look like with Day 20's plain TaskFlow, unchanged</span>
+<span class="kw">@task</span>
+<span class="kw">def</span> check_hanoi(): ...
+<span class="kw">@task</span>
+<span class="kw">def</span> check_hcmc(): ...
+<span class="kw">@task</span>
+<span class="kw">def</span> check_da_nang(): ...
+<span class="kw">@task</span>
+<span class="kw">def</span> check_hue(): ...</code></pre>
+<p>That's already four near-identical functions for four cities that happen to be known today. The real problem surfaces the moment <code>raw.restaurants</code> gains a fifth city: Day 1's own generator script would need a fifth hand-written task, a code change and a redeploy, just to check one more row of data the warehouse already has. Day 20's TaskFlow removed the boilerplate of wiring <code>&gt;&gt;</code> and calling <code>xcom_push</code> by hand for a <em>single</em> value passed between two tasks — it never addressed the case where the number of tasks itself should come from data, not from how many times a DAG author typed <code>@task</code>.</p>
+
+<h2>2 · <dfn data-en="an Airflow TaskFlow mechanism where calling a decorated task's .expand() with a list (often another task's own return value) creates one mapped task instance per element of that list at run time, instead of one task per element written by hand at parse time -- the number of instances is not known until the upstream task that produces the list actually runs" data-vn="giữ nguyên &quot;dynamic task mapping&quot; — cơ chế TaskFlow của Airflow: gọi .expand() của 1 task đã decorate với 1 list (thường là return value của task khác) tạo ra 1 task instance riêng cho MỖI phần tử của list đó tại run time, thay vì viết tay từng task cho từng phần tử lúc parse DAG -- số lượng instance không biết trước được cho tới khi task tạo ra list đó thực sự chạy">dynamic task mapping</dfn>: one task definition, many task instances, decided at run time</h2>
+<p>Airflow's own fix for exactly this is <code>.expand()</code>: call a <code>@task</code>-decorated function's <code>.expand()</code> method with a keyword argument bound to a list, and Airflow creates one <dfn data-en="one of the many task instances Airflow creates from a single mapped task definition via .expand() -- each carries the same task_id as the others but a distinct map_index (0, 1, 2, ...) and runs the decorated function body against one element of the expanded list, independently of every sibling instance's own success or failure" data-vn="giữ nguyên &quot;mapped task instance&quot; — 1 trong nhiều task instance mà Airflow tạo ra từ 1 định nghĩa task mapped duy nhất qua .expand() -- mỗi instance có cùng task_id với các instance khác nhưng map_index riêng (0, 1, 2, ...), chạy phần thân hàm decorate với 1 phần tử của list đã expand, độc lập với việc các instance anh em thành công hay fail">mapped task instance</dfn> per element of that list — not at the moment the DAG file is parsed, but at the moment the DAG actually runs and the list's real length becomes known. Today's shape, built from pieces this course already has (Day 20's plain <code>@task</code>, Day 1's four-city domain):</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+CITIES = [<span class="str">"Hanoi"</span>, <span class="str">"Ho Chi Minh City"</span>, <span class="str">"Da Nang"</span>, <span class="str">"Hue"</span>]
+
+<span class="kw">@dag</span>(schedule=<span class="str">"@daily"</span>, start_date=..., catchup=<span class="kw">False</span>)
+<span class="kw">def</span> city_sla_check():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> list_cities() -&gt; <span class="kw">list</span>[<span class="kw">str</span>]:
+        <span class="kw">return</span> CITIES
+
+    <span class="kw">@task</span>
+    <span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>) -&gt; <span class="kw">dict</span>:
+        ...
+
+    check_city_sla.expand(city=list_cities())
+
+city_sla_check()</code></pre>
+<p>Confirmed this round with a real <code>DagBag</code> parse of exactly this shape (no live scheduler or metadata database needed — the same read-the-parsed-DAG-object technique Days 20/45/51 each used for their own structural claims, since <code>bag.get_dag()</code> itself queries the metadata database and fails without one, while <code>bag.dags[...]</code>, read directly off the parsed <code>DagBag</code> object, does not):</p>
+<pre><code>check_city_sla -&gt; is_mapped: True
+list_cities -&gt; is_mapped: False
+check_city_sla upstream: ['list_cities']</code></pre>
+<p><code>check_city_sla</code> comes back as a distinct kind of object entirely — <code>DecoratedMappedOperator</code>, not the plain operator class every non-mapped task in this course has used — and <code>check_city_sla.expand(city=list_cities())</code> both declares the one upstream dependency (exactly Day 20's "the function call <em>is</em> the dependency" rule, with no <code>&gt;&gt;</code> anywhere) and tells Airflow the elements it maps over will come from that upstream task's own return value, not from a list written into the DAG file.</p>
+<div class="callout">The number four — one mapped instance per city — is <em>not</em> a fact this round's parse can show. <code>list_cities()</code> hasn't run; nothing has. The parsed DAG only knows that <code>check_city_sla</code> is mapped and that its elements will come from <code>list_cities</code>'s eventual output — the actual instance count, and each instance's own <code>map_index</code> (0 for Hanoi, 1 for Ho Chi Minh City, and so on), only exist once a real DAG run executes <code>list_cities</code> and Airflow's scheduler expands <code>check_city_sla</code> against its real return value. That is a live-run fact, named here rather than asserted.</div>
+
+<h2>3 · Why this is still "just" XCom underneath, same as Day 20</h2>
+<p>Nothing about <code>.expand()</code> invents a new data-passing mechanism. <code>list_cities()</code> returns a plain list; Airflow pushes that list to XCom exactly the way Day 20's <code>count_raw_orders()</code> pushed a plain integer — one row, keyed <code>return_value</code>, in Airflow's own metadata database. The only new behavior is what happens on the <em>downstream</em> side: instead of one task instance pulling that whole list as a single value, Airflow's scheduler reads the list's length and creates that many mapped instances of <code>check_city_sla</code>, each one pulling a single element at its own <code>map_index</code>. Day 20's own XCom-sizing warning still applies unchanged: <code>list_cities</code> returning four city names is a tiny, appropriate XCom value; it returning every row of <code>raw.orders</code> to map over would be exactly the dataset-through-XCom mistake Day 20 named, just dressed up as a list.</p>
+
+<h2>4 · Build: a standalone <code>city_sla_check</code> DAG with one mapped task</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, create a new file, <code>dags/city_sla_check.py</code>, independent of Day 7's <code>food_delivery_pipeline.py</code>:</p>
+<pre><code><span class="cm">"""Standalone DAG: one mapped task per city, built with dynamic task mapping.
+
+Not wired into food_delivery_pipeline.py -- a separate file, same pattern
+Day 20's raw_row_count_check.py used for a self-contained TaskFlow demo.
+"""</span>
+<span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+CITIES = [<span class="str">"Hanoi"</span>, <span class="str">"Ho Chi Minh City"</span>, <span class="str">"Da Nang"</span>, <span class="str">"Hue"</span>]
+
+
+<span class="kw">@dag</span>(
+    dag_id=<span class="str">"city_sla_check"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+)
+<span class="kw">def</span> city_sla_check():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> list_cities() -&gt; <span class="kw">list</span>[<span class="kw">str</span>]:
+        <span class="cm"># TODO: today's real skill -- replace the hardcoded CITIES list with</span>
+        <span class="cm"># a real `select distinct city from stg_restaurants` (psycopg, same</span>
+        <span class="cm"># connection shape as Day 20's count_orders), so a fifth city added</span>
+        <span class="cm"># to raw.restaurants is checked with no DAG edit at all.</span>
+        <span class="kw">return</span> CITIES
+
+    <span class="kw">@task</span>
+    <span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>) -&gt; <span class="kw">dict</span>:
+        <span class="cm"># TODO: today's other real skill -- query mart_delivery_sla</span>
+        <span class="cm"># (Day 36's city grain) for this one city's share_over_45_min and</span>
+        <span class="cm"># raise ValueError if it exceeds Day 10's 45-minute var()-driven</span>
+        <span class="cm"># threshold, so one bad city fails only its own mapped instance.</span>
+        ...
+
+    check_city_sla.expand(city=list_cities())
+
+
+city_sla_check()
+</code></pre>
+<p>Fill in both TODOs: a real <code>psycopg</code> query for the city list (same connection shape as every prior <code>psycopg</code> task this course has written) and a real SLA check per city. The point isn't the SQL — it's that <code>check_city_sla.expand(city=list_cities())</code> is the entire wiring for turning "however many cities exist today" into "that many independent task instances," with no loop written at parse time and no count hardcoded anywhere in the file.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags test city_sla_check 2026-11-23</code></pre>
+<p>Expected: <code>list-import-errors</code> prints nothing, and the test run's log shows <code>list_cities</code> finish once, then <code>check_city_sla</code> run four separate times — one log block per city, each ending with its own <code>Done. Returned value was: ...</code> line. Confirm the mapped instance count directly, the way this round's own <code>DagBag</code> check (not a live run) confirmed the structural shape:</p>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags')
+t = bag.dags['city_sla_check'].get_task('check_city_sla')
+print('is_mapped:', t.is_mapped)
+print('upstream:', sorted(t.upstream_task_ids))
+"</code></pre>
+<p>Expected: <code>is_mapped: True</code> and <code>upstream: ['list_cities']</code> — the same two facts this round's own scratch parse printed, confirming the file you just wrote really does produce a mapped operator with the dependency inferred from the <code>.expand()</code> call alone, before trusting a live run to show the actual four-instance fan-out. Commit <code>dags/city_sla_check.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to run the same check against every row of a lookup table, and the number of rows can change. How would you structure that in Airflow?"</strong> A strong answer, out loud: <em>"I'd use dynamic task mapping — one task definition, decorated with @task, calling .expand() with a keyword bound to another task's return value. Airflow creates one mapped task instance per element of that list at run time, each with its own map_index, instead of me hand-writing one task per row or looping at parse time. It's still built on the same XCom mechanism TaskFlow always uses — the list itself is a small XCom value, and the only genuinely new behavior is that the scheduler reads that list's length and expands the downstream task to match, so adding a new row to the source table changes the fan-out with zero code change."</em> The signal: naming that <code>.expand()</code> defers the instance <em>count</em> to run time without inventing a new way to move data, and that each mapped instance fails or succeeds independently of its siblings.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>.expand()</code> over a single keyword argument bound to an upstream task's return value, and the structural facts a <code>DagBag</code> parse can confirm without a live scheduler: <code>is_mapped</code>, the inferred upstream dependency, and the operator class change. It does not cover <code>.expand_kwargs()</code> (mapping over multiple paired arguments at once, vocabulary only), <code>map_index_template</code> (naming mapped instances something more readable than a bare integer), partial binding with <code>.partial()</code> (fixing some arguments while mapping others), or <code>max_active_tis_per_dag</code>-style concurrency limits on how many mapped instances run at once — real depth, left for if this course's own DAGs ever need a map large enough for concurrency to matter. The actual run-time fan-out (four real task instances, one per city, each with its own log and state) rests on Airflow's documented dynamic-mapping behavior, not a live <code>airflow dags test</code> run this round, since the <code>airflow db migrate</code> approval gate named every round since Day 35 was unavailable here too.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round via a real DagBag parse: calling check_city_sla.expand(city=list_cities()) produces a DecoratedMappedOperator (is_mapped: True) whose one upstream dependency, list_cities, is inferred automatically from the function call -- the actual number of mapped instances is a run-time fact the scheduler decides once list_cities has actually executed and its real list length is known, not something fixed when the DAG file is parsed.">
+    <p class="stem">When is the number of mapped task instances <code>check_city_sla.expand(city=list_cities())</code> will create actually decided?</p>
+    <button class="opt" data-ok>at run time, once list_cities has actually run</button>
+    <button class="opt">at parse time, by reading list_cities' source code</button>
+    <button class="opt">never; expand always creates exactly one task here</button>
+  </div>
+  <div class="q" data-why="Dynamic task mapping does not invent a new data-passing mechanism. list_cities() returns a plain list, which Airflow pushes to XCom exactly the way Day 20's count_raw_orders() pushed a plain integer -- the only new behavior is on the downstream side, where the scheduler reads that list's length and creates that many mapped instances instead of one instance pulling the whole list as a single value.">
+    <p class="stem">What actually carries <code>list_cities()</code>'s returned list of four cities over to <code>check_city_sla</code>'s mapped instances?</p>
+    <button class="opt" data-ok>the same XCom mechanism Day 20's TaskFlow already used</button>
+    <button class="opt">a brand-new transport mechanism, invented just for today's mapping</button>
+    <button class="opt">a shared in-memory Python list passed between the tasks</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: bag.get_dag() queries Airflow's metadata database (DagModel.get_current()) and fails with 'no such table: dag' against a bare DagBag with no migrated database -- the exact airflow db migrate gate this course has hit every Airflow round since Day 35. Reading bag.dags[dag_id] directly off the parsed DagBag object skips that database query entirely, since the DAG object already exists in memory once parsing succeeds.">
+    <p class="stem">Why did this round's verification read <code>bag.dags['city_sla_check']</code> directly instead of calling <code>bag.get_dag('city_sla_check')</code>?</p>
+    <button class="opt" data-ok><code>get_dag()</code> queries a metadata database this sandbox lacks</button>
+    <button class="opt"><code>get_dag()</code> does not exist anywhere in this version</button>
+    <button class="opt">mapped DAGs can never be looked up, ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/dynamic-task-mapping.html">Dynamic Task Mapping</a> doc, new to this course's citations, covers <code>.expand()</code>, <code>.expand_kwargs()</code>, <code>.partial()</code> and <code>map_index_template</code> in full — today's content stays inside its first section. Day 20's <a href="https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html">TaskFlow tutorial</a> remains the source for the underlying XCom mechanism today's Section 3 leans on. Not fetched live this round (no working <code>WebFetch</code> tool, the same recurring gap Days 17, 23, 26, 31, 34, 35, 45, 54 and 56 each hit) — today's structural claims instead came from reading the installed <code>apache-airflow==3.3.1</code> package's own <code>DagBag</code>, <code>DecoratedMappedOperator</code> and <code>expand_input</code> directly; confirm flag-level detail (especially <code>map_index_template</code>'s exact syntax) against the live page before relying on it in a real DAG.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 69.<br>
+<strong>Next up:</strong> this round's own scope line named three real, bounded follow-ups left open: <code>.expand_kwargs()</code> over multiple paired arguments, <code>.partial()</code> for fixing some arguments while mapping others, and a live <code>airflow dags test</code> confirmation of the actual four-instance fan-out once the <code>airflow db migrate</code> approval gate (named every round since Day 35, now thirty-five rounds, 35-69) is granted. With today's round, dbt and Kafka have each had recent fresh-gap or named-TODO attention (Kafka: 66, 68; dbt: 63, 65) against Airflow's single round since then (67, itself a TODO-close) — a future round's gap-scan should weigh dbt or Kafka next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why the instance count is a run-time fact, or how <code>.expand_kwargs()</code> would differ for a check needing two mapped arguments at once? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

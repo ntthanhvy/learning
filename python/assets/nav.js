@@ -240,6 +240,8 @@
       file: "lessons/0115-review-retrieval-day-22.html" },
     { n: 116, date: "2026-11-22", title: "urllib.parse: taking a URL apart and putting one together",
       file: "lessons/0116-urllib-parse.html" },
+    { n: 117, date: "2026-11-23", title: "unicodedata: when two identical-looking strings aren't equal",
+      file: "lessons/0117-unicodedata-normalization.html" },
   ];
 
   const REFS = [

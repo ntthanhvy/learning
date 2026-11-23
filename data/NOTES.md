@@ -13112,3 +13112,103 @@
   `data/practice/136_np_arange_and_linspace.py`, and this file). The
   scratch directory `.scratch-data-136/` was deleted after verification, at
   the repo root but never tracked by git.
+- 2026-11-23 generation (Lesson 137, headless run): confirmed before writing
+  anything that no `lessons/0137-*.html` existed and no `n: 137`/
+  `2026-11-23` entry existed in `nav.js` — not a duplicate run. DB reads were
+  unavailable this session (the literal `psql` invocation is blocked by a
+  static content check in this sandbox); paced from `learning-records/` and
+  `NOTES.md` file state alone, per this course's standing practice for that
+  situation. Read `MISSION.md` (unmodified), this file's own tail,
+  `RESOURCES.md`, `assets/nav.js` in full, and Lesson 136's own HTML plus its
+  matching `practice/136_np_arange_and_linspace.py` as the structural
+  template. Topic choice: ran this round's own fresh scan (per this course's
+  "fresh scan each round" convention) — grepped every lesson body
+  case-insensitively for `np.[a-zA-Z_]+\(` (collected the full ~100-name
+  de-duplicated list across Lessons 1-136) and separately checked a list of
+  pandas/NumPy statistics candidates (`.cov()`, `.skew()`, `.kurt()`,
+  `.std()`, `.var()`, `.sem()`, `np.cov()`, `np.std()`, `np.var()`,
+  `.to_numpy()`, `.pct_change()`, `.duplicated()`) against every lesson
+  file. `.std()` turned up only as one column name inside `describe()`'s own
+  output table (Lesson 49) and `corr()`'s byline (Lesson 50) — never called
+  directly anywhere; `.var()`, `np.std()`, `np.var()`, `.cov()`, `.skew()`,
+  `.kurt()`, and `ddof` itself had zero hits anywhere across Lessons 1-136,
+  confirmed via a second, separate grep for the literal string `ddof` across
+  every lesson file plus `NOTES.md`. Picked the `Series.std()`/`.var()`
+  (pandas, default `ddof=1`) vs `np.std()`/`np.var()` (NumPy, default
+  `ddof=0`) mismatch as the topic — a genuine, high-frequency interview trap
+  (sample vs. population variance) that the two libraries disagree on
+  silently, with no error or warning either way, and a natural companion to
+  `describe()` (Lesson 49) and `corr()` (Lesson 50) rather than a further
+  narrowing of the Lessons 126-136 NumPy-array arc. Verified directly in a
+  scratch sandbox (pandas 3.1.1, numpy 2.5.5, `uv run --with pandas`) rather
+  than trusting memory: confirmed on an 8-value Series that `s.std()`
+  (pandas default) returns `2.138089935299395` while `np.std(arr)` (NumPy
+  default) on the identical values returns `2.0` — genuinely different
+  numbers, no exception either way; confirmed `s.std(ddof=0)` then exactly
+  matches `np.std(arr)`, and `np.std(arr, ddof=1)` then exactly matches
+  `s.std()`, proving the split is purely the `ddof` default and nothing
+  else; confirmed the identical split holds for `.var()`/`np.var()`.
+  Confirmed directly, twice, the sharper trap: a one-element
+  `pd.Series([5.0])`'s `.std()`/`.var()` under pandas' own `ddof=1` default
+  divides by `count - 1 = 0`, returning a silent `NaN` with no
+  `ZeroDivisionError` and no warning, while `np.std()`/`np.var()` on that
+  same single value (NumPy's own `ddof=0` default divides by `count = 1`
+  instead) returns a real, non-NaN number (`0.0`) — the same "no crash,
+  quietly wrong" family already flagged for `describe()` (Lesson 49) and
+  `reindex()` (Lesson 47). Did not build out `.sem()` (standard error of the
+  mean) or `.skew()`/`.kurt()` (higher-moment shape statistics) beyond
+  naming them in the scope line as the next nearest candidate gaps, out of
+  scope per `MISSION.md`'s "no deep statistics" line. Added exactly one new
+  glossary row, `ddof` — directly after Lesson 136's `np.empty()` entry —
+  confirmed via a scripted scan of every first-column term that `ddof` was
+  not already present, zero duplicates found across all 218 terms; the one
+  `<dfn>` tag used in the lesson body (`ddof`) was also embedded verbatim
+  into the glossary row's third column, matching the established
+  duplicate-markup convention. `tr`/`td`/`th`/`dfn`/`table` balance on the
+  glossary confirmed 219/219, 654/654, 3/3, 16/16, 1/1 via occurrence-count
+  `grep -o` equivalents, not the line-count shortcut earlier rounds' own
+  notes flagged as unreliable. Also included an explicit `.interview`
+  callout div, matching this course's standing rule. Verification performed
+  mechanically via a scratch directory `.scratch-data-137/` created at the
+  repo root (deleted after, never tracked by git, matching every prior
+  round's own precedent — `/tmp` was unavailable for new directories in this
+  sandbox, confirmed directly when `mkdir -p /tmp/...` was blocked):
+  (1) a quiz-word-count script found the first draft mismatched across all
+  three questions (10/11/10, 9/10/8, 11/6/8) and, after several rounds of
+  wording trims re-verified against the script's own exact tokenization
+  (not hand-counted), confirmed exactly 8/8/8 option words across all three
+  questions, one `data-ok` per question throughout; (2) an HTML tag-balance
+  script initially found a `p`-tag mismatch (18 open / 19 close) caused by
+  a stray `</p>` left inside the Section 2 `.callout` div (the div's own
+  content was never wrapped in a `<p>` to begin with) — fixed by deleting
+  the stray closing tag, then confirmed fully balanced: html/head/body
+  1/1/1, div 6/6, p 18/18, code 81/81, pre 4/4, h1 1/1, h2 7/7, strong 4/4,
+  button 9/9, script 3/3, dfn 1/1, span 28/28, em 4/4, a 3/3, title 1/1,
+  zero raw unescaped `&` outside the lesson's own `cd ~/learning/data && uv
+  run ...` shell command appearing once in prose and once inside its own
+  `<pre><code>` block (matching every prior round's own precedent for that
+  exact exception); exactly 1 `<dfn>`-carrying tag, with both `data-en`/
+  `data-vn`, matching the one new lesson-body dfn. `node --check` confirmed
+  `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid JavaScript,
+  both before and after adding one `n: 137` entry and one
+  `0137-std-var-and-ddof` file reference to `nav.js`. The first run of the
+  shipped (unsolved) `practice/137_std_var_and_ddof.py`, run directly from
+  its real `practice/` location via `uv run --with pandas python3`, printed
+  exactly 2 ✗ with no raw traceback, as expected. Building the solved copy
+  inside `.scratch-data-137/` (deleted after, never tracked by git) printed
+  both ✓ and "All green" on the first attempt, no further fixes needed.
+  Re-ran the shipped file directly from `practice/` again afterward and
+  reproduced the identical all-✗ result, confirming the solved copy's edits
+  never leaked back into the shipped baseline. This round's own fresh scan
+  closed the pandas/NumPy `std()`/`var()`-default-mismatch gap it found —
+  tomorrow's round owes a brand new fresh scan with nothing pre-committed,
+  per this course's standing convention; `.sem()`, `.skew()`, and `.kurt()`
+  remain the nearest still-open statistics candidates it surfaced but did
+  not build out. No new `data/learning-records/` entry was added — routine
+  lesson, no new completion/quiz signal since mid-October. `git status
+  --short` after all edits is expected to show only the intended `data/`
+  files touched (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0137-std-var-and-ddof.html`, new
+  `data/practice/137_std_var_and_ddof.py`, and this file). The scratch
+  directory `.scratch-data-137/` was deleted after verification, at the
+  repo root but never tracked by git.

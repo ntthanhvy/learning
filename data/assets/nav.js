@@ -280,6 +280,8 @@
       file: "lessons/0135-np-mod-and-power.html" },
     { n: 136, date: "2026-11-22", title: "np.arange() vs np.linspace(): the float-step trap, plus np.zeros()/np.ones()/np.full()",
       file: "lessons/0136-np-arange-and-linspace.html" },
+    { n: 137, date: "2026-11-23", title: "Series.std()/.var() vs np.std()/np.var(): the ddof=1 vs ddof=0 trap",
+      file: "lessons/0137-std-var-and-ddof.html" },
   ];
 
   const REFS = [

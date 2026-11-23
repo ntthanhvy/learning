@@ -288,6 +288,8 @@
       file: "lessons/0139-audit-logging-efcore-savechanges-changetracker.html" },
     { n: 140, date: "2026-11-22", title: "Distributed tracing, now in C# too",
       file: "lessons/0140-distributed-tracing-aspnetcore-activity-activitysource.html" },
+    { n: 141, date: "2026-11-23", title: "Feature flags, now in C# too",
+      file: "lessons/0141-feature-flags-aspnetcore-featuremanagement-featuregate.html" },
   ];
 
   const REFS = [

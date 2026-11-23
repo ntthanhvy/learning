@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 141 · Feature flags, now in C# too (FeatureGate, PercentageFilter)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 141 · ~20 min</p>
+<h1>Feature flags, now in C# too (FeatureGate, PercentageFilter)</h1>
+<p class="byline">Lesson 70 built a feature flag the hand-rolled way: a <code>FlagSource</code> interface with one <code>Enabled(ctx, flagName, userID)</code> method, an <code>if</code> statement at the call site, and a percentage rollout computed by hashing the user id mod 100 yourself. .NET has a first-party library for exactly this job — Microsoft's own <code>Microsoft.FeatureManagement</code> package, with declarative flag config, an attribute that gates a whole controller with zero <code>if</code> statements, and a percentage rollout filter that ships in the box instead of being hand-hashed.</p>
+
+<h2>1 · Same decoupling, declared instead of hand-checked</h2>
+<p>Lesson 70's point still holds without change: a <dfn data-en="a runtime check, backed by config rather than a code change, that decides whether a given code path executes -- letting a team deploy new code disabled and enable it later without a second deploy, and disable it again the same way if it misbehaves" data-vn="feature flag (giữ nguyên) — cờ đọc lúc runtime, quyết định 1 đoạn code có chạy hay không, đổi được mà không cần deploy lại">feature flag</dfn> separates deploying code from releasing a feature. What's different in .NET is where the <code>if</code> lives. <code>Microsoft.FeatureManagement</code> declares flags in config, not in a hand-written interface:</p>
+<pre><code><span class="cm">// appsettings.json</span>
+{
+  <span class="st">"feature_management"</span>: {
+    <span class="st">"feature_flags"</span>: [
+      { <span class="st">"id"</span>: <span class="st">"NewCheckout"</span>, <span class="st">"enabled"</span>: <span class="kw">true</span>,
+        <span class="st">"conditions"</span>: { <span class="st">"client_filters"</span>: [
+          { <span class="st">"name"</span>: <span class="st">"Microsoft.Percentage"</span>, <span class="st">"parameters"</span>: { <span class="st">"Value"</span>: <span class="st">"5"</span> } }
+        ] } }
+    ]
+  }
+}</code></pre>
+<p><code>services.AddFeatureManagement()</code> reads this section by convention and registers an <code>IVariantFeatureManager</code> in DI. A handler asks it the same question Lesson 70's <code>FlagSource.Enabled</code> answered:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> CheckoutController : Controller
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> IVariantFeatureManager _featureManager;
+    <span class="kw">public</span> CheckoutController(IVariantFeatureManager featureManager) =&gt; _featureManager = featureManager;
+
+    <span class="kw">public</span> <span class="kw">async</span> Task&lt;IActionResult&gt; Checkout()
+    {
+        <span class="kw">if</span> (<span class="kw">await</span> _featureManager.IsEnabledAsync(<span class="st">"NewCheckout"</span>))
+            <span class="kw">return</span> RunNewCheckout();
+        <span class="kw">return</span> RunLegacyCheckout();
+    }
+}</code></pre>
+<p>Same shape as Go's <code>flags.Enabled(ctx, "new-checkout-flow", userID)</code> — an async bool check, injected rather than passed as a parameter. The flag's value still lives outside the binary (the JSON file, or a provider like Azure App Configuration sitting behind the same <code>IConfiguration</code> interface), so Lesson 70's "a constant in code is not a flag" rule is unchanged.</p>
+
+<h2>2 · <code>[FeatureGate]</code>: the <code>if</code> disappears entirely</h2>
+<p>.NET's distinct move, with no Go equivalent in Lesson 70's version: the <code>Microsoft.FeatureManagement.Mvc</code> package's <dfn data-en="an attribute from Microsoft.FeatureManagement.Mvc that gates a whole MVC controller or action behind one or more named feature flags -- if the flag(s) are off for the current request, the action never runs at all, returning HTTP 404 by default, instead of the handler body containing an explicit if-check" data-vn="[FeatureGate] (giữ nguyên) — attribute của Microsoft.FeatureManagement.Mvc, chặn cả 1 controller/action MVC theo 1 hay nhiều feature flag -- flag tắt thì action không chạy luôn, trả HTTP 404 mặc định, thay vì viết if-check trong handler">[FeatureGate]</dfn> attribute can gate an entire controller or action without any <code>if</code> inside the handler body at all:</p>
+<pre><code>[FeatureGate(<span class="st">"NewCheckout"</span>)]
+<span class="kw">public</span> <span class="kw">class</span> NewCheckoutController : Controller
+{
+    <span class="kw">public</span> IActionResult Index() =&gt; View();
+}</code></pre>
+<p>When <code>NewCheckout</code> is off, ASP.NET Core's MVC pipeline rejects the request before the action method runs — a 404 by default, configurable to another status code — rather than the action running and immediately branching into an <code>else</code>. This is a structural difference, not cosmetic: Lesson 70's "flag debt" problem (an old flag's dead branch still sitting in the handler, forcing every reader to hold both paths in mind) can't happen the same way when the gate lives on the controller declaration instead of inside its body. Removing the flag later means deleting one attribute line and, eventually, the controller that's now unconditionally on — not untangling an <code>if</code>/<code>else</code> first.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> <code>[FeatureGate]</code> looks like a route guard — a Vue/Angular route-level check that redirects before a component ever mounts. The comparison holds structurally (both reject at the boundary, before any body code runs) but the enforcement point differs: a frontend route guard is advisory, since a user can still call the underlying API directly; <code>[FeatureGate]</code> runs server-side in the same pipeline that serves the API itself, so there's no bypass route for a client to find.</div>
+
+<h2>3 · The percentage rollout: shipped, not hand-hashed</h2>
+<p>Lesson 70 section 3 built a percentage rollout by hand: hash a stable user id, reduce mod 100, compare against a threshold. <code>Microsoft.FeatureManagement</code> ships this as a filter instead of code to write: <code>PercentageFilter</code> is one of several built-in feature filters (alongside <code>TimeWindowFilter</code>) that are added automatically the moment <code>AddFeatureManagement()</code> runs — no extra registration, unlike the fourth built-in filter below. The <code>appsettings.json</code> snippet in section 1 already used it (<code>"Microsoft.Percentage"</code>, <code>Value: "5"</code>) — that's the entire 5% rollout from Lesson 70's worked example, with no hashing code anywhere in the application.</p>
+<p>The one built-in filter that needs an extra line is <dfn data-en="a built-in Microsoft.FeatureManagement feature filter that evaluates a flag per user or group rather than a flat percentage of all traffic -- unlike the other built-in filters it is not added automatically by AddFeatureManagement and instead requires calling WithTargeting on the IFeatureManagementBuilder, plus an ITargetingContextAccessor implementation supplying the current user/group information" data-vn="TargetingFilter (giữ nguyên) — feature filter có sẵn của Microsoft.FeatureManagement, đánh giá flag theo từng user/group cụ thể thay vì % traffic chung -- không tự động thêm khi gọi AddFeatureManagement như các filter khác, phải gọi WithTargeting trên IFeatureManagementBuilder, cộng với 1 ITargetingContextAccessor cung cấp thông tin user/group hiện tại">TargetingFilter</dfn>, registered with <code>services.AddFeatureManagement().WithTargeting&lt;MyTargetingContextAccessor&gt;()</code> — it evaluates a flag against a specific user id or named group (e.g. "beta testers") pulled from an <code>ITargetingContextAccessor</code> implementation, rather than a flat percentage of all traffic. Lesson 70's hashed-percentage rollout and .NET's <code>TargetingFilter</code> solve related but distinct problems: percentage rollout answers "how much traffic," targeting answers "which specific users," and a real system often wants both — <code>requirement_type: "All"</code> in the flag's <code>conditions</code> combines filters with AND logic, so a flag can require both a targeting match and a percentage roll in the same evaluation.</p>
+
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 70: Go</th><th>Lesson 141: C#</th></tr></thead>
+<tbody>
+<tr><th>Where the flag is declared</th><td>a <code>FlagSource</code> interface implementation, hand-written</td><td><code>appsettings.json</code>'s <code>feature_management</code> section, or a config provider</td></tr>
+<tr><th>Checking a flag</th><td><code>flags.Enabled(ctx, name, userID)</code>, an explicit <code>if</code></td><td><code>IVariantFeatureManager.IsEnabledAsync(name)</code>, an explicit <code>if</code> — or no <code>if</code> at all via <code>[FeatureGate]</code></td></tr>
+<tr><th>Percentage rollout</th><td>hash the user id, reduce mod 100, compare by hand</td><td><code>Microsoft.Percentage</code> filter, built in, no hashing code written</td></tr>
+<tr><th>Per-user/group targeting</th><td>would need custom logic added to <code>Enabled</code></td><td><code>TargetingFilter</code>, built in, needs one extra <code>WithTargeting()</code> call</td></tr>
+</tbody>
+</table>
+
+<h2>4 · What's unchanged, and what a flag never replaces</h2>
+<p>Lesson 70's kill-switch framing and flag-debt warning both carry over untouched — a flag whose job is "disable this path immediately in production" is exactly as valuable declared in <code>appsettings.json</code> as it was behind a hand-written <code>FlagSource</code>, and a <code>[FeatureGate]</code>'d controller nobody ever removes is still permanent complexity, just one attribute line instead of one dead <code>if</code> branch. Likewise unchanged: a feature flag is still a deploy-time risk knob a human moves on purpose, never a runtime defense that trips itself the way Lesson 28's circuit breaker does — <code>Microsoft.FeatureManagement</code> doesn't change who decides to widen a rollout, only how much hand-written code that decision costs to wire up.</p>
+
+<div class="interview">
+<p><strong>Q: "We're building an ASP.NET Core service and want to roll out a risky change to 5% of users first. Do we need to build our own flag system?"</strong> A strong answer, out loud: <em>"No — Microsoft.FeatureManagement already covers this. I'd declare the flag in config with the built-in Microsoft.Percentage filter at 5%, which needs no custom hashing code, and check it via IVariantFeatureManager.IsEnabledAsync, or gate the whole controller with [FeatureGate] if I want the rejected path to never even enter the action method. If we later need to target specific beta users instead of a flat percentage, TargetingFilter covers that too, with one extra WithTargeting() registration. What the library doesn't give us for free is discipline — we still need to decide, on paper, when the flag gets removed once it's fully rolled out, the same flag-debt risk as any hand-rolled version."</em> The signal: knowing which parts the framework gives for free (the filter math, the attribute-level gate) versus which parts stay a team process problem no library solves (removing old flags).</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>IVariantFeatureManager.IsEnabledAsync</code>, <code>services.AddFeatureManagement()</code>, the <code>[FeatureGate]</code> attribute, and the built-in <code>Microsoft.Percentage</code>/<code>TargetingFilter</code> feature filters. It does not cover variants (the library's mechanism for returning more than a plain on/off value from one flag), telemetry emission for flag evaluations, dynamic feature providers backed by a database rather than <code>appsettings.json</code>, or Azure App Configuration's hosted flag management service — all named once in Microsoft's own docs but out of scope for a 20-minute concept lesson per this course's "concepts first" rule.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The FeatureGate attribute gates an entire controller or action at the MVC pipeline level, before the action method body ever runs -- a request for a gated-off feature is rejected (404 by default) rather than the action running and branching into an if/else, which is why it avoids Lesson 70's flag-debt problem of a dead branch sitting inside a handler.">
+    <p class="stem">What does <code>[FeatureGate]</code> do differently from an <code>if</code> check inside a handler body?</p>
+    <button class="opt" data-ok>it blocks the whole gated action before its body runs</button>
+    <button class="opt">it silently ignores every single feature flag defined here now</button>
+    <button class="opt">it only ever works inside Razor Pages not any controllers</button>
+    <button class="opt">it permanently deletes the gated action from compiled apps now</button>
+  </div>
+  <div class="q" data-why="PercentageFilter and TimeWindowFilter are both added automatically the moment AddFeatureManagement() runs. TargetingFilter is the one built-in filter that is not added automatically -- it requires calling WithTargeting on the IFeatureManagementBuilder plus an ITargetingContextAccessor implementation, because it needs per-user or per-group context that has no ambient default the way a flat percentage check does.">
+    <p class="stem">Which built-in feature filter needs an extra registration call, unlike <code>PercentageFilter</code>?</p>
+    <button class="opt" data-ok>TargetingFilter needs per-user context supplied by the app itself now</button>
+    <button class="opt">PercentageFilter since percentage math always needs its own manual setup</button>
+    <button class="opt">none of them; every single filter needs the same setup</button>
+    <button class="opt">TimeWindowFilter since it cannot read any configured start dates here</button>
+  </div>
+  <div class="q" data-why="Lesson 70 built a percentage rollout by hashing a stable user id and reducing it mod 100 by hand, inside application code. Microsoft.FeatureManagement's Microsoft.Percentage filter does the same job as config -- a Value parameter in appsettings.json -- with zero hashing code written anywhere in the application.">
+    <p class="stem">How does .NET's <code>Microsoft.Percentage</code> filter compare to Lesson 70's Go percentage rollout?</p>
+    <button class="opt" data-ok>same rollout idea but config declared instead of hand hashed</button>
+    <button class="opt">a completely unrelated concept sharing no real purpose at all</button>
+    <button class="opt">it only supports one fixed non configurable fifty percent value</button>
+    <button class="opt">it still requires rewriting the exact same hashing algorithm here</button>
+  </div>
+  <div class="q" data-why="Microsoft.FeatureManagement changes how much code a rollout decision costs to wire up, but it does not change who makes that decision or when. A feature flag, with or without the library, remains a deploy-time risk knob a human moves deliberately -- unlike Lesson 28's circuit breaker, which trips itself automatically on a counted run of failures with no person involved.">
+    <p class="stem">What does <code>Microsoft.FeatureManagement</code> leave unchanged from Lesson 70's framing?</p>
+    <button class="opt" data-ok>a flag is still a human moved risk knob not an automatic</button>
+    <button class="opt">feature flags now trip themselves automatically just exactly like a circuit breaker</button>
+    <button class="opt">deploying code and releasing a feature become the one exact same event</button>
+    <button class="opt">kill switches are no longer possible inside any ASP NET Core app</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/azure/azure-app-configuration/feature-management-dotnet-reference">Microsoft Learn: .NET feature management reference</a> — the primary source for <code>IVariantFeatureManager.IsEnabledAsync</code>, <code>AddFeatureManagement()</code>'s configuration-section convention, <code>FeatureGateAttribute</code>'s controller/action behavior, and the built-in filter list (<code>PercentageFilter</code>, <code>TimeWindowFilter</code>, <code>TargetingFilter</code>, <code>ContextualTargetingFilter</code>) including which ones register automatically versus which need <code>WithTargeting()</code> — every claim in this lesson not attributed to Lesson 70 traces back to this page. Lesson 70's own Pete Hodgson (martinfowler.com) <a href="https://martinfowler.com/articles/feature-toggles.html">Feature Toggles</a> source still covers the flag-category taxonomy and flag-debt problem itself in full, unchanged by this port.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 70's feature-flag design and continues this run's "now in C# too" series (Lessons 132, 137, 138, 139, 140). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 141 rounds — the honest next step remains a completion signal or a user-named track. Standing candidate for the next "now in C# too" port: HATEOAS (Lesson 97), still Go-only, though its .NET angle looks thinner than today's since ASP.NET Core has no first-party hypermedia-link library the way it does for feature flags.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

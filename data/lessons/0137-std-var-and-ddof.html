@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 137 · Series.std()/.var() vs np.std()/np.var(): the ddof=1 vs ddof=0 trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 137 · ~20 min · 23 Nov 2026</p>
+<h1>Series.std()/.var() vs np.std()/np.var(): the ddof=1 vs ddof=0 trap</h1>
+<p class="byline">This round's own fresh scan grepped every lesson body case-insensitively for <code>.std(</code>, <code>.var(</code>, <code>np.std(</code>, and <code>np.var(</code>: <code>std</code> only ever appeared as one column inside <code>describe()</code>'s output table (Lesson 49) or <code>corr()</code>'s own byline (Lesson 50) — never called directly, and <code>.var()</code>/<code>np.std()</code>/<code>np.var()</code> had zero hits anywhere across Lessons 1-136. A genuine, high-frequency interview gap: the two libraries compute a <em>different number by default</em> for the exact same column, with no error or warning to flag it.</p>
+
+<h2>1 · Same column, two different numbers by default</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5) on one small Series:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="kw">2</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>, <span class="kw">9</span>])
+
+s.std()             <span class="cm"># 2.138089935299395   -- pandas default</span>
+np.std(s.to_numpy()) <span class="cm"># 2.0                 -- numpy default, SAME 8 numbers, different result</span></code></pre>
+<p>No crash, no warning — just two confirmed-different answers to what looks like the identical question. The cause is a single hidden parameter both functions compute with but default differently: <dfn data-en="Delta Degrees of Freedom -- the N in a standard-deviation/variance calculation's denominator becomes (count - ddof) instead of plain count; ddof=0 is the POPULATION formula (divide by count), ddof=1 is the SAMPLE formula (divide by count - 1), and the two libraries disagree on which one is the default" data-vn="giữ nguyên 'ddof' (Delta Degrees of Freedom) — tham số quyết định mẫu số khi tính std()/var() là (count - ddof) thay vì count; ddof=0 là công thức QUẦN THỂ (population, chia cho count), ddof=1 là công thức MẪU (sample, chia cho count - 1); hai thư viện mặc định KHÁC NHAU tham số này">ddof</dfn>, short for Delta Degrees of Freedom.</p>
+
+<h2>2 · pandas defaults to ddof=1 (sample); NumPy defaults to ddof=0 (population)</h2>
+<p>Confirmed directly, every pandas statistics method (<code>Series.std()</code>, <code>Series.var()</code>, <code>DataFrame.std()</code>) defaults to <code>ddof=1</code> — dividing the sum of squared deviations by <code>count - 1</code>, the <em>sample</em> variance formula, the correction Bessel's correction is named for, used because real data is almost always a sample of a larger population rather than the whole population itself. <code>np.std()</code> and <code>np.var()</code> default to <code>ddof=0</code> instead — dividing by plain <code>count</code>, the <em>population</em> formula, treating the array as if it already contains every value that exists:</p>
+<pre><code>s.std(ddof=<span class="kw">0</span>)              <span class="cm"># 2.0                 -- forcing pandas to ddof=0 now MATCHES numpy's default</span>
+np.std(s.to_numpy(), ddof=<span class="kw">1</span>)  <span class="cm"># 2.138089935299395   -- forcing numpy to ddof=1 now MATCHES pandas' default</span>
+s.std(ddof=<span class="kw">0</span>) == np.std(s.to_numpy())             <span class="cm"># True</span>
+s.std() == np.std(s.to_numpy(), ddof=<span class="kw">1</span>)              <span class="cm"># True</span></code></pre>
+<p>Same formula family, same array — the two libraries simply ship opposite <code>ddof</code> defaults. <code>.var()</code> (the squared, un-rooted version <code>.std()</code> is the square root of) carries the identical split: pandas' <code>Series.var()</code> defaults to <code>ddof=1</code>, <code>np.var()</code> defaults to <code>ddof=0</code>.</p>
+
+<div class="callout"><strong>Confirmed directly, why pandas picked <code>ddof=1</code> as its default and NumPy picked <code>ddof=0</code>:</strong> pandas is built for tabular data analysis, where a loaded table is treated as a sample drawn from some larger real-world population — dividing by <code>count - 1</code> is the standard statistical correction that makes the sample variance an unbiased estimator of the true population variance. NumPy is a general-purpose array library with no such analysis-flavored assumption baked in — it defaults to the plain mathematical population formula, dividing by <code>count</code> exactly, and leaves the sample correction to whoever calls <code>ddof=1</code> explicitly.</div>
+
+<h2>3 · The silent single-row trap: pandas' default quietly returns NaN</h2>
+<p>Confirmed directly, a one-element Series's <code>.std()</code>/<code>.var()</code> under pandas' own <code>ddof=1</code> default divides by <code>count - 1 = 0</code> — not a <code>ZeroDivisionError</code>, a silent <code>NaN</code>:</p>
+<pre><code>pd.Series([<span class="kw">5.0</span>]).std()   <span class="cm"># nan   -- count=1, ddof=1 -> divide by 0, silently NaN, no crash</span>
+pd.Series([<span class="kw">5.0</span>]).var()   <span class="cm"># nan   -- same root cause</span>
+np.std(np.array([<span class="kw">5.0</span>]))  <span class="cm"># 0.0   -- numpy's ddof=0 default divides by count=1, no trap here</span></code></pre>
+<p>A <code>groupby().std()</code> on any group that happens to land exactly one row wide reproduces this quietly — the output table still has the right shape, with a <code>NaN</code> sitting in that one group's cell instead of an error anywhere pointing at the real cause. The same "no crash, quietly wrong" family already flagged for <code>describe()</code> (Lesson 49) and <code>reindex()</code> (Lesson 47) — except here the quiet wrongness comes from a single-row group, not a dtype mismatch.</p>
+
+<div class="interview">
+<p><strong>Q: "You compute df.std() in pandas and np.std() on the same column's values, and the two numbers don't match. What's going on?"</strong> A strong answer, out loud: <em>"They're using different ddof defaults — pandas' std()/var() default to ddof=1, the sample-variance formula dividing by count minus 1, because pandas treats a loaded table as a sample of a bigger population. NumPy's std()/var() default to ddof=0, the population formula dividing by plain count, since NumPy makes no such assumption. Neither is a bug — I'd pass ddof= explicitly on whichever side to match the other once I know which formula the actual question calls for, and if a group's std() comes back NaN, my first guess is a group with only one row, since ddof=1 on a single value divides by zero silently instead of raising."</em> The signal: naming both defaults by exact value, tying each to why that library chose it, and flagging the single-row NaN trap without being asked.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.std()</code>/<code>Series.var()</code>/<code>DataFrame.std()</code>'s confirmed <code>ddof=1</code> (sample) default, <code>np.std()</code>/<code>np.var()</code>'s confirmed <code>ddof=0</code> (population) default, confirmed direct numeric proof the two disagree by default on the identical array, and the confirmed single-row <code>NaN</code> trap under pandas' own default. It does not cover <code>.sem()</code> (standard error of the mean), <code>.skew()</code>/<code>.kurt()</code> (higher-moment shape statistics), or the Bessel's-correction derivation itself, out of scope per <code>MISSION.md</code>'s "no deep statistics" line — those are candidate gaps for a future round.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/137_std_var_and_ddof.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/137_std_var_and_ddof.py</code></pre>
+<p>Exercise 1 confirms the Section 1/2 contrast: on the same 8-value Series, <code>.std()</code>'s pandas default and <code>np.std()</code>'s numpy default disagree, but matching <code>ddof=</code> on either side makes them equal. Exercise 2 confirms the Section 3 trap: a one-element Series's <code>.std()</code> is <code>NaN</code> under pandas' default, while <code>np.std()</code> on that same single value is a real, non-NaN number.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pandas' Series.std()/.var() default to ddof=1 (dividing by count - 1, the sample-variance formula), while NumPy's np.std()/np.var() default to ddof=0 (dividing by plain count, the population-variance formula). On the identical array these two defaults produce different numbers, with no error or warning either way.">
+    <p class="stem">By default, do <code>Series.std()</code> and <code>np.std()</code> return the same number for the identical array of values?</p>
+    <button class="opt" data-ok>No -- pandas defaults ddof=1, NumPy defaults ddof=0</button>
+    <button class="opt">Yes -- both always divide by plain count</button>
+    <button class="opt">Yes -- NumPy always matches whatever pandas used</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: ddof=1 is the sample-variance formula, dividing the sum of squared deviations by (count - 1) -- the Bessel's-correction convention pandas defaults to, since a loaded table is normally treated as a sample of a larger population. ddof=0 is the population formula, dividing by plain count, which is NumPy's own default.">
+    <p class="stem">What does <code>ddof=1</code> mean in a <code>.std()</code>/<code>.var()</code> calculation?</p>
+    <button class="opt" data-ok>divide by (count - 1), the sample-variance formula</button>
+    <button class="opt">divide by (count + 1), extra smoothing step</button>
+    <button class="opt">ignore duplicate values, then divide by raw count</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a one-element Series's .std()/.var() under pandas' own ddof=1 default divides by (count - 1) = 0 -- not a crash, a silent NaN. np.std() on that same single value uses ddof=0 by default, dividing by count=1, so it returns a real non-NaN number (0.0) instead.">
+    <p class="stem">Calling <code>.std()</code> on a pandas Series containing exactly one value returns what, under pandas' own default?</p>
+    <button class="opt" data-ok>NaN, silently, since ddof=1 divides by zero here</button>
+    <button class="opt">a ZeroDivisionError, raised loudly and immediately right here</button>
+    <button class="opt">0.0 always, matching whatever number np.std() gives back</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.std.html"><code>Series.std()</code></a> and NumPy <a href="https://numpy.org/doc/stable/reference/generated/numpy.std.html"><code>numpy.std()</code></a> API references (per <code>RESOURCES.md</code>'s pandas/NumPy groupings, ~5 min each) — both pages document their own <code>ddof=</code> default directly; the cross-library mismatch and the single-row <code>NaN</code> trap are confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>ddof</code> is new today, added right after Lesson 136's <code>np.empty()</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan surfaced <code>.sem()</code> and <code>.skew()</code>/<code>.kurt()</code> as the next nearest uncovered statistics names, named above in the scope line but left for a future round's own fresh scan to confirm still open, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the ddof=1/ddof=0 split, the single-row NaN trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

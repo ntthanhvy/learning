@@ -111,6 +111,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 114 — `shlex.split()` for parsing a command-line-shaped string into the argument list `subprocess.run()` (Day 68) expects, respecting quoted substrings; `shlex.quote()` for making one value safe to embed in a shell command string, the fix Day 68's `shell=True` injection example needed; and `shlex.join()` as the exact inverse of `split()`, confirmed to round-trip back to the original list.
 - [Docs: `urllib.parse`](https://docs.python.org/3/library/urllib.parse.html)
   Use for: Day 116 — `urlparse()` for splitting a URL string into its named pieces (scheme, netloc, path, query), `parse_qs()` for reading a raw query string's values back as lists (handling a repeated key correctly), `urlencode()` as its write-direction inverse for building a query string from a dict, and `quote()`/`unquote()` for percent-encoding a single raw value, the URL equivalent of Day 114's `shlex.quote()`.
+- [Docs: `unicodedata`](https://docs.python.org/3/library/unicodedata.html)
+  Use for: Day 117 — `unicodedata.normalize()` for rewriting a string into one standard Unicode shape ("NFC"/"NFD") so two strings that only differ in how a character was built become equal under `==` and under set/dict membership, and `unicodedata.name()`/`.category()` for identifying a mystery character and classifying a character's kind.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

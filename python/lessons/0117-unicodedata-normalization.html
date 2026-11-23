@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 117 · unicodedata: when two identical-looking strings aren't equal</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 117 · ~20 min · 23 Nov 2026</p>
+<h1><code>unicodedata</code>: when two identical-looking strings aren't equal</h1>
+<p class="byline">Day 1 taught that <code>==</code> on two <code>str</code> objects compares their actual characters, not their printed appearance — and that has always been true, byte for byte. What Day 1 didn't need yet is a case where two strings print <em>identically</em> on screen, character for character to the human eye, and still fail <code>==</code>. Unicode makes that possible: the same visible letter can be built from a different number of underlying code points. <code>unicodedata</code> is the standard-library module that explains why, and <code>normalize()</code> is the fix.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>unicodedata</code>, <code>normalize</code>, <code>NFC</code>, and <code>NFD</code> are all zero-hit — genuinely untaught. <code>selectors</code>, <code>signal</code>, <code>sched</code>, <code>stat</code>, <code>tracemalloc</code>, <code>platform</code>, <code>ipaddress</code>, <code>mimetypes</code>, <code>binascii</code>, and <code>codecs</code> were also confirmed zero-hit this round (Day 116's own closing note had flagged all eleven as candidates), but most of those skew toward OS/event-loop internals this course's own scope boundary already excludes (<code>MISSION.md</code>'s "no deep asyncio event-loop internals," extended here to the sibling OS-signal/socket territory), or are thin single-function asides. <code>unicodedata</code> won because it is a genuine language-level gotcha about <code>str</code> identity and equality — directly extending Day 1's "names, objects, mutability" rather than standing alone — and because it is a real bug class: usernames, filenames, and search queries that look identical can silently fail an <code>==</code> check or a dict/set lookup depending on which app or OS last touched the string. <code>calendar</code> and <code>socket</code> remain the two longest-standing ruled-out candidates (thin content and scope-depth respectively). Day 116 was fresh day 1 of the current three-fresh-then-review cycle, so today is fresh day 2 — Day 118 should be fresh day 3, then Day 119 the next review day, spanning Days 116-118.</div>
+
+<h2>1 · The same letter, built two different ways</h2>
+<p>A letter like <code>é</code> can exist in a Python <code>str</code> as a single code point — <code>U+00E9</code>, "LATIN SMALL LETTER E WITH ACUTE" — or as <em>two</em> code points stacked together: a plain <code>e</code> (<code>U+0065</code>) followed by a separate "combining acute accent" mark (<code>U+0301</code>) that visually lands on top of whatever comes before it. Both render identically on screen. Neither is wrong; Unicode allows both on purpose, because some scripts need combining marks that have no single precomposed character at all.</p>
+<pre><code>s1 = <span class="str">"café"</span>                      <span class="cm"># precomposed: e-acute is ONE code point, U+00E9</span>
+s2 = <span class="str">"cafe"</span> + <span class="str">"́"</span>           <span class="cm"># plain e + a SEPARATE combining acute accent, U+0301</span>
+
+<span class="kw">print</span>(s1, <span class="str">"|"</span>, s2)          <span class="cm"># confirmed live: café | café  -- look identical</span>
+<span class="kw">print</span>(<span class="kw">len</span>(s1), <span class="kw">len</span>(s2))     <span class="cm"># confirmed live: 4 5  -- but NOT the same length</span>
+<span class="kw">print</span>(s1 == s2)            <span class="cm"># confirmed live: False</span></code></pre>
+<p>That's not a display bug and not a Python bug — <code>==</code> on strings compares code points exactly, the same rule Day 1 relied on everywhere else, and these two strings genuinely contain a different sequence of code points. The trap is that nothing on screen hints at it. A value pasted from one app, a filename saved by one OS, or a username typed on one keyboard layout can carry a different code-point sequence than another that looks pixel-for-pixel the same, and <code>==</code>, dict lookups, and set membership will all quietly disagree.</p>
+
+<h2>2 · <code>unicodedata.normalize()</code>: picking one shape to compare by</h2>
+<p><code>unicodedata.normalize(form, s)</code> rewrites a string into one of a small number of standard shapes, so two strings that only differ in <em>how</em> a character was built end up identical after normalizing both the same way. The two forms this course needs: <code>"NFC"</code> (compose combining marks into a single code point wherever one exists) and <code>"NFD"</code> (decompose the other way, splitting every precomposed character back into its base + combining marks). Either direction works as a comparison key, as long as both sides use the <em>same</em> one:</p>
+<pre><code><span class="kw">import</span> unicodedata
+
+nfc1 = unicodedata.normalize(<span class="str">"NFC"</span>, s1)
+nfc2 = unicodedata.normalize(<span class="str">"NFC"</span>, s2)
+<span class="kw">print</span>(nfc1 == nfc2)                 <span class="cm"># confirmed live: True</span>
+<span class="kw">print</span>(<span class="kw">len</span>(nfc1), <span class="kw">len</span>(nfc2))        <span class="cm"># confirmed live: 4 4  -- both composed down to the same 4 code points</span>
+
+nfd1 = unicodedata.normalize(<span class="str">"NFD"</span>, s1)
+nfd2 = unicodedata.normalize(<span class="str">"NFD"</span>, s2)
+<span class="kw">print</span>(nfd1 == nfd2)                 <span class="cm"># confirmed live: True</span>
+<span class="kw">print</span>(<span class="kw">len</span>(nfd1), <span class="kw">len</span>(nfd2))        <span class="cm"># confirmed live: 5 5  -- both decomposed to the same 5 code points</span></code></pre>
+<p><dfn data-en="unicodedata.normalize(form, s) rewrites a string into one of a small number of standard Unicode shapes -- NFC composes combining marks into a single code point wherever a precomposed one exists, NFD decomposes the other way -- so two strings that only differed in how a character was built become identical, confirmed live, once both are normalized to the same form" data-vn="giữ nguyên &quot;normalize&quot; — viết lại string theo 1 trong vài dạng chuẩn Unicode cố định; NFC ghép dấu phụ (combining mark) thành 1 code point duy nhất nếu có dạng ghép sẵn, NFD tách ngược lại; 2 string chỉ khác cách dựng ký tự sẽ thành giống y nhau sau khi normalize cùng 1 dạng">unicodedata.normalize()</dfn> is the fix: pick one form, apply it to every string before comparing, storing, or hashing it, and the "built differently, looks the same" trap disappears — exactly the way Day 1's mutable-default-argument trap disappeared once the actual rule behind it was named instead of guessed at.</p>
+
+<div class="callout"><strong>The lookup trap, made concrete:</strong> a <code>set</code> or <code>dict</code> key check uses <code>==</code> internally (via <code>__hash__</code>/<code>__eq__</code>, Day 31), so it inherits the exact same blind spot. Confirmed live: <code>{s1}</code> as a set does <strong>not</strong> contain <code>s2</code> (<code>s2 in {s1}</code> is <code>False</code>), even though they print identically — but normalizing both sides first fixes it, <code>unicodedata.normalize("NFC", s2) in {unicodedata.normalize("NFC", s1)}</code> is <code>True</code>. Any code that deduplicates usernames, filenames, or free-text input by putting them in a <code>set</code> or using them as a <code>dict</code> key needs to normalize first, or it will silently treat two "same" values as different.</div>
+
+<h2>3 · <code>unicodedata.name()</code> and <code>.category()</code>: asking what a character actually is</h2>
+<p>Two more small, frequently useful lookups from the same module: <code>unicodedata.name(char)</code> returns a character's official Unicode name as a string — useful for debugging exactly which invisible character snuck into a string — and <code>unicodedata.category(char)</code> returns a short code classifying what kind of character it is (letter, digit, punctuation, space, and so on), handy for a validation check that needs to reason about character <em>kind</em> rather than hand-writing a list of allowed characters:</p>
+<pre><code><span class="kw">print</span>(unicodedata.name(<span class="str">"A"</span>))          <span class="cm"># confirmed live: LATIN CAPITAL LETTER A</span>
+<span class="kw">print</span>(unicodedata.category(<span class="str">"A"</span>))      <span class="cm"># confirmed live: Lu  -- Letter, uppercase</span>
+<span class="kw">print</span>(unicodedata.category(<span class="str">"5"</span>))      <span class="cm"># confirmed live: Nd  -- Number, decimal digit</span>
+<span class="kw">print</span>(unicodedata.category(<span class="str">" "</span>))      <span class="cm"># confirmed live: Zs  -- Separator, space</span></code></pre>
+<p><code>name()</code> turns a mystery character copy-pasted from somewhere into a readable label instead of a blank space or a box on screen — exactly the debugging move for "why does this string that looks fine fail every check." <code>category()</code> is a one-call way to ask "is this a letter?" or "is this punctuation?" without hand-writing a range of acceptable code points.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has a notion of Unicode normalization at all — a column of strings read with <code>pd.read_csv()</code> that silently mixes NFC and NFD text keeps that inconsistency straight through any pandas operation, including <code>.groupby()</code> and <code>.drop_duplicates()</code>, which both compare using the same <code>==</code>-based rule this lesson just showed breaking. Normalizing is still a plain-Python, per-string job, typically done once while cleaning raw text before it ever reaches a DataFrame. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/117_unicodedata_normalization.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/117_unicodedata_normalization.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: normalizing two differently-built-but-identical-looking strings to the same form so <code>==</code> agrees, deduplicating a list of "same-looking" strings correctly by normalizing before putting them in a <code>set</code>, and using <code>unicodedata.name()</code> to identify a mystery character hiding inside a string.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="s1 and s2 render identically because Unicode allows the same visible letter to be built either as one precomposed code point or as a base character followed by a separate combining mark -- confirmed live, len(s1) was 4 and len(s2) was 5, and s1 == s2 was False, because == compares the actual code-point sequence, not the printed appearance.">
+    <p class="stem">Two strings print as identical text on screen, but <code>s1 == s2</code> is <code>False</code>. What's the most likely cause?</p>
+    <button class="opt" data-ok>one letter was built from a different number of code points</button>
+    <button class="opt">the string equality operator never actually works right in this language</button>
+    <button class="opt">one of the values is secretly still a raw bytes type</button>
+  </div>
+  <div class="q" data-why="unicodedata.normalize(form, s) rewrites a string into one of a small number of standard Unicode shapes -- NFC composes combining marks into a single code point wherever a precomposed one exists, NFD decomposes the other way -- so two strings that only differed in how a character was built become identical once both are normalized to the same form, confirmed live on both NFC and NFD.">
+    <p class="stem">What does <code>unicodedata.normalize("NFC", s)</code> actually do to a string?</p>
+    <button class="opt" data-ok>it rewrites the string into one standard code-point shape for comparing</button>
+    <button class="opt">it deletes every single character that is not a plain letter</button>
+    <button class="opt">it converts the whole string into one block of lowercase bytes</button>
+  </div>
+  <div class="q" data-why="a set or dict key check uses == internally, so it inherits the exact same code-point-sequence blind spot -- confirmed live, s2 in {s1} was False even though the two strings print identically, because the set stores and compares the raw un-normalized code points. Normalizing both sides first before the set is built or checked fixes it.">
+    <p class="stem">Why can <code>some_value in a_set</code> return <code>False</code> for a value that looks identical to one already in <code>a_set</code>?</p>
+    <button class="opt" data-ok>set membership checks use equality, which only ever compares raw code points</button>
+    <button class="opt">a Python set is only ever allowed to hold exactly five items</button>
+    <button class="opt">an in check on a set always returns False for any string</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/unicodedata.html"><code>unicodedata</code></a> docs, especially <code>normalize()</code>, <code>name()</code>, and <code>category()</code>; the Unicode Consortium's own <a href="https://unicode.org/reports/tr15/">UAX #15: Unicode Normalization Forms</a> for why NFC/NFD/NFKC/NFKD all exist, if curious beyond the two forms used here.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day117">glossary</a> under Day 117.<br>
+<code>calendar</code> and <code>socket</code> remain open, ruled-out-so-far candidates for a future round (thin content and scope-depth respectively). Day 118 should be fresh day 3 of this cycle, then Day 119 the next review day, spanning Days 116-118.<br><br>
+💬 Anything unclear — why two identical-looking strings can differ, or NFC vs NFD? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

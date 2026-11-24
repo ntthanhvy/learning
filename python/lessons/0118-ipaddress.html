@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 118 · ipaddress: IP addresses as real objects, not strings</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 118 · ~20 min · 24 Nov 2026</p>
+<h1><code>ipaddress</code>: IP addresses as real objects, not strings</h1>
+<p class="byline">Day 116 parsed a URL's <code>netloc</code> out as a plain string — <code>"api.example.com"</code> or, just as often in real logs and configs, a bare IP like <code>"192.168.1.10"</code>. A string like that looks fine to read but is easy to get wrong to validate: is it actually a valid address? Is it inside an allowed range? Hand-rolled string splitting and regex (Day 38) both get this wrong at the edges. <code>ipaddress</code> is the standard-library module that turns an IP address and a network range into real objects with the checks already built in.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>ipaddress</code>, <code>mimetypes</code>, <code>binascii</code>, <code>textwrap</code>, <code>stat</code>, <code>tracemalloc</code>, and <code>platform</code> are all zero-hit — genuinely untaught (<code>zoneinfo</code>, also on that watch-list, turned out to already be covered on Day 14 once checked directly, so it's off the list now, not a candidate). <code>selectors</code>, <code>sched</code>, and <code>signal</code> were re-confirmed zero-hit too but still skew toward the OS/event-loop internals <code>MISSION.md</code>'s own async-depth scope boundary already excludes. <code>ipaddress</code> won over the other clean candidates because it connects directly to two already-taught lessons rather than standing alone: Day 116's <code>urllib.parse</code> (a <code>netloc</code> is sometimes a bare IP, never validated there) and Day 38's <code>re</code> (the module people reach for first to "validate an IP with a regex," and get wrong at the edges this lesson shows). <code>calendar</code> and <code>socket</code> remain the two longest-standing ruled-out candidates (thin content and scope-depth respectively) and stayed untouched again this round.</div>
+
+<h2>1 · Why a string is the wrong representation</h2>
+<p>A regex built to "validate an IP address" is a classic trap: it's easy to write one that accepts <code>"999.999.999.999"</code> (four groups of digits, but each one out of range) or rejects a perfectly legal shortened IPv6 address. <code>ipaddress.ip_address()</code> does the real parsing — not a pattern match, an actual check that each piece is a valid address — and raises on anything that isn't:</p>
+<pre><code><span class="kw">import</span> ipaddress
+
+addr = ipaddress.ip_address(<span class="str">"192.168.1.10"</span>)
+<span class="kw">print</span>(<span class="kw">type</span>(addr), addr)      <span class="cm"># confirmed live: &lt;class 'ipaddress.IPv4Address'&gt; 192.168.1.10</span>
+
+<span class="kw">try</span>:
+    ipaddress.ip_address(<span class="str">"192.168.1.999"</span>)
+<span class="kw">except</span> ValueError <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># confirmed live: '192.168.1.999' does not appear to be an IPv4 or IPv6 address</span></code></pre>
+<p><dfn data-en="ipaddress.ip_address(s) parses a string into a real IPv4Address or IPv6Address object -- confirmed live, it picks the right type automatically from the string's shape -- and raises ValueError on anything that is not actually a valid address, catching out-of-range pieces a hand-written regex would miss" data-vn="giữ nguyên &quot;ip_address&quot; — parse 1 string thành object IPv4Address hoặc IPv6Address thật (tự chọn đúng loại theo hình dạng string); raise ValueError nếu string không phải địa chỉ hợp lệ, bắt được các trường hợp sai phạm vi mà 1 regex viết tay dễ bỏ sót">ipaddress.ip_address()</dfn> picks <code>IPv4Address</code> or <code>IPv6Address</code> automatically from the string's shape — one function covers both, and the result is a real object, not text, so it supports ordering (<code>&lt;</code>, confirmed live: <code>ip_address("192.168.1.5") &lt; ip_address("192.168.1.10")</code> is <code>True</code> — something string comparison alone would get wrong, since <code>"192.168.1.5" &lt; "192.168.1.10"</code> as plain strings is actually <code>False</code>) and useful attributes like <code>.is_private</code>:</p>
+<pre><code><span class="kw">print</span>(ipaddress.ip_address(<span class="str">"192.168.1.5"</span>) &lt; ipaddress.ip_address(<span class="str">"192.168.1.10"</span>))  <span class="cm"># confirmed live: True</span>
+<span class="kw">print</span>(<span class="str">"192.168.1.5"</span> &lt; <span class="str">"192.168.1.10"</span>)        <span class="cm"># confirmed live: False -- plain string comparison, wrong answer</span>
+
+<span class="kw">print</span>(ipaddress.ip_address(<span class="str">"10.0.0.5"</span>).is_private)     <span class="cm"># confirmed live: True</span>
+<span class="kw">print</span>(ipaddress.ip_address(<span class="str">"1.1.1.1"</span>).is_private)      <span class="cm"># confirmed live: False</span></code></pre>
+
+<h2>2 · <code>ip_network()</code>: a whole range, with membership built in</h2>
+<p>Real config and firewall rules talk about <em>ranges</em>, written in CIDR form like <code>192.168.1.0/24</code> — the <code>/24</code> says how many leading bits are the fixed network part, leaving the rest free for individual hosts. <code>ipaddress.ip_network()</code> parses that into an object supporting Python's own <code>in</code> operator for membership, so checking "is this address inside this range" is one readable line instead of manual octet math:</p>
+<pre><code>net = ipaddress.ip_network(<span class="str">"192.168.1.0/24"</span>)
+<span class="kw">print</span>(net.num_addresses)                              <span class="cm"># confirmed live: 256</span>
+<span class="kw">print</span>(ipaddress.ip_address(<span class="str">"192.168.1.10"</span>) <span class="kw">in</span> net)   <span class="cm"># confirmed live: True</span>
+<span class="kw">print</span>(ipaddress.ip_address(<span class="str">"192.168.2.1"</span>) <span class="kw">in</span> net)    <span class="cm"># confirmed live: False -- outside the /24</span></code></pre>
+<p><dfn data-en="ipaddress.ip_network(cidr) parses a CIDR string like 192.168.1.0/24 into a network object supporting Python's own `in` operator for membership -- confirmed live, checking whether an address falls inside the range is one readable line, no manual bit or octet math" data-vn="giữ nguyên &quot;ip_network&quot; — parse 1 chuỗi CIDR như 192.168.1.0/24 thành object network, dùng được toán tử in có sẵn của Python để kiểm tra 1 địa chỉ có thuộc range đó không; chỉ 1 dòng dễ đọc, không cần tính tay theo bit hay octet">ipaddress.ip_network()</dfn> is strict by default about one easy-to-miss detail: the address part must actually be the start of the range, with no "host bits" left set, or it raises — confirmed live, <code>ip_network("192.168.1.5/24")</code> raises <code>ValueError: 192.168.1.5/24 has host bits set</code>, because <code>.5</code> is a host inside the <code>/24</code>, not its start. Passing <code>strict=False</code> rounds it down to the network's actual start instead of raising, useful when the exact starting address genuinely doesn't matter yet:</p>
+<pre><code><span class="kw">try</span>:
+    ipaddress.ip_network(<span class="str">"192.168.1.5/24"</span>)
+<span class="kw">except</span> ValueError <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)   <span class="cm"># confirmed live: 192.168.1.5/24 has host bits set</span>
+
+<span class="kw">print</span>(ipaddress.ip_network(<span class="str">"192.168.1.5/24"</span>, strict=<span class="kw">False</span>))  <span class="cm"># confirmed live: 192.168.1.0/24</span></code></pre>
+
+<div class="callout"><strong>Hosts vs. addresses:</strong> <code>net.num_addresses</code> counts every address in the range, including the network's own first address and its broadcast address at the end — neither of which is a usable host. <code>net.hosts()</code> is a generator (Day 5) yielding only the usable ones. Confirmed live on this same <code>/24</code>: <code>num_addresses</code> is <code>256</code>, but <code>len(list(net.hosts()))</code> is <code>254</code> — the first (<code>192.168.1.1</code>) and last (<code>192.168.1.254</code>) usable hosts bracket the network/broadcast addresses that <code>hosts()</code> correctly excludes.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has any notion of an IP address or network as a type — a column of IP strings read with <code>pd.read_csv()</code> stays plain text, and checking range membership for a whole column means writing a small function with <code>ipaddress</code> and applying it, the same per-value logic this lesson just showed, one row at a time. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/118_ipaddress.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/118_ipaddress.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: validating a list of candidate IP strings and separating the genuinely valid ones from the invalid, checking whether a given address falls inside a CIDR range, and building a <code>strict=False</code> network from an address that isn't the range's exact start.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ipaddress.ip_address() does real parsing, not a pattern match -- confirmed live, it raised ValueError on '192.168.1.999' because 999 is out of range for one group, a mistake an easy-to-write regex can accept by only checking digit shape, not digit value.">
+    <p class="stem">Why does a hand-written regex often accept an invalid IP address like <code>"192.168.1.999"</code>?</p>
+    <button class="opt" data-ok>it checks digit shape only, missing that one out-of-range group</button>
+    <button class="opt">regular expressions cannot ever match any digit character at all</button>
+    <button class="opt">Python strings cannot legally contain the digit nine written twice</button>
+  </div>
+  <div class="q" data-why="ipaddress.ip_network() objects support Python's own `in` operator for membership -- confirmed live, ip_address('192.168.1.10') in ip_network('192.168.1.0/24') is True and ip_address('192.168.2.1') in the same network is False, with no manual octet math written by hand.">
+    <p class="stem">What does <code>ipaddress.ip_network()</code> give you that a plain string holding <code>"192.168.1.0/24"</code> does not?</p>
+    <button class="opt" data-ok>an object supporting `in` for checking address membership right away</button>
+    <button class="opt">a string that always prints itself in reverse for fun</button>
+    <button class="opt">automatic translation of the whole address into a spoken language</button>
+  </div>
+  <div class="q" data-why="ip_network() is strict by default and raises if the given address is not the exact start of the range -- confirmed live, ip_network('192.168.1.5/24') raised ValueError: host bits set, because .5 is a host address inside the /24, not its start; strict=False rounds it down to the network's real start instead of raising.">
+    <p class="stem"><code>ipaddress.ip_network("192.168.1.5/24")</code> raises <code>ValueError: ... has host bits set</code>. What does <code>strict=False</code> do about it?</p>
+    <button class="opt" data-ok>rounds the given address down to the range's actual start address</button>
+    <button class="opt">silently deletes every host bit from the final returned object now</button>
+    <button class="opt">disables all future address validation checks for the whole program entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/ipaddress.html"><code>ipaddress</code></a> docs, especially <code>ip_address()</code>, <code>ip_network()</code>, and the membership/<code>hosts()</code> examples under "Networks as containers of addresses."</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day118">glossary</a> under Day 118.<br>
+<code>calendar</code> and <code>socket</code> remain open, ruled-out-so-far candidates (thin content and scope-depth respectively); <code>mimetypes</code>, <code>binascii</code>, <code>textwrap</code>, <code>stat</code>, <code>tracemalloc</code>, and <code>platform</code> are fresh zero-hit candidates for the next fresh cycle after Day 119. Day 118 was fresh day 3 of this cycle — Day 119 should be the next review day, spanning Days 116-118 (<code>urllib.parse</code>, <code>unicodedata</code>, <code>ipaddress</code>).<br><br>
+💬 Anything unclear — why a regex IP check is risky, or <code>strict=False</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

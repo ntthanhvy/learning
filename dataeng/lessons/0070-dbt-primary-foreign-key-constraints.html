@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 70 · dbt model contracts: closing Day 14's primary_key and foreign_key gap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 70 · ~20 min · 24 Nov 2026</p>
+<h1>dbt model contracts: closing Day 14's primary_key and foreign_key gap</h1>
+<p class="byline">Today's tangible win: <code>dim_restaurants.restaurant_id</code> gets a real <code>primary_key</code> constraint and <code>fct_orders.restaurant_id</code> gets a real <code>foreign_key</code> constraint pointing at it — both inside the same <code>contract: {enforced: true}</code> block Day 14 already turned on, which that day's own text named as something Postgres actually enforces at the database level and then never built. Confirmed this round with a real scratch <code>dbt parse</code>: both constraints parse clean, and the installed Postgres adapter's own <code>CONSTRAINT_SUPPORT</code> table marks <code>primary_key</code> and <code>foreign_key</code> as <code>ENFORCED</code>, not just declared.</p>
+
+<div class="callout"><strong>Before today — confirm Day 14's contract still builds:</strong> today only adds to <code>models/marts/marts.yml</code>'s existing <code>constraints:</code> blocks on <code>dim_restaurants</code> and <code>fct_orders</code> — it doesn't touch any <code>.sql</code> file. Start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: the same passing count Day 14 left behind. If <code>fct_orders</code> or <code>dim_restaurants</code> don't already have a <code>contract: {enforced: true}</code> block in <code>marts.yml</code>, finish Day 14 first — today's two new constraints are added inside that existing block, not a new one.</div>
+
+<h2>1 · The gap Day 14 named and never closed</h2>
+<p>Day 14 turned on <code>contract: {enforced: true}</code> for <code>fct_orders</code> and declared two column-level <code>constraints</code> on <code>order_id</code>: <code>not_null</code> and <code>unique</code>. That lesson's own text went further than it built, naming a fact worth rereading: dbt Labs' Model contracts page lists <em>four</em> constraint types a contract can declare at the column level — <code>not_null</code>, <code>unique</code>, <code>primary_key</code>, <code>foreign_key</code> — and names Postgres specifically as the adapter that enforces every one of them as a real database-level constraint, not metadata a build can silently violate. Day 14 built the first two and stopped. <code>restaurant_id</code> sat on both <code>dim_restaurants</code> (where it's the natural primary key) and <code>fct_orders</code> (where it's a foreign key into that same table) the whole time, contract-enforced in name only.</p>
+<p>The gap matters because this project already has a relationship it checks the slow way. Day 4's <code>relationships</code> test on <code>fct_orders.restaurant_id</code> runs <em>after</em> a build, as a <code>select</code> that fails if it finds an order pointing at a restaurant that doesn't exist — useful, but it only catches the problem once bad rows already landed in the table. A real foreign key constraint, enforced by Postgres itself, refuses the bad row's <code>insert</code> or <code>merge</code> outright, at write time, before it is ever a row dbt's own test has to go looking for.</p>
+
+<h2>2 · <dfn data-en="a dbt column-level constraint (type: primary_key) declaring that a column uniquely identifies each row of its model -- on an adapter that enforces it (Postgres is one), dbt writes it into the model's own create-table DDL as a real 'primary key' clause, checked by the database on every write, not just asserted in YAML" data-vn="giữ nguyên &quot;primary_key constraint&quot; — constraint cấp cột trong dbt (type: primary_key), khai báo 1 cột định danh duy nhất mỗi dòng của model đó -- trên adapter có enforce (Postgres là 1 trong số đó), dbt ghi nó vào DDL create-table của model dưới dạng mệnh đề 'primary key' thật, được database kiểm tra ở MỌI lần viết, không chỉ khai báo trong YAML">primary_key constraint</dfn> on <code>dim_restaurants</code></h2>
+<p>Add one line to the existing <code>restaurant_id</code> column entry in <code>models/marts/marts.yml</code>, under <code>dim_restaurants</code>:</p>
+<pre><code><span class="cm"># models/marts/marts.yml -- dim_restaurants, extending Day 14's shape</span>
+models:
+  - name: dim_restaurants
+    config:
+      contract:
+        enforced: <span class="kw">true</span>
+    columns:
+      - name: restaurant_id
+        data_type: bigint
+        constraints:
+          - type: primary_key
+        tests:
+          - unique
+          - not_null
+      <span class="cm"># ...name, cuisine, city, commission_rate -- unchanged from Day 14</span></code></pre>
+<p>Keep the <code>unique</code>/<code>not_null</code> <em>tests</em> alongside the new <code>constraints</code> entry, the same "two different checks, two different times" reasoning Day 14 already gave for <code>fct_orders.order_id</code>. A <code>primary_key</code> constraint folds <code>not_null</code> and <code>unique</code> into one declared concept — "this column identifies the row" — but on dbt's own <code>CONSTRAINT_SUPPORT</code> table a <code>primary_key</code> entry is distinct from either, and the pre-existing <code>tests:</code> block is what still gives a readable, named failure if it's ever violated. Checked directly against the installed Postgres adapter's own source this round, not assumed: <code>PostgresAdapter.CONSTRAINT_SUPPORT[ConstraintType.primary_key]</code> is <code>ConstraintSupport.ENFORCED</code>, and the base adapter class every other adapter inherits from marks the same entry <code>NOT_ENFORCED</code> by default — Postgres is overriding the default, not merely matching it.</p>
+
+<h2>3 · <dfn data-en="a dbt column-level constraint (type: foreign_key, with to: ref(...) and to_columns: [...]) declaring that a column's values must exist in another model's named column -- on an adapter that enforces it, dbt renders it as a real 'references' clause in the column's own DDL, so the database itself refuses an insert or merge whose value has no match in the referenced table, catching the violation at write time instead of a later select-based test finding it" data-vn="giữ nguyên &quot;foreign_key constraint&quot; — constraint cấp cột trong dbt (type: foreign_key, có to: ref(...) và to_columns: [...]), khai báo giá trị của cột đó phải tồn tại trong 1 cột được nêu tên ở model khác -- trên adapter có enforce, dbt render nó thành mệnh đề 'references' thật trong DDL của cột, nên chính database sẽ từ chối insert/merge nào có giá trị không khớp ở bảng được tham chiếu, bắt lỗi ngay lúc viết thay vì để 1 test select phát hiện sau">foreign_key constraint</dfn> on <code>fct_orders</code></h2>
+<p>Now the half that references <code>dim_restaurants</code>. Add to <code>fct_orders</code>' <code>restaurant_id</code> column, alongside its existing <code>relationships</code> test:</p>
+<pre><code><span class="cm"># models/marts/marts.yml -- fct_orders, extending Day 14's shape</span>
+  - name: fct_orders
+    config:
+      contract:
+        enforced: <span class="kw">true</span>
+      on_schema_change: <span class="str">'fail'</span>
+    columns:
+      - name: order_id
+        data_type: bigint
+        constraints:
+          - type: not_null
+          - type: unique
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        data_type: bigint
+      - name: restaurant_id
+        data_type: bigint
+        constraints:
+          - type: foreign_key
+            to: ref(<span class="str">'dim_restaurants'</span>)
+            to_columns: [restaurant_id]
+        tests:
+          - relationships:
+              arguments:
+                to: ref(<span class="str">'dim_restaurants'</span>)
+                field: restaurant_id
+      <span class="cm"># ...courier_id, subtotal, delivery_fee, order_total, placed_at -- unchanged</span></code></pre>
+<p><code>to</code> and <code>to_columns</code> are the two fields a <code>foreign_key</code> constraint needs that <code>not_null</code>/<code>unique</code>/<code>primary_key</code> never did: <code>to</code> is a <code>ref()</code> (or <code>source()</code>) pointing at the referenced model, and <code>to_columns</code> is the list of columns over there holding the matching key — <code>dim_restaurants.restaurant_id</code>, <code>dim_restaurants</code>' own new <code>primary_key</code> column from Section 2. Using <code>ref()</code> rather than a bare schema-qualified table name matters for the same reason it always has in this course: it resolves to whatever schema the active target actually builds into, so the constraint survives a move between dev, CI and prod targets unchanged.</p>
+<div class="callout">Confirmed live this round, not assumed: a scratch dbt project with exactly this shape — Day 1's four tables, Day 14's <code>contract: {enforced: true}</code>, today's two new constraints — parsed clean with <code>dbt parse</code>, zero warnings tied to the constraints themselves. Reading the resulting manifest directly showed dbt keeps <code>to</code> as the literal string <code>"ref('dim_restaurants')"</code> at parse time, not yet resolved to a real relation name — the same "parse doesn't reach this far, compile/run does" limit Day 14 and Day 13 each found for their own constraint and config checks. The real DDL — a Postgres <code>references dim_restaurants (restaurant_id)</code> clause on the column — only gets rendered when the model actually compiles against a live connection, which this sandbox still can't reach (no running Postgres container). Reading <code>dbt.adapters.base.impl</code>'s own <code>render_column_constraint</code> method directly confirmed the exact rendering rule instead: a <code>foreign_key</code> constraint with both <code>to</code> and <code>to_columns</code> set renders as <code>f"references {constraint.to} ({', '.join(constraint.to_columns)})"</code>.</div>
+
+<h2>4 · What a <code>foreign_key</code> constraint catches that Day 4's test already caught — and what it catches earlier</h2>
+<p>Nothing here replaces Day 4's <code>relationships</code> test, kept unchanged above in the same column entry. The two checks run at different times against a different failure: the test is a <code>select</code> dbt runs after <code>fct_orders</code> is built, searching the finished table for any <code>restaurant_id</code> with no match in <code>dim_restaurants</code> and failing with a named, readable count if it finds one. The constraint is enforced by Postgres itself, inside the <code>insert</code>/<code>merge</code> statement dbt's own incremental materialization writes — a row with a bad <code>restaurant_id</code> never makes it into the table in the first place, the database refuses the write outright. For an incremental model like <code>fct_orders</code>, built with Day 4's own <code>merge</code> strategy, that distinction is the same at-the-door-versus-after-the-fact gap this course has drawn before: Day 6's <code>ON CONFLICT (event_id) DO NOTHING</code> stops a duplicate write at the door; Day 4's own <code>relationships</code> test only ever tells you, afterward, that a door was left open.</p>
+<p>One ordering fact worth naming explicitly: Day 14's own build order means <code>dim_restaurants</code> must exist with its <code>primary_key</code> constraint already in place before <code>fct_orders</code>' <code>foreign_key</code> constraint can be enforced against it — the same dependency <code>ref('dim_restaurants')</code> already encodes in dbt's DAG, just now carrying a database-level consequence too, not only a build-order one.</p>
+
+<h2>5 · Build and verify</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>models/marts/marts.yml</code> with both additions above, then rebuild just the two affected models:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select dim_restaurants fct_orders</code></pre>
+<p>Expected — identical pass count to Day 14's last clean build, since the constraints match what both models already produce:</p>
+<pre><code>1 of 2 OK created sql table model dbt_dev.dim_restaurants ....... [SELECT 40 in 0.05s]
+2 of 2 OK created sql incremental model dbt_dev.fct_orders ...... [MERGE 0 in 0.10s]
+
+Done. PASS=2 WARN=0 ERROR=0 SKIP=0 TOTAL=2</code></pre>
+<p>Confirm the constraints really landed as DDL, not just YAML, by reading Postgres' own catalog directly — this is the check that actually distinguishes today's work from a no-op YAML edit:</p>
+<pre><code>docker compose exec -T postgres psql -U postgres -d food_delivery -c "
+  SELECT conrelid::regclass AS table_name, conname, contype
+  FROM pg_constraint
+  WHERE conrelid IN ('dbt_dev.dim_restaurants'::regclass, 'dbt_dev.fct_orders'::regclass)
+  ORDER BY table_name, contype;
+"</code></pre>
+<p>Expected: one row for <code>dim_restaurants</code> with <code>contype = 'p'</code> (primary key) and one row for <code>fct_orders</code> with <code>contype = 'f'</code> (foreign key) — Postgres' own two-letter constraint-type codes, proof the constraint is sitting in <code>pg_constraint</code> as a real, database-enforced rule, not a line of YAML dbt only ever reasons about internally. Prove it has teeth the same way Day 3 and Day 12 both held their own checks to: try to insert an order for a restaurant that doesn't exist and confirm Postgres itself refuses it, not a dbt test catching it later:</p>
+<pre><code>docker compose exec -T postgres psql -U postgres -d food_delivery -c "
+  INSERT INTO dbt_dev.fct_orders (order_id, customer_id, restaurant_id, courier_id, subtotal, delivery_fee, order_total, placed_at)
+  VALUES (999999, 1, 999999, 1, 10.00, 2.00, 12.00, now());
+"</code></pre>
+<p>Expected: <code>ERROR: insert or update on table "fct_orders" violates foreign key constraint</code> — the database rejecting the row outright, before any dbt test ever runs against it. Commit the edited <code>models/marts/marts.yml</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your dbt project has a relationships test on a foreign key column. Why would you also add a foreign_key constraint, since the test already catches orphaned rows?"</strong> A strong answer, out loud: <em>"They catch the same mistake at different times. A relationships test is a select dbt runs after the model is built, so it tells me, with a readable failure message, that a bad row already landed — useful for visibility and CI, but the damage is already in the table. A foreign_key constraint, on an adapter that actually enforces it — Postgres is one of a short list dbt Labs documents, most warehouses only let you declare it as metadata — becomes a real database-level constraint in the model's own DDL. That means the insert or merge itself gets rejected by the database, at write time, before a bad row ever exists to go looking for. I'd keep both: the constraint as the hard stop, the test as the named, debuggable signal when something upstream is producing bad keys in the first place. And I'd be explicit in an interview that this only has real teeth on Postgres — the same contract on Snowflake or BigQuery would parse and declare the same YAML but never actually stop a bad write."</em> The signal: naming the enforcement-vs-metadata split by adapter, not treating "I added a foreign_key constraint" as uniformly meaningful everywhere dbt runs.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers column-level <code>primary_key</code> and <code>foreign_key</code> constraints inside a contract already enforced since Day 14, on Postgres specifically, where dbt Labs' own documentation and the installed adapter's <code>CONSTRAINT_SUPPORT</code> table agree both are genuinely <code>ENFORCED</code> as real DDL. It does not cover model-level constraints (declared under a model's own top-level <code>constraints:</code> key rather than per-column — needed for a composite primary key spanning more than one column, which this project's tables never do), <code>check</code> constraints (an arbitrary SQL predicate, vocabulary only here), or what happens to either constraint on an adapter that only declares them as metadata (Snowflake, BigQuery, Redshift) — named in Section 2 and 4 as a real difference, not built, since this course's warehouse is Postgres by design. No live Postgres connection was reachable this sandbox round, so the actual DDL rendering, the <code>pg_constraint</code> catalog check, and the rejected insert in Section 5 rest on the installed adapter's own documented rendering rule, not a live <code>psql</code> run this round — flagged here rather than asserted as directly observed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by reading the installed Postgres adapter's own CONSTRAINT_SUPPORT dict directly: ConstraintType.foreign_key maps to ConstraintSupport.ENFORCED for Postgres, while dbt Labs' own Model contracts page lists most other supported adapters (Snowflake, BigQuery, Redshift) as only able to declare a foreign_key as metadata the warehouse never actually checks on a write.">
+    <p class="stem">On which adapter does dbt actually enforce a <code>foreign_key</code> constraint as real DDL, not just metadata?</p>
+    <button class="opt" data-ok>Postgres, the warehouse this course already uses</button>
+    <button class="opt">Snowflake, the warehouse this course never uses</button>
+    <button class="opt">every adapter dbt supports, equally and always</button>
+  </div>
+  <div class="q" data-why="A relationships test is an ordinary dbt data test: a select query dbt runs after the model is already built, which fails with a named, readable message if it finds any row whose foreign key has no match. A foreign_key constraint is enforced by the database itself inside the insert or merge statement, so a bad row is rejected at write time and never lands in the table at all -- the same before-the-write-versus-after-the-build distinction this course drew for Day 6's ON CONFLICT clause.">
+    <p class="stem">What is the real difference between Day 4's <code>relationships</code> test and today's <code>foreign_key</code> constraint on the same column?</p>
+    <button class="opt" data-ok>one checks after the build, one blocks the write itself</button>
+    <button class="opt">they are two different names for one identical dbt mechanism</button>
+    <button class="opt">the constraint only runs in CI, never locally at all</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: a scratch dbt parse against exactly this shape left the foreign_key constraint's 'to' field as the literal unresolved string \"ref('dim_restaurants')\" in the manifest, not a real schema-qualified relation name -- resolving that ref() into an actual table name, and rendering the real 'references ...' DDL clause, only happens when the model compiles against a live database connection, the identical parse-versus-compile limit Day 13 and Day 14 each named for their own checks.">
+    <p class="stem">After running <code>dbt parse</code> on today's new <code>foreign_key</code> constraint, what does the manifest's <code>to</code> field actually contain?</p>
+    <button class="opt" data-ok>the literal unresolved text <code>ref('dim_restaurants')</code>, as a string</button>
+    <button class="opt">the fully resolved, real schema-qualified table name already</button>
+    <button class="opt">nothing at all; parse rejects foreign_key constraints outright</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/docs/collaborate/govern/model-contracts">Model contracts</a> doc, already this course's Day 14 citation, reused here for its platform-by-platform constraint-support tables — fetched live again this round, confirming Postgres as the one adapter in the comparison table where both <code>primary_key</code> and <code>foreign_key</code> show <code>Enforced</code> rather than <code>Definable</code> only. The <a href="https://docs.getdbt.com/reference/resource-properties/constraints">Constraints reference</a> page, new to this course's citations, is the source for the exact <code>to</code>/<code>to_columns</code> YAML fields used in Section 3 — also fetched live this round.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 70.<br>
+<strong>Next up:</strong> this round closed Day 14's own named gap (<code>primary_key</code>/<code>foreign_key</code> constraints, built on Postgres) but left two things on the table: model-level constraints for a composite key, and what today's exact YAML would do differently on an adapter that only declares rather than enforces — both named in today's scope line as real, bounded depth this course hasn't needed yet. Day 69's own three Airflow follow-ups (<code>.expand_kwargs()</code>, <code>.partial()</code>, and a live <code>airflow dags test</code> confirmation once the <code>airflow db migrate</code> approval gate is granted) remain open too — that gate has now blocked thirty-six rounds (35-70). With today's round, dbt has had the most recent fresh-gap attention (closing a two-lesson-old named TODO); a future round's gap-scan should weigh Kafka or Airflow next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why Postgres enforces these and other warehouses don't, or what a composite primary key's YAML would look like? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

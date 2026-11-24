@@ -290,6 +290,8 @@
       file: "lessons/0140-distributed-tracing-aspnetcore-activity-activitysource.html" },
     { n: 141, date: "2026-11-23", title: "Feature flags, now in C# too",
       file: "lessons/0141-feature-flags-aspnetcore-featuremanagement-featuregate.html" },
+    { n: 142, date: "2026-11-24", title: "Server-Sent Events, now in C# too",
+      file: "lessons/0142-server-sent-events-aspnetcore-typedresults-sseitem.html" },
   ];
 
   const REFS = [

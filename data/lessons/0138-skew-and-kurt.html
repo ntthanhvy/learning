@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 138 · Series.skew() and .kurt(): shape statistics, and the min-count NaN trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 138 · ~20 min · 24 Nov 2026</p>
+<h1>Series.skew() and .kurt(): shape statistics, and the min-count NaN trap</h1>
+<p class="byline">Lesson 137's own scope line named <code>.sem()</code> and <code>.skew()</code>/<code>.kurt()</code> as the nearest open statistics gaps but left them for a future round's own fresh scan to confirm still open, per this course's "fresh scan each round" convention. Today's own fresh scan re-confirmed it directly: grepped every lesson body and every glossary row case-insensitively for <code>.sem(</code>, <code>.skew(</code>, <code>.kurt(</code>, <code>np.skew(</code>, and <code>np.kurtosis(</code> — the only hits were two prior "skewed data" mentions in plain English (Lesson 3's fill-value reasoning, Lesson 131's log-transform byline), never the actual methods; zero hits anywhere for <code>.sem()</code>, <code>.kurt()</code>, or either NumPy spelling. Picked <code>.skew()</code>/<code>.kurt()</code> as today's pair — a closely related higher-moment shape-statistics duo, same family as Lesson 137's <code>.std()</code>/<code>.var()</code> but describing a distribution's asymmetry and tail-weight rather than its spread — and left <code>.sem()</code> (a simple <code>.std()</code>-derived ratio, confirmed below) as the next nearest gap, since building out all three in one lesson would blur the two genuinely distinct traps this lesson confirms.</p>
+
+<h2>1 · skew() measures asymmetry; its sign tells you which tail is long</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5) on three shapes of the same rough size:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+symmetric   = pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>])
+right_tail  = pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">3</span>, <span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">100</span>])  <span class="cm"># one huge outlier, high end</span>
+left_tail   = pd.Series([<span class="kw">1</span>, <span class="kw">97</span>, <span class="kw">98</span>, <span class="kw">98</span>, <span class="kw">98</span>, <span class="kw">99</span>, <span class="kw">99</span>, <span class="kw">99</span>, <span class="kw">100</span>])  <span class="cm"># one huge outlier, low end</span>
+
+symmetric.skew()   <span class="cm"># 0.0                 -- no asymmetry</span>
+right_tail.skew()  <span class="cm"># 2.9948337189548666  -- positive: long tail stretches RIGHT (toward +inf)</span>
+left_tail.skew()   <span class="cm"># -2.9958956056874224 -- negative: long tail stretches LEFT (toward -inf)</span></code></pre>
+<p><dfn data-en="a statistic measuring a distribution's asymmetry around its mean -- 0 means symmetric, a positive value means the long tail stretches toward larger values (right-skewed), a negative value means the long tail stretches toward smaller values (left-skewed); the sign names the tail's direction, not which side holds most of the data" data-vn="giữ nguyên 'skew()' (độ lệch, skewness) — đo độ bất đối xứng của phân phối quanh giá trị trung bình; 0 là đối xứng, số DƯƠNG là đuôi dài kéo về phía giá trị LỚN (lệch phải), số ÂM là đuôi dài kéo về phía giá trị NHỎ (lệch trái); dấu của số cho biết đuôi dài nằm hướng nào, không phải phần lớn dữ liệu nằm hướng nào">Series.skew()</dfn> reports a single number: <code>0</code> means symmetric, a positive number means the long tail points toward larger values (one huge high outlier, like the income-distribution shape Lesson 3's median-fill reasoning already assumed without naming the number), and a negative number means the long tail points toward smaller values. The sign names where the <em>tail</em> stretches, not where most of the rows actually sit.</p>
+
+<h2>2 · kurt() is EXCESS kurtosis — a normal distribution scores ~0, not ~3</h2>
+<p>Confirmed directly on a 100,000-value random normal sample:</p>
+<pre><code>rng = np.random.default_rng(<span class="kw">42</span>)
+normal_sample = pd.Series(rng.normal(size=<span class="kw">100_000</span>))
+
+normal_sample.skew()  <span class="cm"># ~0.007  -- a true normal distribution has 0 skew</span>
+normal_sample.kurt()  <span class="cm"># ~0.023  -- a true normal distribution ALSO scores ~0 here, not ~3</span>
+
+right_tail.kurt()     <span class="cm"># 8.977116427636945  -- heavy-tailed / sharply peaked relative to normal</span></code></pre>
+<p><dfn data-en="a statistic measuring how heavy a distribution's tails are (and how sharply peaked its center is) relative to a normal distribution -- pandas reports EXCESS kurtosis, meaning the baseline for a normal distribution is confirmed directly to be 0, not the raw-kurtosis textbook value of 3; a positive number means heavier tails / sharper peak than normal, a negative number means lighter tails / flatter peak than normal" data-vn="giữ nguyên 'kurt()' (độ nhọn, kurtosis) — đo độ "nặng" của 2 đuôi phân phối (và độ nhọn ở giữa) so với phân phối chuẩn (normal distribution); pandas tính kurtosis KIỂU EXCESS (dư ra so với chuẩn) — xác nhận trực tiếp mốc của phân phối chuẩn là 0, KHÔNG phải giá trị 3 như công thức kurtosis thô trong sách giáo khoa; số DƯƠNG là đuôi nặng hơn/nhọn hơn chuẩn, số ÂM là đuôi nhẹ hơn/bẹt hơn chuẩn">Series.kurt()</dfn> reports <strong>excess</strong> kurtosis — confirmed directly, a near-perfect normal distribution scores close to <code>0</code> here, not the raw-kurtosis value of <code>3</code> that a statistics textbook's formula produces before subtracting 3 for the normal baseline. The trap: quoting "kurtosis of 3 means normal" in an interview is the textbook's raw formula, but pandas has already subtracted that 3 for you — treating a pandas <code>.kurt()</code> reading of <code>3</code> as "normal" would be off by the entire baseline.</p>
+
+<div class="callout"><strong>Confirmed directly, the minimum row count each needs before it stops returning NaN:</strong> <code>.skew()</code> needs at least 3 non-null values — a Series of length 1 or 2 returns a silent <code>NaN</code>, and length exactly 3 is the first point it returns a real number (<code>0.0</code> for three evenly-spaced values). <code>.kurt()</code> needs at least 4 — lengths 1 through 3 all return <code>NaN</code>, and length 4 is the first real number. Both also return <code>NaN</code> on a constant column (every value identical, zero variance) regardless of length, since both formulas divide by a power of the standard deviation and a constant column's standard deviation is exactly <code>0</code>. No exception, no warning, either way — the same "no crash, quietly wrong" family as Lesson 137's single-row <code>.std()</code> trap, <code>describe()</code> (Lesson 49), and <code>reindex()</code> (Lesson 47), but with a higher row-count threshold than <code>.std()</code>/<code>.var()</code>'s "just one row" trigger.</div>
+
+<h2>3 · pandas-only: no np.skew() or np.kurtosis() to fall back on</h2>
+<p>Confirmed directly, unlike Lesson 137's <code>.std()</code>/<code>.var()</code> (which exist on both sides with different <code>ddof</code> defaults), NumPy has no direct equivalent at all:</p>
+<pre><code><span class="kw">hasattr</span>(np, <span class="str">"skew"</span>)      <span class="cm"># False</span>
+<span class="kw">hasattr</span>(np, <span class="str">"kurtosis"</span>)  <span class="cm"># False</span></code></pre>
+<p>There is no cross-library default-mismatch trap here to watch for — only the pandas method exists, so the only confirmed traps are the excess-kurtosis baseline (Section 2) and the minimum-row-count <code>NaN</code> (the callout above). A <code>DataFrame.skew()</code>/<code>.kurt()</code> call runs column-by-column exactly like <code>.std()</code>/<code>.var()</code> do, returning <code>NaN</code> for any column that is constant or too short, independently of its neighbors.</p>
+
+<div class="interview">
+<p><strong>Q: "What does a skew() value tell you, and what's the gotcha with kurt()?"</strong> A strong answer, out loud: <em>"skew() measures asymmetry — zero is symmetric, positive means the long tail stretches toward larger values, negative means it stretches toward smaller values, so the sign tells me which direction the outliers are pulling. kurt() measures tail weight relative to a normal distribution, but pandas reports excess kurtosis, so a true normal distribution scores around 0, not the 3 you'd get from the raw textbook formula — I'd be careful not to compare a pandas kurt() reading against the raw-3 baseline by mistake. Both also need a minimum row count to return a real number at all — skew() needs at least 3 values, kurt() needs at least 4 — and both silently return NaN below that or on a constant column, with no error to flag it."</em> The signal: naming the excess-kurtosis baseline unprompted, since quoting "3 means normal" against a pandas kurt() output is the single most common mistake this topic invites.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.skew()</code>'s confirmed sign convention (positive = right tail, negative = left tail), <code>Series.kurt()</code>'s confirmed excess-kurtosis baseline (normal ≈ 0, not the textbook's raw 3), the confirmed minimum-row-count <code>NaN</code> traps (3 for <code>skew()</code>, 4 for <code>kurt()</code>) and the constant-column <code>NaN</code> trap, and the confirmed absence of any <code>np.skew()</code>/<code>np.kurtosis()</code> counterpart. It does not cover <code>.sem()</code> (standard error of the mean — confirmed directly to be exactly <code>.std() / sqrt(count)</code>, the next nearest open gap this round's fresh scan surfaced but did not build out), the Fisher-Pearson skewness formula's own derivation, or <code>scipy.stats</code>'s alternate bias-corrected spellings, out of scope per <code>MISSION.md</code>'s "no deep statistics" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/138_skew_and_kurt.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/138_skew_and_kurt.py</code></pre>
+<p>Exercise 1 confirms the Section 1 sign contrast: a right-tailed Series scores a positive <code>.skew()</code>, a left-tailed Series (same shape, mirrored) scores a negative one. Exercise 2 confirms the Section 2/callout traps: a large random-normal sample's <code>.kurt()</code> lands near <code>0</code> (not <code>3</code>), and a 2-element Series's <code>.skew()</code>/<code>.kurt()</code> both come back <code>NaN</code> rather than raising.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: Series.skew() is 0 for a symmetric distribution, positive when the long tail stretches toward larger values (a high-end outlier pulling the tail right), and negative when the long tail stretches toward smaller values (a low-end outlier pulling the tail left). The sign names the tail's direction, not which side holds most of the rows.">
+    <p class="stem">A Series has one huge high-value outlier and otherwise clustered low values. What sign does <code>.skew()</code> report?</p>
+    <button class="opt" data-ok>Positive -- the long tail stretches toward larger values</button>
+    <button class="opt">Negative -- the long tail stretches toward smaller values</button>
+    <button class="opt">Zero -- a single outlier never moves this statistic</button>
+  </div>
+  <div class="q" data-why="Confirmed directly on a 100,000-value random normal sample: Series.kurt() scores close to 0, not 3. pandas reports EXCESS kurtosis -- the normal-distribution baseline of 3 from the raw textbook formula has already been subtracted, so comparing a pandas kurt() reading against the raw-3 baseline is the classic mistake this trap invites.">
+    <p class="stem">A true normal distribution's <code>Series.kurt()</code> value in pandas is approximately what?</p>
+    <button class="opt" data-ok>0 -- pandas reports excess kurtosis, baseline already adjusted</button>
+    <button class="opt">3 -- the raw textbook kurtosis formula's own value</button>
+    <button class="opt">1 -- the same baseline numpy's own default uses</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: Series.skew() requires at least 3 non-null values before it returns a real number -- length 1 or 2 returns a silent NaN, with no error or warning either way. Series.kurt() has an even higher threshold, requiring at least 4 values.">
+    <p class="stem">Calling <code>.skew()</code> on a two-value pandas Series returns what, confirmed directly?</p>
+    <button class="opt" data-ok>NaN, silently -- below skew()'s own minimum row count</button>
+    <button class="opt">0.0, always -- two points can never look skewed</button>
+    <button class="opt">a real ValueError, raised immediately and loudly, right here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.skew.html"><code>Series.skew()</code></a> and <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.kurt.html"><code>Series.kurt()</code></a> API references (per <code>RESOURCES.md</code>'s pandas grouping, ~5 min each) — the <code>kurt()</code> page documents the excess-kurtosis convention directly; the minimum-row-count thresholds and the normal-sample baseline are confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>Series.skew()</code> and <code>Series.kurt()</code> are new today, added right after Lesson 137's <code>ddof</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan confirmed <code>.sem()</code> (standard error of the mean, confirmed above to equal <code>.std() / sqrt(count)</code> exactly) as the next nearest uncovered statistics name, left for a future round's own fresh scan to confirm still open, per this course's "fresh scan each round" convention.<br><br>
+💬 Anything unclear — the skew sign convention, the excess-kurtosis baseline, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

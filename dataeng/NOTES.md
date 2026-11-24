@@ -8077,3 +8077,132 @@ along the Phase 2 spine, adapted to the learning records.
   attention; a future round's gap-scan should weigh dbt or Kafka next, or
   whichever named TODO or learner signal turns up first, rather than
   assuming any one of the three by default.
+
+- 2026-11-24 (headless 06:00 run, Day 70 generated): seventieth lesson,
+  `0070-dbt-primary-foreign-key-constraints.html`. Idempotency check first:
+  confirmed via the filesystem that no `lessons/0070-*.html` existed and no
+  `n: 70` row was in `assets/nav.js`, and via a DB query that no
+  `lesson_generated` row existed for dataeng dated 2026-11-24 — Day 69
+  remained the latest prior lesson. Read `MISSION.md` in full (unmodified),
+  `PLAN.md`'s full Phase 2 spine, this file's tail through Day 69's close,
+  the single baseline learning record (still no newer record on file), and
+  `RESOURCES.md` before picking anything.
+  **Topic choice:** Day 69's own closing note said dbt and Kafka had each
+  had recent fresh-gap or named-TODO attention (Kafka: 66, 68; dbt: 63, 65)
+  against Airflow's single round since then, and that a future round should
+  weigh dbt or Kafka next rather than defaulting to any one of the three.
+  Grepped every lesson title and filename for dbt/Kafka/Airflow coverage
+  (34 dbt-titled lessons, 12 Kafka-titled, the rest Airflow/portfolio) and
+  re-read Day 69's own text for named follow-ups before treating this as an
+  unscanned guess. Day 69 itself named one, from its own sub-agent gap-scan
+  two rounds back: dbt model contracts' `primary_key`/`foreign_key`
+  constraints, which Day 14 only ever declared in its own lesson text (citing
+  dbt Labs' own enforcement table, Postgres enforcing all four constraint
+  types) without ever building either in the actual `marts.yml`. Confirmed
+  the gap was still real and unclosed by grepping Day 14's own file for
+  `primary_key`/`foreign_key` — found only prose naming the gap, no
+  `constraints:` entry of either type anywhere in the shipped YAML. Picked
+  it over a totally fresh dbt/Kafka topic for the same "a named TODO beats
+  an unscanned guess" reasoning Days 58/61/62/64/68 each used, and because it
+  fits `PLAN.md` 2a's governance bullet (model contracts) directly rather
+  than reaching outside the spine. No pandas, no Python-language teaching,
+  no API/idempotency re-derivation (one paragraph in Section 4 reuses Day
+  6's existing `ON CONFLICT`/at-the-door argument verbatim, by name, rather
+  than re-deriving it) — none applied or needed this round.
+  **Content:** added `type: primary_key` to `dim_restaurants.restaurant_id`
+  (the table's own natural key) and `type: foreign_key` with `to:
+  ref('dim_restaurants')`/`to_columns: [restaurant_id]` to
+  `fct_orders.restaurant_id`, both inside the `contract: {enforced: true}`
+  block Day 14 already turned on, alongside the pre-existing `not_null`/
+  `unique` tests and Day 4's `relationships` test (kept, not replaced, with
+  the lesson drawing the same before-the-write/after-the-build distinction
+  Day 6's own `ON CONFLICT` argument already established). Section 4 names
+  the one new ordering fact today's pair makes explicit: `fct_orders`'
+  foreign key can only be enforced once `dim_restaurants`' primary key
+  already exists, the same dependency `ref()` already encodes in the DAG,
+  now carrying a database-level consequence too.
+  **Verification:** `WebFetch` was reachable this round (not the recurring
+  gap prior rounds have each named) — fetched dbt Labs' Model contracts
+  page live and confirmed its platform-support table lists Postgres as the
+  one adapter in the comparison enforcing both `primary_key` and
+  `foreign_key`, where Snowflake/BigQuery/Redshift/Spark/Databricks/Fabric/
+  Athena only declare them as metadata; separately fetched the Constraints
+  reference page live and confirmed the exact `to`/`to_columns` YAML shape
+  for a `foreign_key` entry, matching what was independently derived from
+  the installed package (below) before either fetch. Built a real scratch
+  dbt project (Day 1's four-table domain, Day 14's staging/marts shape)
+  under `.scratch-dataeng-70-verify/` at the repo root (deleted after;
+  confirmed via `ls -d` returning "No such file or directory" post-cleanup)
+  and ran `uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .
+  --no-partial-parse` twice (once mid-draft, once as a final fresh check in
+  a second scratch dir, `.scratch-dataeng-70-final/`, also deleted and
+  confirmed gone after) — both clean, zero lines containing "Error" in the
+  output. Reading the resulting `target/manifest.json` directly confirmed
+  the lesson's own parse-vs-compile claim: the `foreign_key` constraint's
+  `to` field stayed the literal unresolved string `"ref('dim_restaurants')"`
+  at parse time, not a resolved relation name. Also read
+  `dbt.adapters.base.impl`'s own `render_column_constraint` method and
+  `PostgresAdapter.CONSTRAINT_SUPPORT` directly off the installed
+  `dbt-postgres==1.11.0` package: confirmed the exact DDL-rendering rule
+  (`f"references {constraint.to} ({', '.join(constraint.to_columns)})"`
+  for `foreign_key`, `f"primary key {expression}"` for `primary_key`) and
+  that Postgres's own `CONSTRAINT_SUPPORT` dict marks every one of `check`/
+  `not_null`/`unique`/`primary_key`/`foreign_key` as `ENFORCED`, overriding
+  the base adapter class's own defaults (`unique`/`primary_key` are
+  `NOT_ENFORCED` there) — the exact fact Day 14's text had cited from dbt
+  Labs' docs, now also confirmed directly from the installed adapter's own
+  source rather than docs alone. What was **not** confirmed live: no
+  reachable Postgres container this sandbox round (no `docker compose`
+  stack running here), so Section 5's own `pg_constraint` catalog query and
+  the rejected-insert proof rest on the adapter's documented rendering rule
+  and Postgres's own well-known foreign-key behavior, not a live `psql` run
+  this round — flagged explicitly in the lesson's scope line and verification
+  callout, the same honesty convention every recent round has used for its
+  own reachability gap. No Python file in this lesson (pure dbt YAML), so no
+  `py_compile` step applied this round.
+  Quiz word counts verified with a small Node script (the same workaround
+  recent rounds used), stripping HTML tags and counting whitespace-split
+  tokens per option. First draft came up uneven on two of three questions
+  (11/9/11 and 5/7/7) — one option-level edit pass each, re-running the
+  script after every edit, to reach a clean 7/7/7, 10/10/10, 8/8/8 split.
+  HTML structure verified via paired open/close tag counts on every tag that
+  appears (`div` 7/7, `p` 23/23, `code` 145/145, `button` 9/9, `script` 3/3,
+  `dfn` 2/2, `pre` 7/7, `h2` 8/8, `h1` 1/1, `em` 4/4, `strong` 4/4, `a` 3/3,
+  `span` 9/9) and a bare-`&` regex scan — zero bare `&` found.
+  Grepped the whole glossary for `primary_key constraint`, `foreign_key
+  constraint`, `primary key constraint` and `foreign key constraint` before
+  writing either new `<dfn>` — zero hits, confirming both terms are
+  genuinely new, not a restatement of Day 14's own `model contract` or
+  Day 4's `fact table`/`dimension table` entries. `reference/glossary.html`
+  re-checked after appending Day 70's section: `h2` 69/69, `table` 69/69,
+  `tr` 237/237, `td` 504/504, `th` 207/207, zero bare `&`, and a
+  duplicate-term scan across all 168 terms in the first column — zero
+  duplicates. `node --check` clean on `nav.js` after today's edit.
+  Added two new glossary terms — `primary_key constraint` and `foreign_key
+  constraint` — under a new Day 70 section.
+  Added one new `RESOURCES.md` line this round: the Constraints (resource
+  property) reference page, new to this course's citations, under dbt
+  (deep) right after the Documentation/Exposures/Model contracts/Model
+  versions line — and appended a short note to that existing line recording
+  that Model contracts itself was reused and re-fetched live for Day 70.
+  Registered Lesson 70 in `assets/nav.js` right after the `n: 69` entry,
+  dated 2026-11-24.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named follow-up inside Day 69's own closing-note text (itself
+  from a sub-agent gap-scan two rounds back), not a new durable fact about
+  the learner distinct from the single 2026-09-14 baseline record on file,
+  the same reasoning recent rounds have each used.
+  **Next up:** a concrete, named follow-up this round did not build: model-
+  level constraints for a composite primary key (this project never needs
+  one, since every mart here has a single-column natural key), and what
+  today's exact YAML would render to — or silently not enforce — on a
+  non-Postgres adapter, named in today's scope line as real, bounded depth
+  left alone by design. Day 69's own three Airflow follow-ups
+  (`.expand_kwargs()`, `.partial()`, and a live `airflow dags test`
+  confirmation) remain open too, and the `airflow db migrate` approval-gate
+  block is now thirty-six rounds (35-70) unresolved — still worth a human
+  granting it once. With today's round, dbt has had the most recent
+  fresh-gap attention (closing a two-round-old named TODO); a future
+  round's gap-scan should weigh Kafka or Airflow next, or whichever named
+  follow-up or learner signal turns up first, rather than assuming any one
+  of the three by default.

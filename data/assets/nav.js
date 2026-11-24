@@ -282,6 +282,8 @@
       file: "lessons/0136-np-arange-and-linspace.html" },
     { n: 137, date: "2026-11-23", title: "Series.std()/.var() vs np.std()/np.var(): the ddof=1 vs ddof=0 trap",
       file: "lessons/0137-std-var-and-ddof.html" },
+    { n: 138, date: "2026-11-24", title: "Series.skew() and .kurt(): shape statistics, and the min-count NaN trap",
+      file: "lessons/0138-skew-and-kurt.html" },
   ];
 
   const REFS = [

@@ -12486,3 +12486,173 @@ dead-letter queues, still confirmed to have no first-party ASP.NET Core
 angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same way; and
 FluentValidation and Polly/.NET resilience libraries, both still
 deliberately out of scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-24 — Lesson 142: Server-Sent Events, now in C# too (TypedResults.ServerSentEvents, SseItem<T>)
+
+Headless run. No DB read access this round either (same static-content
+gate on a literal `psql` invocation prior rounds have hit), so paced
+from file state alone. Confirmed directly on disk: no `lessons/0142-*
+.html` file existed before this round, `nav.js`'s last entry was still
+`n: 141, date: "2026-11-23"`, and neither "142" nor "2026-11-24"
+appeared anywhere in `nav.js` — safe to proceed with day 142 without a
+DB confirmation.
+
+Topic picked: Lesson 141's own closing note named HATEOAS (Lesson 97) as
+the sole standing "now in C# too" candidate, but flagged its .NET angle
+as likely thin. Before accepting that flag at face value, a dedicated
+sub-agent check this round confirmed it directly: `LinkGenerator`/
+`IUrlHelper` (Microsoft.AspNetCore.Routing) are documented purely as
+generic URL-generation helpers with zero HATEOAS/hypermedia framing
+anywhere in Microsoft's own docs, the `CreatedAtAction` return-types doc
+page mentions no `links`/`_links` array or the word "HATEOAS" at all,
+and ASP.NET Core core ships no OData/HAL/JSON:API support (OData
+conventions live only in the separate, third-party-adjacent
+`Microsoft.AspNetCore.OData` package). A C# port would therefore mostly
+restate Lesson 97's JSON shape in C# syntax around a hand-built `links`
+array — the same "thin restatement" bar Lessons 139/140/141 have used
+to reject candidates — so HATEOAS was rejected again this round, this
+time on a freshly re-verified basis rather than inherited assumption.
+
+A second sub-agent then surveyed the full remaining Go-only lesson list
+(1–101 minus everything already ported in 102–141) for the next-best
+candidate, checking sagas (84), event-driven vocabulary (72), job status
+resource pattern (67), API gateway/BFF (66), load balancing (69), load
+shedding (71), delivery semantics (91), canary/blue-green (89), SLOs/
+error budgets (68), secrets management (64), gRPC (101), multi-tenant
+data models (78), and — the one that landed — the Server-Sent Events
+half of Lesson 63 (polling/long-polling/SSE/WebSockets), which Lesson
+102's WebSocket-vs-SignalR coverage never touched on its own terms (SSE
+appeared there only as SignalR's transport-fallback rung #2). Picked SSE
+specifically because .NET 10 added a genuinely new, first-party, well-
+documented mechanism for it — `TypedResults.ServerSentEvents` returning
+a `ServerSentEventsResult<T>`, and `SseItem<T>` as a typed wrapper around
+the wire format's `EventId`/`EventType`/`ReconnectionInterval` fields —
+not a thin restatement, the same bar HATEOAS failed. Ruled out this
+round for thinner reasons: event-driven vocabulary (terms-only, no
+distinct API); canary/blue-green (pure deployment-platform concern, no
+C# API surface); SLOs/error budgets (an App Insights portal feature, not
+a C# API); sagas (the only real orchestration tooling is MassTransit,
+third-party, same exclusion logic as Polly/FluentValidation). `grep -i`
+for `TypedResults.ServerSentEvents`/`SseItem`/`ServerSentEventsResult`
+across `backend/lessons/` and `glossary.html` came back empty before
+writing; "SSE / Server-Sent Events" itself already existed as a concept
+term from Lesson 63 and was deliberately reused, not duplicated, per the
+same precedent Lesson 141 used for feature flags' pre-existing terms.
+
+Verification: fetched four `learn.microsoft.com` pages via `WebFetch`.
+(1) `dotnet/api/microsoft.aspnetcore.http.typedresults.serversentevents`
+confirmed all three overloads verbatim — `ServerSentEvents(IAsyncEnumerable
+<string>, string? eventType = default)`, the generic `ServerSentEvents
+<T>(IAsyncEnumerable<SseItem<T>>)`, and `ServerSentEvents<T>
+(IAsyncEnumerable<T>, string? eventType = default)` — plus the ASP.NET
+Core 10.0/11.0 package monikers and the `ServerSentEventsResult<T>`
+return type. An initial guess at the conceptual doc URL (`aspnetcore/
+fundamentals/minimal-apis/sse`) 404'd and was dropped in favor of the API
+reference page, which had everything needed. (2) `dotnet/api/system.net.
+serversentevents.sseitem-1` confirmed the struct's namespace (`System.
+Net.ServerSentEvents`), its one constructor (`SseItem<T>(T data, string?
+eventType)`), and its four properties (`Data`, `EventId`, `EventType`,
+`ReconnectionInterval`). (3) A self-caught near-miss: this lesson's
+second code block uses object-initializer syntax (`new SseItem<T>(status,
+eventType: "order-status") { EventId = ..., ReconnectionInterval = ... }`)
+which requires those properties to be settable — the first-fetched page
+only said "Gets" for each, which would make that syntax invalid C# if
+true. Two follow-up `WebFetch` calls against the per-property pages
+(`.eventid`, `.reconnectioninterval`) resolved it: both are declared
+`public string? EventId { get; init; }` and `public TimeSpan?
+ReconnectionInterval { get; init; }` — `init`-settable, so the object-
+initializer in this lesson's code is valid, confirmed rather than assumed.
+(4) `aspnetcore/fundamentals/minimal-apis/parameter-binding` confirmed
+verbatim that a `CancellationToken` parameter is "automatically bound
+without requiring any explicit attributes," resolved from `HttpContext.
+RequestAborted` — the claim this lesson's section 2 and Q3 both rest on
+— with the doc's own worked example (`app.MapGet("/", async
+(CancellationToken cancellationToken) => ...)`) matching this lesson's
+own pattern. `command -v dotnet`/`go` were both attempted this round and
+both required interactive approval with no user present, the same
+outcome every round has hit since Lesson 103; `node --version` resolved
+directly and was used for every scratch check below, consistent with the
+same no-approval-needed distinction noted since Lesson 136.
+
+Other verification performed via a throwaway `node` script in a scratch
+directory under the repo root (`_scratch_lesson142/`, not `/tmp`, same
+constraint as every round since Lesson 133; nothing written to the repo
+besides the three intended files; scratch directory deleted after): (1)
+a quiz word-count check per `<div class="q">` block — first draft landed
+uneven on all four questions (Q1 10/9/10/10, Q2 10/8/10/9, Q3 11/13/11/12,
+Q4 13/12/13/13 across several intermediate passes), converged after
+roughly a dozen rewrite-and-recount passes using a standalone word-count
+script to test candidate option text before touching the lesson file, to
+exactly 11/11/11/11 (Q1, Q3, Q4) and 10/10/10/10 (Q2), exactly one
+`data-ok` and four options per question confirmed the same way; (2) an
+HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+strong/a/table/tr/td/th/thead/tbody — clean on the structural pass (div
+7/7, p 17/17, code 75/75, button 16/16, script 3/3, dfn 2/2, pre 2/2, h2
+7/7, h1 1/1, em 2/2, strong 4/4, a 4/4, table 1/1, tr 5/5, td 8/8, th
+7/7, thead 1/1, tbody 1/1); a first attempt at checking `dfn` tags for
+both `data-en=`/`data-vn=` used a regex that truncated early because
+this lesson's `data-en` attribute text itself contains a raw `<T>` (e.g.
+"ServerSentEventsResult<T>") — confirmed as valid, already-precedented
+house style (Lesson 121's `AddEndpointFilter<T>()` does the same inside
+its own `data-en`), not a lesson bug, and fixed by tightening the check
+script's regex to match through the attribute boundary correctly; both
+`dfn` tags then confirmed clean; (3) a brace/paren/bracket balance check
+on both `<pre><code>` blocks after stripping tags and unescaping HTML
+entities — balanced (block 1: 3/3 braces, 7/7 parens, 1/1 brackets;
+block 2: 3/3 braces, 6/6 parens); the stripped C# was also read back in
+full and hand-checked against the API shapes verified above; (4) a raw-
+unescaped-`&` scan across the lesson — zero hits; (5) a duplicate-term
+scan on `glossary.html`'s first column before adding the two new rows —
+zero collisions for `TypedResults.ServerSentEvents` or `SseItem<T>`,
+confirming "SSE / Server-Sent Events" itself was correctly left alone as
+a reused term; a `<tr>`/`<td>` balance check on `glossary.html` after
+the two-row addition — balanced (430 `<tr>`, 1287 `<td>`, 429 term rows
+total = 427 prior + 2 new), plus a second duplicate-term scan afterward —
+zero duplicates; (6) `node --check` against `nav.js`, `gloss.js`,
+`quiz.js` — all clean, both before and after the `nav.js` edit; (7) a
+basic HTML well-formedness check (one `<!DOCTYPE html>`, one `<html>`/
+`</html>`, three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 142 in `nav.js` (date 2026-11-24, today's actual
+generation date) right after `n: 141`. Day number used 142, matching
+this file's own day-equals-lesson-number convention, no deviation found.
+`git status --short backend/` confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`, this
+`backend/NOTES.md` entry, and the new `backend/lessons/0142-server-sent-
+events-aspnetcore-typedresults-sseitem.html`. No new `RESOURCES.md` line
+added — all four fetched pages are `learn.microsoft.com`, cited inline
+in the lesson's own "Go deeper" section instead, consistent with every
+recent C#-port round's precedent. No new `learning-records/` file added
+— the topic came from this round's own candidate search prompted by
+Lesson 141's standing note, not a new observation about the learner;
+`learning-records/` still has no entry newer than Lesson 3, so this
+round was paced as a normal sequential step per the same convention
+every recent round has used, including the two still-unconfirmed
+standing items (Lesson 25's concurrency-vocabulary retrieval quiz,
+Lesson 102's SignalR/WebSocket quiz) which remain open but untouched
+this round, same as prior rounds. `bin/record-progress backend
+lesson_generated --day 142 --lesson 0142-server-sent-events-aspnetcore-
+typedresults-sseitem.html --detail '{"by":"claude-sonnet-5"}'` was not
+run this round per this run's own orchestrator instructions — DB
+progress recording is being handled centrally this round instead.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: load shedding (Lesson 71, via `System.Threading.
+RateLimiting`'s `ConcurrencyLimiter`, a saturation-based mechanism
+distinct from Lesson 118's token-bucket rate limiter) and multi-tenant
+data models (Lesson 78, via EF Core's `HasQueryFilter` global query
+filters) — both surfaced by this round's own candidate survey as the
+next-strongest unexplored options; the two simpler `TypedResults.
+ServerSentEvents` overloads (a bare `IAsyncEnumerable<string>`, and
+`IAsyncEnumerable<T>` with one shared `eventType`), named in this
+lesson's own scope line but not covered; actually implementing `Last-
+Event-ID`-based resume server-side, also named but not written; HATEOAS
+(Lesson 97), now checked twice (Lessons 141 and 142) and rejected both
+times on the same thin-C#-angle grounds — worth retiring as a standing
+candidate unless picked deliberately as a cold-start C# feature rather
+than a direct port; Go's `select`-statement arbitration rules, still
+deferred many rounds running on fetched-page-truncation grounds; Lesson
+49's dead-letter queues, still confirmed to have no first-party ASP.NET
+Core angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same
+way; and FluentValidation and Polly/.NET resilience libraries, both
+still deliberately out of scope per MISSION.md's "concepts first" rule.

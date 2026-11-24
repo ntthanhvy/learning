@@ -113,6 +113,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 116 — `urlparse()` for splitting a URL string into its named pieces (scheme, netloc, path, query), `parse_qs()` for reading a raw query string's values back as lists (handling a repeated key correctly), `urlencode()` as its write-direction inverse for building a query string from a dict, and `quote()`/`unquote()` for percent-encoding a single raw value, the URL equivalent of Day 114's `shlex.quote()`.
 - [Docs: `unicodedata`](https://docs.python.org/3/library/unicodedata.html)
   Use for: Day 117 — `unicodedata.normalize()` for rewriting a string into one standard Unicode shape ("NFC"/"NFD") so two strings that only differ in how a character was built become equal under `==` and under set/dict membership, and `unicodedata.name()`/`.category()` for identifying a mystery character and classifying a character's kind.
+- [Docs: `ipaddress`](https://docs.python.org/3/library/ipaddress.html)
+  Use for: Day 118 — `ip_address()` for parsing and validating a single IPv4/IPv6 address (and why a hand-written regex gets range checks wrong), `ip_network()` for parsing a CIDR range and checking membership with `in`, and the `strict=False` escape hatch for building a network from an address that isn't the range's exact start.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

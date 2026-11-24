@@ -82,6 +82,7 @@
     { n: 67, date: "2026-11-21", title: "Closing Day 64's TODO: an on_failure_callback on check_kafka_lag", file: "lessons/0067-airflow-kafka-lag-failure-callback.html" },
     { n: 68, date: "2026-11-22", title: "Static membership with two consumers: one restarts, the other never notices", file: "lessons/0068-kafka-static-membership-two-consumers.html" },
     { n: 69, date: "2026-11-23", title: "Airflow dynamic task mapping: one task per city, not one task for all", file: "lessons/0069-airflow-dynamic-task-mapping.html" },
+    { n: 70, date: "2026-11-24", title: "dbt model contracts: closing Day 14's primary_key and foreign_key gap", file: "lessons/0070-dbt-primary-foreign-key-constraints.html" },
   ];
 
   const REFS = [

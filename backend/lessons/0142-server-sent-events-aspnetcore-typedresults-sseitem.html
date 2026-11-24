@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 142 · Server-Sent Events, now in C# too (TypedResults.ServerSentEvents, SseItem&lt;T&gt;)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 142 · ~20 min</p>
+<h1>Server-Sent Events, now in C# too (TypedResults.ServerSentEvents, SseItem&lt;T&gt;)</h1>
+<p class="byline">Lesson 63 built SSE the hand-rolled way: grab the <code>http.Flusher</code>, set <code>Content-Type: text/event-stream</code> yourself, and format every event as a literal <code>data: {...}\n\n</code> string in a loop. Lesson 102 then covered SignalR, which uses SSE only as one of three automatic fallback transports underneath a different abstraction — never SSE on its own terms. As of .NET 10, ASP.NET Core Minimal APIs finally have a first-party way to return a plain SSE stream directly: <code>TypedResults.ServerSentEvents</code>, with a typed <code>SseItem&lt;T&gt;</code> wrapper instead of hand-formatted text.</p>
+
+<h2>1 · The gap Lesson 63 and 102 both left open</h2>
+<p>Lesson 63's Go handler worked, but every part of the wire format was the application's own responsibility: setting the header, writing the <code>data:</code> prefix, writing the blank line that ends an event, and flushing after each write so the browser doesn't wait on a buffer. Lesson 102 showed that SignalR already knows how to speak SSE — it's transport #2 in the fallback order behind WebSockets — but only as an internal detail of a hub connection, never exposed as "just give me an SSE endpoint." Until .NET 10, writing a plain SSE endpoint in ASP.NET Core meant doing exactly what Lesson 63's Go code did: set the header and write formatted strings to the response body by hand. <code>Microsoft.AspNetCore.Http</code>'s new <dfn data-en="a static method on TypedResults, added in ASP.NET Core 10, that takes an IAsyncEnumerable of values and returns a ServerSentEventsResult<T> -- an IResult that writes each value to the HTTP response as a Server-Sent Event, setting the text/event-stream content type and serializing non-string payloads with the app's configured JSON options, so a Minimal API handler no longer formats the data:/\n\n wire syntax by hand" data-vn="TypedResults.ServerSentEvents (giữ nguyên) — static method của TypedResults, có từ ASP.NET Core 10, nhận IAsyncEnumerable giá trị, trả về ServerSentEventsResult&lt;T&gt; (1 IResult) tự viết từng giá trị xuống response dạng Server-Sent Event -- tự set content-type text/event-stream, tự serialize giá trị không phải string bằng JSON options của app, handler Minimal API không còn phải tự tay viết format data:/\n\n">TypedResults.ServerSentEvents</dfn> closes that gap: the handler hands over an async sequence of values, and the framework writes the stream.</p>
+
+<h2>2 · The same loop, now returned instead of written by hand</h2>
+<p>Lesson 63's Go handler pulled events off a channel inside a <code>for</code>/<code>select</code> loop and wrote each one itself. A Minimal API endpoint doing the same job returns an <code>IAsyncEnumerable&lt;T&gt;</code> and lets the framework drive the loop:</p>
+<pre><code>app.MapGet(<span class="st">"/orders/{id}/updates"</span>, (<span class="kw">int</span> id, CancellationToken ct) =&gt;
+    TypedResults.ServerSentEvents(GetOrderUpdates(id, ct)));
+
+<span class="kw">async</span> IAsyncEnumerable&lt;OrderStatus&gt; GetOrderUpdates(
+    <span class="kw">int</span> id, [EnumeratorCancellation] CancellationToken ct)
+{
+    <span class="kw">while</span> (!ct.IsCancellationRequested)
+    {
+        <span class="kw">var</span> status = <span class="kw">await</span> _statusFeed.NextAsync(id, ct);
+        <span class="kw">yield</span> <span class="kw">return</span> status;
+    }
+}</code></pre>
+<p>Binding a <code>CancellationToken</code> parameter in a Minimal API handler gives it <code>HttpContext.RequestAborted</code> automatically — the same signal Lesson 63's Go version read off <code>r.Context().Done()</code> inside its <code>select</code> — so the generator loop above stops the moment the client disconnects, without a separate disconnect check anywhere. <code>yield return</code> is doing the job Lesson 63's <code>fmt.Fprintf</code> plus <code>flusher.Flush()</code> did by hand: producing one value, handing it off, and waiting for the next. There is no header to set and no flush call to remember — <code>TypedResults.ServerSentEvents</code> owns both.</p>
+
+<h2>3 · <code>SseItem&lt;T&gt;</code>: an event is a typed value, not a formatted string</h2>
+<p>Section 2's example streams a plain <code>OrderStatus</code> value per event, serialized through the app's configured JSON options — a reasonable default, but it skips the three extra fields the SSE wire format itself defines: an event type, an id the browser echoes back on reconnect, and a server-chosen retry interval. Lesson 63's Go version had to splice those directly into the formatted string if it wanted them at all. In C#, they're named properties on <dfn data-en="a readonly struct in System.Net.ServerSentEvents (used with the generic TypedResults.ServerSentEvents<T> overload) wrapping one event's payload plus the three fields the SSE wire format defines beyond the data itself -- Data (the typed payload), EventId (an id the browser's EventSource echoes back via the Last-Event-ID header on reconnect), EventType (the named event type), and ReconnectionInterval (how long the browser should wait before reconnecting)" data-vn="SseItem&lt;T&gt; (giữ nguyên) — readonly struct trong System.Net.ServerSentEvents (dùng với overload generic TypedResults.ServerSentEvents&lt;T&gt;), bọc 1 giá trị event cộng 3 field khác mà định dạng SSE có ngoài data -- Data (giá trị), EventId (id mà EventSource phía browser gửi lại qua header Last-Event-ID khi reconnect), EventType (tên loại event), ReconnectionInterval (browser nên chờ bao lâu rồi mới reconnect)">SseItem&lt;T&gt;</dfn>, constructed per event instead of written as string literals:</p>
+<pre><code>IAsyncEnumerable&lt;SseItem&lt;OrderStatus&gt;&gt; GetOrderUpdates(<span class="kw">int</span> id, CancellationToken ct)
+{
+    <span class="kw">await</span> <span class="kw">foreach</span> (<span class="kw">var</span> status <span class="kw">in</span> _statusFeed.Subscribe(id, ct))
+    {
+        <span class="kw">yield</span> <span class="kw">return</span> <span class="kw">new</span> SseItem&lt;OrderStatus&gt;(status, eventType: <span class="st">"order-status"</span>)
+        {
+            EventId = status.Version.ToString(),
+            ReconnectionInterval = TimeSpan.FromSeconds(<span class="dv">5</span>)
+        };
+    }
+}</code></pre>
+<p>That <code>EventId</code> is the C# side of a detail Lesson 63's browser-facing half mentioned only as "the browser reconnects automatically" without saying what it sends on the way back in: <code>EventSource</code> remembers the last event id it received and resends it as a <code>Last-Event-ID</code> request header on reconnect, so a server can resume a stream from where a dropped connection left off instead of replaying everything. <code>ReconnectionInterval</code> is the server telling the browser how long to wait before that reconnect attempt — a tuning knob Lesson 63's hand-rolled version had no field for at all, because it never wrote anything but <code>data:</code> lines.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> <code>Last-Event-ID</code> looks like it should be something the frontend code reads and resends manually, the way you'd persist a cursor to localStorage. It isn't — <code>EventSource</code> tracks and resends it internally, with no application code touching it on either side of the connection unless you explicitly override it. The only decision left to the backend is whether to set a meaningful <code>EventId</code> at all; an endpoint that never sets one gives the browser nothing useful to resume from, and every reconnect effectively restarts the stream from scratch.</div>
+
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 63: Go</th><th>Lesson 142: C#</th></tr></thead>
+<tbody>
+<tr><th>Wire format</th><td><code>fmt.Fprintf(w, "data: %s\n\n", ...)</code>, by hand</td><td><code>TypedResults.ServerSentEvents</code> writes it, no string formatting</td></tr>
+<tr><th>Per-event loop</th><td><code>for</code>/<code>select</code> over a channel, flushing each write</td><td><code>IAsyncEnumerable&lt;T&gt;</code> with <code>yield return</code>, framework drives the loop</td></tr>
+<tr><th>Disconnect signal</th><td><code>r.Context().Done()</code> checked in the same <code>select</code></td><td>bound <code>CancellationToken</code> parameter, same <code>RequestAborted</code> signal</td></tr>
+<tr><th>Event id / retry hint</th><td>no dedicated field — would need splicing into the string by hand</td><td><code>SseItem&lt;T&gt;.EventId</code> / <code>.ReconnectionInterval</code>, typed properties</td></tr>
+</tbody>
+</table>
+
+<h2>4 · What's unchanged, and what this still doesn't do</h2>
+<p>Every architectural limit Lesson 63 named stays exactly as true here: SSE is still one-way, server-to-client only — <code>TypedResults.ServerSentEvents</code> gives a handler a cleaner way to produce that one-way stream, not a second channel back. A chat app's outgoing messages still need an ordinary POST endpoint alongside the SSE one, in C# exactly as in Go. And Lesson 63's capacity warning carries over unchanged too: each open SSE connection is a held resource — in the C# version, an <code>IAsyncEnumerable</code> generator suspended on an <code>await</code>, not a blocked goroutine, but still something a server holding thousands of them at once has to plan for the same way Lesson 18 planned for connection-pool exhaustion. <code>TypedResults.ServerSentEvents</code> changes how much code the stream costs to write; it doesn't change the direction, or the fact that holding the connection open is still the whole feature.</p>
+
+<div class="interview">
+<p><strong>Q: "We need live order-status updates in an ASP.NET Core API — build it with Minimal APIs, nothing fancier."</strong> A strong answer, out loud: <em>"Since .NET 10, there's a first-party way to do this without hand-formatting anything: return TypedResults.ServerSentEvents from the endpoint, backed by an async method that yields SseItem&lt;OrderStatus&gt; values as the status changes. Binding a CancellationToken parameter gets me the client-disconnect signal for free, and setting EventId on each item means a client that reconnects after a drop sends Last-Event-ID back and I can resume instead of replaying the whole history. What I still need to decide myself is capacity — each open connection is a suspended generator held open for as long as the client stays connected, same cost as Lesson 63's Go version, just a different runtime primitive holding it."</em> The signal: knowing what the framework now writes for free (the wire format, the reconnect id plumbing) versus what's still an application decision no library makes for you (how many of these a server can hold open, and whether resuming from Last-Event-ID is worth implementing).</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>TypedResults.ServerSentEvents</code>'s <code>IAsyncEnumerable&lt;SseItem&lt;T&gt;&gt;</code> overload, <code>SseItem&lt;T&gt;</code>'s <code>EventId</code>/<code>EventType</code>/<code>ReconnectionInterval</code> properties, and the bound-<code>CancellationToken</code> disconnect signal. It does not cover the two simpler overloads (a bare <code>IAsyncEnumerable&lt;string&gt;</code>, or <code>IAsyncEnumerable&lt;T&gt;</code> with a single shared <code>eventType</code>), actually implementing <code>Last-Event-ID</code>-based resume server-side (the property exists; reading the incoming header back and replaying from it is application code this lesson doesn't write), or MVC-controller equivalents — every example above is a Minimal API endpoint, the shape Microsoft's own reference for this API uses throughout.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="TypedResults.ServerSentEvents takes an IAsyncEnumerable of values (or SseItem<T> values) and writes the text/event-stream wire format itself, so a Minimal API handler never writes a data:/\n\n string or calls a flush method by hand, unlike Lesson 63's Go version which did both directly.">
+    <p class="stem">What does <code>TypedResults.ServerSentEvents</code> remove from writing an SSE endpoint by hand?</p>
+    <button class="opt" data-ok>writing the data colon wire format and flushing it by hand</button>
+    <button class="opt">the one way direction limit that only SSE itself ever has</button>
+    <button class="opt">any ability for a client browser to ever reconnect at all</button>
+    <button class="opt">the entire need for any kind of HTTP response status code</button>
+  </div>
+  <div class="q" data-why="SseItem<T>.EventId is the server-side field that lets a reconnecting client resume instead of replaying everything -- EventSource automatically remembers the last event id it received and resends it as a Last-Event-ID request header on reconnect, with no application code touching that header on either side unless explicitly overridden.">
+    <p class="stem">What does setting <code>SseItem&lt;T&gt;.EventId</code> enable on a client reconnect?</p>
+    <button class="opt" data-ok>resuming the stream from that id instead of replaying everything</button>
+    <button class="opt">permanently disabling every single future browser reconnect attempt here now</button>
+    <button class="opt">forcing the entire browser tab itself to fully reload now</button>
+    <button class="opt">switching that one open connection over into plain WebSocket now</button>
+  </div>
+  <div class="q" data-why="A Minimal API handler that binds a CancellationToken parameter gets HttpContext.RequestAborted automatically -- the same disconnect signal Lesson 63's Go handler read off r.Context().Done() inside its own select loop -- so the async generator stops yielding once the client goes away, with no separate check written.">
+    <p class="stem">How does a bound <code>CancellationToken</code> parameter relate to Lesson 63's <code>r.Context().Done()</code> check?</p>
+    <button class="opt" data-ok>it is the same client disconnect signal delivered a new way</button>
+    <button class="opt">it instead limits how many total bytes one response may send</button>
+    <button class="opt">it only ever fires after a fixed thirty minute timer expires</button>
+    <button class="opt">it replaces needing any kind of async method whatsoever right here</button>
+  </div>
+  <div class="q" data-why="SSE remains strictly one-way, server to client, no matter which side writes the wire format -- TypedResults.ServerSentEvents makes producing that one-way stream less code to write, it does not add a channel back, and an open connection is still a held resource a server must plan capacity for, same as Lesson 63's Go version and Lesson 18's connection-pool warning."><p class="stem">What does .NET 10's SSE support leave unchanged from Lesson 63's Go version?</p>
+    <button class="opt" data-ok>the stream stays one way only and is still a resource</button>
+    <button class="opt">a client can now freely send messages back on that channel</button>
+    <button class="opt">holding the connection open no longer costs the server anything now</button>
+    <button class="opt">the browser side EventSource API itself no longer exists at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.http.typedresults.serversentevents">Microsoft Learn: TypedResults.ServerSentEvents Method</a> — the primary source for all three overloads (<code>IAsyncEnumerable&lt;string&gt;</code>, <code>IAsyncEnumerable&lt;SseItem&lt;T&gt;&gt;</code>, and <code>IAsyncEnumerable&lt;T&gt;</code> with a shared <code>eventType</code>), confirming the method's ASP.NET Core 10 package version and its return type, <code>ServerSentEventsResult&lt;T&gt;</code>. Read alongside <a href="https://learn.microsoft.com/en-us/dotnet/api/system.net.serversentevents.sseitem-1">Microsoft Learn: SseItem&lt;T&gt; Struct</a> for the <code>Data</code>/<code>EventId</code>/<code>EventType</code>/<code>ReconnectionInterval</code> property list cited in section 3. Lesson 63's own <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events">MDN — Server-Sent Events</a> source still covers the wire format and <code>EventSource</code>'s browser-side reconnect behavior in full and is not re-derived here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 63's SSE section and Lesson 102's transport-fallback coverage, and continues this run's "now in C# too" series (Lessons 132, 137, 138, 139, 140, 141). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 142 rounds — the honest next step remains a completion signal or a user-named track. HATEOAS (Lesson 97) was reconsidered this round and confirmed still thin on the .NET side — no first-party hypermedia-link library exists the way one now exists for feature flags and SSE — so it remains a cold-start candidate rather than a direct port if picked. Standing "now in C# too" candidates worth checking fresh next time: load shedding (Lesson 71, via <code>System.Threading.RateLimiting</code>'s <code>ConcurrencyLimiter</code>, a saturation-based mechanism distinct from Lesson 118's token-bucket rate limiter) and multi-tenant data models (Lesson 78, via EF Core's <code>HasQueryFilter</code> global query filters).</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

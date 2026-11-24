@@ -13212,3 +13212,110 @@
   `data/practice/137_std_var_and_ddof.py`, and this file). The scratch
   directory `.scratch-data-137/` was deleted after verification, at the
   repo root but never tracked by git.
+- 2026-11-24 generation (Lesson 138, headless run): confirmed before writing
+  anything that no `lessons/0138-*.html` existed and no `n: 138`/
+  `2026-11-24` entry existed in `nav.js` — not a duplicate run. DB reads
+  confirmed via the orchestrator's own pre-check that no `lesson_completed`/
+  quiz/kata row has ever been recorded for `data` (routine `lesson_generated`
+  rows only) — no weak-spot or completion-gap signal, continuing steady
+  sequential pacing. Read `MISSION.md` (unmodified), `RESOURCES.md`, this
+  file's own tail, `learning-records/0001-baseline-sql-strong-python-basic.md`,
+  and Lesson 137's own HTML plus its matching
+  `practice/137_std_var_and_ddof.py` in full as the structural template.
+  Topic choice: ran this round's own fresh scan (per this course's "fresh
+  scan each round" convention) rather than trusting Lesson 137's own
+  byline-named candidates at face value — grepped every lesson body and
+  every glossary row case-insensitively for `.sem(`, `.skew(`, `.kurt(`,
+  `np.skew(`, and `np.kurtosis(`: the only hits anywhere were two prior
+  plain-English "skewed data" mentions (Lesson 3's median-fill reasoning,
+  Lesson 131's log-transform byline), never the actual methods; zero hits
+  for `.sem()`, `.kurt()`, or either NumPy spelling — confirming Lesson
+  137's own named candidates are still genuinely open rather than assuming
+  it. Picked `.skew()`/`.kurt()` as today's pair over `.sem()`: a closely
+  related higher-moment shape-statistics duo (same family as Lesson 137's
+  `.std()`/`.var()`, but describing asymmetry/tail-weight rather than
+  spread), whereas `.sem()` is a simple `.std()`-derived ratio confirmed
+  directly in this round's own scratch sandbox to equal
+  `.std() / sqrt(count)` exactly, with no comparable independent trap of
+  its own — left as the next nearest gap rather than building all three
+  into one lesson and blurring the two genuinely distinct traps `.skew()`/
+  `.kurt()` each carry. Verified directly in a scratch sandbox (pandas
+  3.1.1, numpy 2.5.5, `uv run --with pandas`) rather than trusting memory:
+  confirmed a symmetric 5-value Series's `.skew()` is exactly `0.0`;
+  confirmed a 9-value Series with one huge high-end outlier returns a
+  positive `.skew()` (`2.9948337189548666`) and the mirrored low-end-outlier
+  version returns the negative of that same magnitude
+  (`-2.9958956056874224`) — the sign names the tail's direction, not which
+  side holds most of the rows. Confirmed, on a 100,000-value
+  `np.random.default_rng(42).normal()` sample, `.kurt()` lands at
+  approximately `0.023` (not `3`) — direct proof pandas reports *excess*
+  kurtosis with the normal-distribution baseline already subtracted, the
+  single most common "3 means normal" textbook-formula mix-up this topic
+  invites. Confirmed directly, looping `n` from 1 to 5, `.skew()` returns
+  `NaN` for `n` in `{1, 2}` and a real number starting at `n=3`; `.kurt()`
+  returns `NaN` for `n` in `{1, 2, 3}` and a real number starting at `n=4`
+  — a higher minimum-row threshold than `.skew()`'s own, and higher than
+  Lesson 137's single-row `.std()`/`.var()` trap. Confirmed directly, twice,
+  a constant column (every value identical, zero standard deviation) returns
+  `NaN` for both `.skew()` and `.kurt()` regardless of length, since both
+  formulas divide by a power of the standard deviation. Confirmed directly
+  `hasattr(np, "skew")` and `hasattr(np, "kurtosis")` are both `False` —
+  unlike Lesson 137's `.std()`/`.var()`, there is no NumPy-side counterpart
+  at all, so no cross-library default-mismatch trap exists here; only the
+  excess-kurtosis baseline and the minimum-row-count `NaN` are the confirmed
+  traps. Separately confirmed `pd.Series([2,4,4,4,5,5,7,9]).sem()` equals
+  `.std() / sqrt(len(s))` exactly, and `hasattr(np, "sem")` is `False` too —
+  supporting the decision to leave `.sem()` for a future round rather than
+  treating it as a comparably rich topic on its own. Did not build out the
+  Fisher-Pearson skewness formula's own derivation or `scipy.stats`'s
+  alternate bias-corrected spellings, out of scope per `MISSION.md`'s "no
+  deep statistics" line. Added exactly two new glossary rows, "Series.skew()"
+  and "Series.kurt()" — directly after Lesson 137's `ddof` entry — confirmed
+  via a scripted scan of every first-column term that neither name was
+  already present, zero duplicates found across all 221 terms; both `<dfn>`
+  tags used in the lesson body were also embedded verbatim into their
+  matching glossary rows' third column, matching the established
+  duplicate-markup convention. `tr`/`td`/`th`/`dfn`/`table` balance on the
+  glossary confirmed 221/221, 660/660, 3/3, 18/18, 1/1 via occurrence-count
+  regex equivalents, not the line-count shortcut earlier rounds' own notes
+  flagged as unreliable. Also included an explicit `.interview` callout div,
+  matching this course's standing rule. Verification performed mechanically
+  via a scratch directory `.scratch-data-138/` created at the repo root
+  (deleted after, never tracked by git, matching every prior round's own
+  precedent): (1) a quiz-word-count script found the first draft mismatched
+  across all three questions (9/9/8, 8/9/9, 9/9/6) and, after a few rounds
+  of wording trims re-verified against the script's own exact tokenization
+  (not hand-counted), confirmed exactly 9/9/9 option words across all three
+  questions, one `data-ok` per question throughout; (2) an HTML tag-balance
+  script confirmed fully balanced on the first full pass after the
+  word-count fixes: html/head/body 1/1/1, div 6/6, p 18/18, code 79/79, pre
+  4/4, h1 1/1, h2 7/7, strong 5/5, button 9/9, script 3/3, dfn 2/2, span
+  43/43, em 2/2, a 3/3, title 1/1, zero raw unescaped `&` outside the
+  lesson's own `cd ~/learning/data && uv run ...` shell command appearing
+  once in prose and once inside its own `<pre><code>` block (matching every
+  prior round's own precedent for that exact exception); exactly 2
+  `<dfn>`-carrying tags, both with `data-en`/`data-vn`, matching the two new
+  lesson-body dfns. `node --check` confirmed `nav.js`, `gloss.js`, and
+  `quiz.js` all still parse as valid JavaScript, both before and after
+  adding one `n: 138` entry and one `0138-skew-and-kurt` file reference to
+  `nav.js`. The first run of the shipped (unsolved)
+  `practice/138_skew_and_kurt.py`, run directly from its real `practice/`
+  location via `uv run --with pandas python3`, printed exactly 2 ✗ with no
+  raw traceback, as expected. Building the solved copy inside
+  `.scratch-data-138/` (deleted after, never tracked by git) printed both ✓
+  and "All green" on the first attempt, no further fixes needed. Re-ran the
+  shipped file directly from `practice/` again afterward and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. This round's own fresh scan closed the
+  `.skew()`/`.kurt()` gap it found and confirmed `.sem()`'s own formula
+  directly — tomorrow's round owes a brand new fresh scan with nothing
+  pre-committed, per this course's standing convention; `.sem()` remains the
+  nearest still-open statistics candidate surfaced but not built out. No new
+  `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal since mid-October. `git status --short` after all
+  edits is expected to show only the intended `data/` files touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0138-skew-and-kurt.html`, new
+  `data/practice/138_skew_and_kurt.py`, and this file). The scratch
+  directory `.scratch-data-138/` was deleted after verification, at the
+  repo root but never tracked by git.

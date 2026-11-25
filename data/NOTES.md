@@ -13319,3 +13319,108 @@
   `data/practice/138_skew_and_kurt.py`, and this file). The scratch
   directory `.scratch-data-138/` was deleted after verification, at the
   repo root but never tracked by git.
+- 2026-11-25 generation (Lesson 139, headless 06:00 run): idempotency check
+  attempted via `bin/query-progress` directly and via a subagent (per the
+  orchestrator's claim that subagent DB access had just been confirmed
+  working on a sibling course) — both attempts were blocked identically:
+  the script requires interactive approval in this sandboxed session, and
+  the subagent independently found the same wall (missing executable bit,
+  `~/.config/learning/db.env` fenced off as out-of-workspace, approval
+  denied) and declined to force it through. Fell back to
+  `git log -1 --format=%cd --date=short -- data/lessons/0138-skew-and-kurt.html`,
+  which returned `2026-11-24` — not today — so this round proceeded
+  (fallback signal, not the DB). Read `MISSION.md` (unmodified),
+  `RESOURCES.md`, this file's own tail, the sole
+  `learning-records/0001-baseline-sql-strong-python-basic.md`, and Lesson
+  138's own HTML plus its matching `practice/138_skew_and_kurt.py` in full
+  as the structural template. No `lesson_completed`/quiz/kata row has ever
+  been recorded for `data` beyond the Lesson 1 baseline (same DB-unreachable
+  caveat as every recent round) — no weak-spot or completion-gap signal, so
+  this round continues steady sequential pacing rather than reshaping
+  format. Topic choice: ran this round's own fresh scan (per this course's
+  "fresh scan each round" convention) rather than trusting Lesson 138's own
+  named candidate at face value — grepped every lesson body and every
+  glossary row case-insensitively for `.sem(` and `np.sem(`: the only hit
+  anywhere was Lesson 138's own prose naming it as a future gap, never an
+  actual call — confirming it was still genuinely open. Built out `.sem()`
+  (standard error of the mean) exactly as Lesson 138 itself flagged it:
+  confirmed directly, in a scratch sandbox (pandas 3.1.1, numpy 2.5.5,
+  `uv run --with pandas`, using an in-repo `.scratch-data-139/` directory
+  since `/tmp` is outside this session's allowed working directory), that
+  `Series.sem()` equals `Series.std() / sqrt(count)` exactly on an 8-value
+  Series, confirmed again with a `NaN` injected into the Series (both the
+  numerator's `.std()` and the denominator's `.count()` drop the `NaN`
+  consistently, no double-counting trap), and confirmed again under
+  `ddof=0` (matches `.std(ddof=0) / sqrt(len(s))` exactly, inheriting
+  Lesson 137's own ddof split rather than introducing a separate one).
+  Confirmed directly, looping the non-null count from 0 to 3, `.sem()`
+  returns `NaN` for `n` in `{0, 1}` (the `n=1` case is the identical
+  single-row `ddof=1` root cause Lesson 137 already confirmed for `.std()`
+  itself) and a real number starting at `n=2` — a lower minimum than Lesson
+  138's `.skew()` (3) or `.kurt()` (4), since `.sem()` only needs the plain
+  standard deviation, not a third or fourth central moment. The headline
+  finding this round's own fresh scan surfaced and verified directly,
+  twice: a constant 10-value column (zero standard deviation) returns a
+  REAL `0.0` from `.sem()`, the opposite of Lesson 138's confirmed `NaN` for
+  both `.skew()` and `.kurt()` on the identical kind of input — `.sem()`'s
+  formula multiplies by the standard deviation in its numerator rather than
+  dividing by a power of it, so a zero standard deviation produces a real
+  zero instead of a division-by-zero `NaN`; also confirmed `.std()`/`.var()`
+  themselves also return a real `0.0` on a constant column, grouping
+  `.sem()` with Lesson 137's pair rather than Lesson 138's. Confirmed
+  directly `hasattr(np, "sem")` is `False` — pandas-only, same pattern as
+  Lesson 138's `.skew()`/`.kurt()`, not Lesson 137's `.std()`/`.var()` split.
+  Also confirmed directly `DataFrame.sem()` runs column-by-column via a
+  2-column example. Did not build out confidence-interval construction from
+  `sem()`, the Central Limit Theorem's own derivation, or
+  `scipy.stats.sem()`'s alternate spellings, out of scope per `MISSION.md`'s
+  "no deep statistics" line. Added exactly one new glossary row,
+  "Series.sem()", directly after Lesson 138's `Series.kurt()` entry;
+  confirmed via a scripted row count (221 → 222, exactly +1) that no
+  duplicate was introduced. `tr`/`td`/`th`/`dfn`/`table` balance on the
+  glossary confirmed 222/222, 663/663, 3/3, 19/19, 1/1 via occurrence-count
+  regex equivalents. The single `<dfn>` tag used in the lesson body (one
+  combined term, `Series.sem()`, matching this lesson's narrower one-method
+  focus versus Lesson 138's two) was also embedded verbatim into the
+  glossary row's own third column, matching the established duplicate-markup
+  convention. Also included an explicit `.interview` callout div, matching
+  this course's standing rule. Verification performed mechanically via an
+  in-repo scratch directory `.scratch-data-139/` (deleted after, never
+  tracked by git, matching every prior round's own precedent — adjusted
+  this round only in that `/tmp` itself was unreachable, not the convention
+  of using a scratch dir at all): (1) a quiz-word-count script found the
+  first draft mismatched across all three questions and, after several
+  rounds of wording trims re-verified against the script's own exact
+  tokenization each time (not hand-counted), confirmed exactly 8/8/8,
+  8/8/8, and 9/9/9 option words across the three questions respectively,
+  one `data-ok` per question throughout; (2) an HTML tag-balance script
+  confirmed fully balanced on the first full pass: html/head/body 1/1/1,
+  div 6/6, p 20/20, h1 1/1, h2 8/8, strong 4/4, button 9/9, script 3/3,
+  dfn 1/1, span 38/38, em 3/3, a 2/2, title 1/1, code 98/98, pre 5/5, zero
+  raw unescaped `&` outside the lesson's own
+  `cd ~/learning/data && uv run ...` shell command appearing once inside
+  its own `<pre><code>` block (this round's prose referred to the command
+  without repeating the literal text, so only one occurrence total rather
+  than Lesson 138's two — still the same established exception, just
+  invoked once instead of twice). `node --check` confirmed `nav.js`,
+  `gloss.js`, and `quiz.js` all still parse as valid JavaScript, both before
+  and after adding one `n: 139` entry and one `0139-sem` file reference to
+  `nav.js`. The first run of the shipped (unsolved) `practice/139_sem.py`,
+  copied into the scratch dir and run via `uv run --with pandas python3`,
+  printed exactly 2 ✗ with no raw traceback, as expected; building the
+  solved copy inside the same scratch dir printed both ✓ and "All green" on
+  the first attempt, no further fixes needed; re-ran the shipped file
+  directly from its real `practice/` location afterward and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. This round's own fresh scan closed the
+  only candidate Lesson 138 itself named (`.sem()`) and found no further
+  statistics-method gap worth naming as a successor — tomorrow's round owes
+  a brand new fresh scan with nothing pre-committed, per this course's
+  standing convention. No new `data/learning-records/` entry was added —
+  routine lesson, no new completion/quiz signal since mid-October.
+  `git status --short` after all edits showed only the intended `data/`
+  files touched (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0139-sem.html`, new `data/practice/139_sem.py`, and this
+  file) alongside unrelated sibling-course changes from concurrent runs,
+  left untouched. The scratch directory `.scratch-data-139/` was deleted
+  after verification, at the repo root but never tracked by git.

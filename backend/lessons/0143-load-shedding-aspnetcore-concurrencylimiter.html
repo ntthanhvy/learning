@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 143 · Load shedding, now in C# too (ConcurrencyLimiter)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 143 · ~20 min</p>
+<h1>Load shedding, now in C# too (ConcurrencyLimiter)</h1>
+<p class="byline">Lesson 71's load shedder watched the server's own health (CPU, queue depth, latency) and rejected low-priority work once it crossed a threshold — a hand-written <code>Shedder</code> struct with no library backing it. Lesson 118 later covered ASP.NET Core's rate limiting middleware, but only its <em>token bucket</em> limiter: a per-client budget over a time period, not a server-wide overload signal. <code>System.Threading.RateLimiting</code> ships a fourth limiter type built for exactly Lesson 71's problem — <code>ConcurrencyLimiter</code>, which caps requests in flight right now instead of requests per second.</p>
+
+<h2>1 · A different question than "how many per second"</h2>
+<p>Lesson 118's token bucket answers "has this client used up its budget for this window." That's the right question for a client that sends too many requests. It is the wrong question for the problem Lesson 71 named: a service that is overloaded even though no single client has crossed any limit — a slow dependency, an expensive query, or many different well-behaved clients arriving at once can all drive the server into trouble while every individual rate-limit counter stays comfortably under its cap.</p>
+<p><dfn data-en="a RateLimiter implementation in System.Threading.RateLimiting that caps the number of requests allowed to be in flight (running) at the same time, rather than the number of requests allowed per time period -- each granted permit is held until the request finishes and released back to the pool when it completes, so the limit tracks concurrent load directly instead of a historical rate" data-vn="ConcurrencyLimiter (giữ nguyên) — 1 cài đặt RateLimiter trong System.Threading.RateLimiting, giới hạn số request được chạy đồng thời cùng lúc, không phải số request mỗi khoảng thời gian -- mỗi permit cấp ra bị giữ cho đến khi request đó xong rồi mới trả lại pool, nên limit đi theo tải đồng thời thực tế, không phải theo lịch sử rate">ConcurrencyLimiter</dfn> answers the question Lesson 71's <code>loadFn</code> was reaching for, but with one specific, cheap-to-read signal: how many requests are in flight right now, server-wide (or per named policy) — not CPU, not a custom health function, just concurrency itself as the overload proxy.</p>
+
+<h2>2 · Registering it: the fourth limiter alongside Lesson 118's token bucket</h2>
+<p>Lesson 118's <code>AddTokenBucketLimiter</code> sits in the same <code>AddRateLimiter</code> call as this lesson's <code>AddConcurrencyLimiter</code> — same registration shape, same pattern, different algorithm:</p>
+<pre><code><span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddRateLimiter(options =&gt;
+{
+    options.AddConcurrencyLimiter(<span class="st">"checkout-capacity"</span>, opt =&gt;
+    {
+        opt.PermitLimit = <span class="dv">20</span>;
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = <span class="dv">5</span>;
+    });
+});
+
+<span class="kw">var</span> app = builder.Build();
+app.UseRateLimiter();
+
+app.MapPost(<span class="st">"/checkout"</span>, HandleCheckout)
+   .RequireRateLimiting(<span class="st">"checkout-capacity"</span>);</code></pre>
+<p><code>PermitLimit</code> here means something structurally different from Lesson 118's <code>TokenLimit</code>: it is not a bucket that refills over time, it is a count of permits currently on loan. Every request that enters <code>/checkout</code> takes one of the 20 permits and holds it for the request's entire duration; the permit returns to the pool only when that request finishes, not on a timer. A slow checkout holding its permit for three seconds blocks that same permit from a second request for those same three seconds — the exact "held resource" framing Lesson 71 used for an open connection, now expressed as a configuration option instead of a hand-rolled struct field.</p>
+
+<h2>3 · What this buys over Lesson 71's hand-written <code>Shedder</code></h2>
+<p>Lesson 71's Go <code>Shedder.Admit</code> read a custom <code>loadFn</code> and compared it against two hand-chosen thresholds (0.80, 0.95). <code>ConcurrencyLimiter</code> replaces that whole decision with permit accounting the framework already does for every request: no health function to write, no threshold to tune by hand, no struct to maintain. <code>QueueLimit</code> plays the same role Lesson 71's thresholds did for borderline load — a request arriving when all 20 permits are out doesn't fail immediately, it waits in a queue up to <code>QueueLimit</code> deep (processed <code>OldestFirst</code> here, mirroring Lesson 118's same enum) before being rejected once the queue itself is full.</p>
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 71: Go <code>Shedder</code></th><th>Lesson 143: <code>ConcurrencyLimiter</code></th></tr></thead>
+<tbody>
+<tr><th>Signal</th><td>a custom <code>loadFn</code> (CPU, queue depth) read by hand</td><td>requests currently in flight, tracked by the limiter itself</td></tr>
+<tr><th>Threshold logic</th><td>hand-written <code>switch</code> over two chosen ratios</td><td><code>PermitLimit</code> — one number, no ratio math</td></tr>
+<tr><th>Borderline case</th><td>none — a request is admitted or refused on the spot</td><td><code>QueueLimit</code> lets a request wait briefly for a freed permit</td></tr>
+<tr><th>Priority</th><td>caller-assigned <code>Priority</code>, checked in <code>Admit</code></td><td>not built in — see section 4</td></tr>
+</tbody>
+</table>
+
+<h2>4 · What <code>ConcurrencyLimiter</code> does <em>not</em> give back</h2>
+<p>Lesson 71's whole second half was priority: shed the health check before the checkout. A bare <code>ConcurrencyLimiter</code> has no concept of priority at all — every request competing for those 20 permits is equal, so under sustained overload it sheds whichever requests happen to arrive once the queue is full, in arrival order, not by importance. Getting Lesson 71's priority behavior back means doing what Lesson 71's Go version did: assigning a separate, smaller <code>PermitLimit</code> policy to low-priority routes (health checks, background pings) via <code>RequireRateLimiting</code> on a different policy name, so they exhaust their own small pool before ever touching the pool that serves checkout. The limiter enforces whatever policy a route is assigned; deciding which routes get which policy — the actual priority judgment — is still the developer's call, exactly as it was in Lesson 71's hand-assigned <code>Priority</code> enum.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> <code>PermitLimit</code> on a concurrency policy looks like a client-facing quota, the same shape as Lesson 118's per-API-key token bucket. It isn't partitioned by client at all unless wrapped in a <code>PartitionedRateLimiter</code> the way Lesson 118 did for tokens — a bare <code>AddConcurrencyLimiter</code> policy is one shared pool for every caller hitting that route, which is exactly the point: it protects the server's own capacity, not any one client's fair share.</div>
+
+<h2>5 · One real difference in what the rejected response can say</h2>
+<p>Lesson 71 recommended <code>503</code> with a <code>Retry-After</code> header so a well-behaved client knows the rejection is about capacity, not a bug. Microsoft's own rate-limiting docs name a specific limit here: time-based limiters like the token bucket can compute <code>Retry-After</code> because they know exactly when the next permit arrives (the next replenishment tick). <code>ConcurrencyLimiter</code> cannot — it has no timer, no schedule, just permits that free up whenever whichever in-flight request finishes first, at an unpredictable moment. A rejected response can still return <code>503</code>, just without a trustworthy <code>Retry-After</code> value attached — the client learns "try later," not "try in exactly N seconds."</p>
+
+<div class="interview">
+<p><strong>Q: "Your ASP.NET Core API falls over under a traffic spike even though no client is hitting its per-key rate limit. What do you reach for?"</strong> A strong answer, out loud: <em>"That's the gap token-bucket rate limiting doesn't cover — it caps one client's requests per second, not the server's total in-flight load. I'd add a ConcurrencyLimiter policy capping how many requests can run at once, which is a direct port of the load-shedding idea: react to the server's own saturation, not a per-client count. The nuance is priority — a bare ConcurrencyLimiter treats every request equally, so I'd give low-priority routes like health checks their own smaller-permit policy so they exhaust their pool before touching checkout's. And since it's not time-based, I can't hand back a trustworthy Retry-After the way the token bucket limiter can — the client just hears 503, try again later, with no exact number attached."</em> The signal: naming that concurrency and rate are different proxies for overload, and that priority still has to be designed in by routing, not assumed from the limiter.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>AddConcurrencyLimiter</code>, its <code>PermitLimit</code>/<code>QueueProcessingOrder</code>/<code>QueueLimit</code> options, and the concurrency-vs-rate distinction against Lesson 118's token bucket. It does not cover chaining a concurrency limiter with a token bucket via <code>RateLimiter.CreateChained</code> (named in Microsoft's docs as a way to combine both signals on one endpoint), the rate-limiting metrics the middleware emits, or constructing a <code>ConcurrencyLimiter</code> directly rather than through <code>AddConcurrencyLimiter</code> — all left for a dedicated lesson if picked up later.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Token bucket (and fixed/sliding window) limiters cap the total number of requests allowed within a recurring time period, replenished on a schedule. ConcurrencyLimiter instead caps only how many requests may be running at the same instant, with no time period involved at all -- a permit frees up whenever an in-flight request finishes, not on a timer.">
+    <p class="stem">What does <code>ConcurrencyLimiter</code> cap that Lesson 118's token bucket limiter does not?</p>
+    <button class="opt" data-ok>requests running at once, not requests per time period</button>
+    <button class="opt">the total number of distinct client IP addresses seen</button>
+    <button class="opt">the maximum byte size allowed for any response body</button>
+    <button class="opt">how many database connections any one query may open</button>
+  </div>
+  <div class="q" data-why="A permit granted by ConcurrencyLimiter is held for the entire duration of the request it was granted to, and only returns to the pool once that request completes -- unlike a token bucket's tokens, which refill automatically on a replenishment schedule regardless of how long any one request takes.">
+    <p class="stem">When does a <code>ConcurrencyLimiter</code> permit return to the pool?</p>
+    <button class="opt" data-ok>when the request holding it finishes, not on a timer</button>
+    <button class="opt">after a fixed replenishment period has fully elapsed once again</button>
+    <button class="opt">only once the entire server process itself restarts completely fresh</button>
+    <button class="opt">immediately, before the request body itself gets read at all</button>
+  </div>
+  <div class="q" data-why="A bare ConcurrencyLimiter policy treats every request competing for its permits as equal -- it has no priority concept at all, so under sustained overload it sheds whichever requests arrive once the queue is full, in arrival order. Getting Lesson 71's priority back requires assigning low-priority routes their own separate, smaller-PermitLimit policy, the same judgment Lesson 71's hand-assigned Priority enum made explicit.">
+    <p class="stem">What does a bare <code>ConcurrencyLimiter</code> policy fail to do that Lesson 71's <code>Shedder</code> did?</p>
+    <button class="opt" data-ok>favor high priority requests over lower priority ones here</button>
+    <button class="opt">limit how many requests may run concurrently at all</button>
+    <button class="opt">accept every single request regardless of the current load</button>
+    <button class="opt">return any kind of rejection status code whatsoever here</button>
+  </div>
+  <div class="q" data-why="Time-based limiters like the token bucket know exactly when the next permit becomes available (the next scheduled replenishment tick), so they can compute an accurate Retry-After. ConcurrencyLimiter has no schedule -- a permit frees up whenever some unrelated in-flight request happens to finish, an unpredictable moment -- so Microsoft's own docs note it doesn't provide Retry-After metadata the way time-based limiters do.">
+    <p class="stem">Why can't a rejected <code>ConcurrencyLimiter</code> response include a trustworthy <code>Retry-After</code> value?</p>
+    <button class="opt" data-ok>it has no schedule, so the next free permit is unpredictable</button>
+    <button class="opt">the HTTP specification itself forbids that header on any response code</button>
+    <button class="opt">ASP.NET Core always removes that header from every single response sent</button>
+    <button class="opt">Retry-After only ever has meaning on successful two hundred responses sent</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit">Microsoft Learn: Rate limiting middleware in ASP.NET Core</a> — the same standing source Lesson 118 used for the token bucket limiter, continued here into its "Concurrency limiter" section (the one-sentence definition cited in section 1 and the worked <code>AddConcurrencyLimiter</code> example in section 2) and its chained-limiters note that <code>ConcurrencyLimiter</code> "doesn't provide <code>RetryAfter</code> metadata" (section 5). Read alongside <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.concurrencylimiter">Microsoft Learn: ConcurrencyLimiter Class</a> for the type's own constructor and <code>GetStatistics()</code> method. Lesson 71's own Google SRE Book — Handling Overload source still covers the load-shedding concept and priority-based shedding in full and is not re-derived here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 71's load-shedding concept and Lesson 118's rate-limiting middleware, and continues this run's "now in C# too" series (Lessons 132, 137, 138, 139, 140, 141, 142). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 143 rounds — the honest next step remains a completion signal or a user-named track. Standing "now in C# too" candidates worth checking fresh next time: multi-tenant data models (Lesson 78, via EF Core's <code>HasQueryFilter</code> global query filters) and HATEOAS (Lesson 97, checked twice already and rejected both times on a thin-C#-angle basis — worth retiring unless picked deliberately as a cold-start C# feature rather than a direct port).</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

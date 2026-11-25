@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 71 · Airflow .expand_kwargs() and .partial(): closing Day 69's two named gaps</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 71 · ~20 min · 25 Nov 2026</p>
+<h1>Airflow .expand_kwargs() and .partial(): closing Day 69's two named gaps</h1>
+<p class="byline">Today's tangible win: <code>city_sla_check</code>'s one mapped task now varies <em>two</em> arguments per city — <code>city</code> and a per-city <code>min_orders</code> floor — fixed with <code>.expand_kwargs()</code> over a list of dicts instead of Day 69's single <code>city=list_cities()</code>, and a third argument, <code>threshold_minutes</code>, is fixed once for every instance with <code>.partial()</code> rather than repeated in each dict. Confirmed this round with a real <code>DagBag</code> parse against an installed Airflow 3.3.1: both calls produce the same <code>DecoratedMappedOperator</code> Day 69 found, and a genuinely new finding — mapping and fixing the <em>same</em> keyword with both calls parses clean with no error at all, because the duplicate-key check Day 69 never needed runs at task-unmapping time, not at parse time.</p>
+
+<div class="callout"><strong>Before today — confirm Day 69's DAG still parses:</strong> today edits <code>dags/city_sla_check.py</code> in place, replacing its single <code>.expand(city=...)</code> call — it doesn't touch <code>food_delivery_pipeline.py</code>. Start from a clean parse:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If Day 69's <code>city_sla_check.py</code> doesn't exist yet with a working <code>list_cities</code>/<code>check_city_sla</code>/<code>.expand()</code> shape, build that first — today's two calls replace one line inside it, not a fresh file.</div>
+
+<h2>1 · The two gaps Day 69's own scope line named and left alone</h2>
+<p>Day 69 built one mapped task, <code>check_city_sla</code>, over one varying argument: <code>city</code>. Its own scope line named two real limits on that shape, straight from the official Dynamic Task Mapping doc it cited but didn't open past the first section: <code>.expand_kwargs()</code> for "mapping over multiple paired arguments at once," and <code>.partial()</code> for "fixing some arguments while mapping others." Both gaps are real the moment the per-city check needs more than one thing to vary. A food-delivery SLA floor isn't uniform across four cities of very different order volume — Hanoi and Ho Chi Minh City move far more orders than Da Nang or Hue, so a sensible <code>min_orders</code> floor per city (below which a day's SLA percentage is too noisy to act on) differs by city too. <code>check_city_sla.expand(city=list_cities())</code> has no second slot for that: <code>.expand()</code> takes keyword arguments whose values are each a <em>single</em> list, one argument varying independently of any other, never two values arriving paired together per instance.</p>
+
+<h2>2 · <dfn data-en="an Airflow TaskFlow method, called instead of .expand(), that maps a decorated task over a single list of dicts (or an XComArg producing one) -- each dict supplies more than one keyword argument at once for its mapped instance, so several arguments can vary together, paired per instance, rather than each varying independently the way separate .expand() keyword arguments do" data-vn="giữ nguyên &quot;expand_kwargs&quot; — method TaskFlow của Airflow, gọi thay cho .expand(), map 1 task đã decorate qua 1 list dict DUY NHẤT (hoặc 1 XComArg trả ra list đó) -- mỗi dict cấp nhiều hơn 1 keyword argument cùng lúc cho instance mapped của nó, nên nhiều argument có thể biến đổi CÙNG NHAU, theo cặp cho từng instance, khác với việc mỗi keyword argument riêng của .expand() biến đổi độc lập nhau">.expand_kwargs()</dfn>: one dict per instance, not one list per argument</h2>
+<p>Where <code>.expand(city=list_cities())</code> takes one keyword bound to one list, <code>.expand_kwargs()</code> takes exactly one positional argument: a list of dicts (or an <code>XComArg</code> that will produce one), where each dict's keys become that one mapped instance's keyword arguments. Four cities, two arguments each, paired:</p>
+<pre><code><span class="kw">@task</span>
+<span class="kw">def</span> list_city_configs() -&gt; <span class="kw">list</span>[<span class="kw">dict</span>]:
+    <span class="kw">return</span> [
+        {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"min_orders"</span>: <span class="kw">50</span>},
+        {<span class="str">"city"</span>: <span class="str">"Ho Chi Minh City"</span>, <span class="str">"min_orders"</span>: <span class="kw">100</span>},
+        {<span class="str">"city"</span>: <span class="str">"Da Nang"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+        {<span class="str">"city"</span>: <span class="str">"Hue"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+    ]
+
+<span class="kw">@task</span>
+<span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>, min_orders: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+    ...
+
+check_city_sla.expand_kwargs(list_city_configs())</code></pre>
+<p>Confirmed this round by reading the installed <code>apache-airflow==3.3.1</code> package's own <code>expand_kwargs()</code> method directly: it accepts only an <code>XComArg</code> or a <code>Sequence</code> of mappings — passing anything else (a plain list of strings, say) raises <code>TypeError: expected XComArg or list[dict], not list</code> immediately, at parse time, before the DAG is ever scheduled. Internally the mapped task's <code>expand_input</code> becomes a distinct type from Day 69's own, <code>ListOfDictsExpandInput</code> rather than <code>DictOfListsExpandInput</code> — the exact two names this course now has for "many arguments varying independently" versus "one bundle of arguments varying together, per instance."</p>
+
+<h2>3 · <dfn data-en="an Airflow TaskFlow method, called on a decorated task before .expand() or .expand_kwargs(), that fixes one or more keyword arguments to the same value for every mapped instance the later expand call creates -- it returns an intermediate OperatorPartial object that only becomes a real mapped task once .expand()/.expand_kwargs() is chained onto it, so a bare .partial() call with no expand afterward is a task that was configured but never actually mapped" data-vn="giữ nguyên &quot;.partial()&quot; — method TaskFlow của Airflow, gọi trên task đã decorate TRƯỚC .expand() hoặc .expand_kwargs(), fix 1 hay nhiều keyword argument về CÙNG 1 giá trị cho MỌI instance mapped mà lệnh expand sau đó tạo ra -- nó trả về object trung gian OperatorPartial, chỉ thực sự thành task mapped khi .expand()/.expand_kwargs() được chain tiếp vào, nên gọi .partial() trơ trọi không có expand theo sau là 1 task đã được config nhưng chưa bao giờ thực sự mapped">.partial()</dfn>: the same value, every instance, no repeating it four times</h2>
+<p>A 45-minute SLA threshold belongs to the check itself, not to any one city — the same value for every mapped instance, the exact case <code>.partial()</code> exists for. Call it on the decorated task before <code>.expand_kwargs()</code>, chained:</p>
+<pre><code><span class="kw">@task</span>
+<span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>, min_orders: <span class="kw">int</span>, threshold_minutes: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+    ...
+
+check_city_sla.partial(threshold_minutes=<span class="kw">45</span>).expand_kwargs(list_city_configs())</code></pre>
+<p><code>.partial()</code> on its own builds nothing — confirmed by reading the installed package's own <code>OperatorPartial</code> class directly: it is explicitly documented in its own docstring as "an intermediate state," existing only between DAG-parsing and the <code>.expand()</code>/<code>.expand_kwargs()</code> call that must follow it, and its <code>__del__</code> method fires a real <code>UserWarning</code> — <code>"Task ... was never mapped!"</code> — if that chain is ever left incomplete. The value lands in the resulting mapped task's own <code>partial_kwargs</code>, confirmed live this round with a real <code>DagBag</code> parse printing <code>partial_kwargs: {..., 'op_kwargs': {'threshold_minutes': 45}, ...}</code> — one fixed value, shared by whatever number of mapped instances <code>.expand_kwargs()</code> ends up creating, not copied into each of the four dicts above.</p>
+<div class="callout">A genuinely new finding this round, not assumed from Day 69's own <code>.expand()</code> behavior: mapping and fixing the <em>same</em> keyword with both calls — <code>check.partial(city="fixed").expand_kwargs(list_configs())</code>, where <code>list_configs()</code>'s dicts also set <code>city</code> — parsed with <strong>zero error</strong>, confirmed with a real <code>DagBag</code> parse against exactly that shape. Reading <code>mappedoperator.py</code>'s own source directly explains why: <code>.expand()</code> calls a duplicate-key check, <code>prevent_duplicates()</code>, immediately against <code>.partial()</code>'s own kwargs, so a repeated keyword fails loudly at parse time with <code>TypeError: unmappable or already specified argument: ...</code>. <code>.expand_kwargs()</code> skips that same check at parse time — it only runs inside <code>_get_unmap_kwargs()</code>, called once per mapped instance at actual task-execution time, with the exact same <code>TypeError</code> firing then instead. The DAG file you are about to commit looks clean either way; only a real run (or a live <code>airflow tasks test</code>, blocked here by the standing <code>airflow db migrate</code> gate) would surface a duplicate-key mistake made with <code>.expand_kwargs()</code>, where the identical mistake with <code>.expand()</code> would have been caught the moment the file was parsed.</div>
+
+<h2>4 · Build: both calls, replacing Day 69's single <code>.expand()</code></h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/city_sla_check.py</code>:</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+CITY_CONFIGS = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"min_orders"</span>: <span class="kw">50</span>},
+    {<span class="str">"city"</span>: <span class="str">"Ho Chi Minh City"</span>, <span class="str">"min_orders"</span>: <span class="kw">100</span>},
+    {<span class="str">"city"</span>: <span class="str">"Da Nang"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hue"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+]
+
+
+<span class="kw">@dag</span>(
+    dag_id=<span class="str">"city_sla_check"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+)
+<span class="kw">def</span> city_sla_check():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> list_city_configs() -&gt; <span class="kw">list</span>[<span class="kw">dict</span>]:
+        <span class="cm"># TODO: replace the hardcoded list with a real query -- per-city</span>
+        <span class="cm"># order counts from stg_orders, to pick each min_orders floor from</span>
+        <span class="cm"># real volume instead of a number typed in by hand.</span>
+        <span class="kw">return</span> CITY_CONFIGS
+
+    <span class="kw">@task</span>
+    <span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>, min_orders: <span class="kw">int</span>, threshold_minutes: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+        <span class="cm"># TODO: query mart_delivery_sla for this city; if today's order</span>
+        <span class="cm"># count &gt;= min_orders, raise ValueError when share_over_45_min's</span>
+        <span class="cm"># minute threshold (threshold_minutes) is exceeded, else skip the</span>
+        <span class="cm"># verdict as too-low-volume to act on.</span>
+        ...
+
+    check_city_sla.partial(threshold_minutes=<span class="kw">45</span>).expand_kwargs(list_city_configs())
+
+
+city_sla_check()
+</code></pre>
+<p>Fill in both TODOs with the real query logic — the point of today's build step is the two-call chain itself, not the SQL inside either task body.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags')
+t = bag.dags['city_sla_check'].get_task('check_city_sla')
+print('is_mapped:', t.is_mapped)
+print('partial_kwargs:', t.partial_kwargs['op_kwargs'])
+print('upstream:', sorted(t.upstream_task_ids))
+"</code></pre>
+<p>Expected — the same structural facts this round's own scratch parse printed:</p>
+<pre><code>is_mapped: True
+partial_kwargs: {'threshold_minutes': 45}
+upstream: ['list_city_configs']</code></pre>
+<p>If you deliberately break it to see the new failure mode — add <code>city="Hanoi"</code> to the <code>.partial()</code> call while <code>list_city_configs()</code>'s dicts still set <code>city</code> too — <code>list-import-errors</code> still prints <code>No data found</code>, confirming today's main point live: the duplicate-key mistake is invisible at parse time. Commit the edited <code>dags/city_sla_check.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for .expand_kwargs() instead of .expand(), and what's one way the two aren't just syntactic variants of each other?"</strong> A strong answer, out loud: <em>".expand() takes separate keyword arguments, each bound to its own list, and every combination varies independently — it has no way to say 'these two values are paired, for the same instance.' .expand_kwargs() takes one list of dicts instead, so several arguments can vary together per mapped instance, which is what you need the moment two inputs are genuinely correlated, like a city and its own order-volume floor. They're not just two spellings of the same check, either: if you accidentally fix an argument with .partial() that a .expand() call also maps, Airflow catches that as a parse-time error immediately. The identical mistake with .expand_kwargs() parses clean, because that duplicate-key check only runs when a mapped instance is actually being unmapped at execution time — so a DAG using .expand_kwargs() needs a real run, not just a parse, to catch that specific class of bug."</em> The signal: not treating .expand_kwargs() as a drop-in replacement for .expand() with more arguments, and naming the parse-time-versus-run-time gap in where the same mistake gets caught.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>.expand_kwargs()</code> over a list of dicts and <code>.partial()</code> chained before it, on the same <code>city_sla_check</code> DAG Day 69 built. It does not cover <code>map_index_template</code> (naming mapped instances something more readable than a bare integer), <code>.expand_kwargs()</code> given an <code>XComArg</code> directly from an upstream task rather than the list this lesson used (the type signature allows it; today's build didn't need the extra indirection), or <code>max_active_tis_per_dag</code>-style concurrency limits — all three still real, bounded depth left open for if this project's own mapped DAGs grow large enough to need them. No live Postgres or Airflow metadata database was reachable this sandbox round (the standing <code>airflow db migrate</code> approval gate, unavailable again), so the actual four-instance run-time fan-out with two paired arguments rests on Airflow's documented behavior and this round's own <code>DagBag</code>-level parse confirmation, not a live <code>airflow dags test</code> run.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by reading the installed apache-airflow==3.3.1 package's own expand_kwargs() method directly: it accepts exactly one positional argument, either an XComArg or a Sequence of mappings (dicts), and raises TypeError immediately for anything else. Each dict in that one list supplies every keyword argument for one mapped instance together, which is exactly the shape needed when two arguments (city and min_orders) must vary together, paired per instance, rather than independently.">
+    <p class="stem">What does <code>.expand_kwargs()</code> take as its argument, and why does that fit pairing <code>city</code> with its own <code>min_orders</code> value?</p>
+    <button class="opt" data-ok>one list of dicts, each dict key becoming one argument</button>
+    <button class="opt">one list per argument, exactly like plain old <code>.expand()</code> takes</button>
+    <button class="opt">a single dict shared equally across every mapped task instance</button>
+  </div>
+  <div class="q" data-why="Confirmed this round with a real DagBag parse: check.partial(city='fixed').expand_kwargs(list_configs()), where list_configs()'s own dicts also set city, parsed with zero error. Reading mappedoperator.py's source showed why -- .expand() calls prevent_duplicates() against partial_kwargs immediately at parse time, but .expand_kwargs() only runs that same check later, inside _get_unmap_kwargs(), at actual task-execution time, so the identical mistake surfaces only on a real run, not a parse.">
+    <p class="stem">If the same keyword argument is set by both <code>.partial()</code> and the dicts passed to <code>.expand_kwargs()</code>, when does Airflow actually catch that mistake?</p>
+    <button class="opt" data-ok>only at real task-execution time, well after the file parses</button>
+    <button class="opt">immediately, the exact same parse-time error that <code>.expand()</code> always raises</button>
+    <button class="opt">never at all; Airflow just silently merges the two values</button>
+  </div>
+  <div class="q" data-why="Confirmed this round by reading the installed OperatorPartial class directly: its own docstring calls it an intermediate state that only exists between DAG-parsing and a later .expand()/.expand_kwargs() call, and its __del__ method fires a real UserWarning reading 'Task ... was never mapped!' if that chain is left incomplete -- a bare .partial() call with nothing chained onto it builds no mapped task at all.">
+    <p class="stem">What happens if <code>.partial(threshold_minutes=45)</code> is called on a task but no <code>.expand()</code> or <code>.expand_kwargs()</code> ever follows it?</p>
+    <button class="opt" data-ok>no mapped task is built; Airflow warns it was never mapped</button>
+    <button class="opt">Airflow runs the task exactly once, using only the partial value</button>
+    <button class="opt">the whole DAG fails to parse with an immediate hard error</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/dynamic-task-mapping.html">Dynamic Task Mapping</a> doc, Day 69's citation, reused here for the sections after the one Day 69 stayed inside — <code>expand_kwargs</code> and <code>partial</code>. Not fetched live this round (no working <code>WebFetch</code> tool, the same recurring gap Days 17, 23, 26, 31, 34, 35, 45, 54, 56 and 69 each hit); today's behavioral claims instead came from reading the installed <code>apache-airflow==3.3.1</code> package's own <code>expand_kwargs()</code> method, <code>OperatorPartial</code> class and <code>prevent_duplicates()</code>/<code>_get_unmap_kwargs()</code> functions directly, confirmed live against a real <code>DagBag</code> parse. Confirm exact wording and <code>map_index_template</code>'s own syntax against the live page before relying on it further.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 71.<br>
+<strong>Next up:</strong> three follow-ups named and left open this round: <code>map_index_template</code>, an <code>XComArg</code> passed directly to <code>.expand_kwargs()</code> rather than through a plain list, and the still-unresolved <code>airflow db migrate</code> approval gate (now thirty-seven rounds, 35-71) blocking every live <code>airflow dags test</code> confirmation this course has wanted since Day 35. With today's round, Airflow has had the most recent fresh-gap attention (closing both of Day 69's own named TODOs); a future round's gap-scan should weigh dbt or Kafka next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why <code>.expand_kwargs()</code>'s duplicate-key check fires later than <code>.expand()</code>'s, or what <code>map_index_template</code> would actually rename? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

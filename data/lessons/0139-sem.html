@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 139 · Series.sem(): the std()-derived ratio, and the constant-column contrast with skew()/kurt()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 139 · ~20 min · 25 Nov 2026</p>
+<h1>Series.sem(): the std()-derived ratio, and the constant-column contrast with skew()/kurt()</h1>
+<p class="byline">Lesson 138's own scope line named <code>.sem()</code> as the next nearest open statistics gap but left it for a future round's own fresh scan to confirm still open, per this course's "fresh scan each round" convention. Today's own fresh scan re-confirmed it directly: grepped every lesson body and every glossary row case-insensitively for <code>.sem(</code> and <code>np.sem(</code> — the only hit anywhere was Lesson 138's own prose naming it as a future gap, never an actual call; zero hits for the real method on either side. No new <code>lesson_completed</code>/quiz/kata row has ever been recorded for this course beyond the Lesson 1 baseline (routine <code>lesson_generated</code> rows only), so there is still no reported weak spot to size against — this round continues the established steady pace and closes exactly the gap Lesson 138 itself named, same as every round in this run of statistics lessons.</p>
+
+<h2>1 · sem() is just std() divided by the square root of the count</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5) on the same 8-value Series Lesson 137 used:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="kw">2</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>, <span class="kw">9</span>])
+
+s.sem()                        <span class="cm"># 0.7559289460184544</span>
+s.std() / np.sqrt(<span class="kw">len</span>(s))      <span class="cm"># 0.7559289460184544  -- identical, confirmed directly</span></code></pre>
+<p><dfn data-en="standard error of the mean -- a statistic estimating how much a *sample mean* itself would vary if you drew many different samples of the same size; confirmed directly to equal Series.std() divided by the square root of the non-null count, so it inherits std()'s own ddof default rather than introducing a new formula of its own" data-vn="giữ nguyên 'sem()' (standard error of the mean, sai số chuẩn của giá trị trung bình) — ước lượng ĐỘ DAO ĐỘNG của chính giá trị trung bình (mean) nếu lấy mẫu nhiều lần khác nhau cùng cỡ; xác nhận trực tiếp bằng đúng Series.std() chia cho căn bậc hai của số lượng giá trị hợp lệ (non-null) -- nên nó KẾ THỪA mặc định ddof của std() luôn, không phải công thức riêng">Series.sem()</dfn> is not an independent formula — it is confirmed directly to be exactly <code>.std()</code>'s own result divided by the square root of the count, the textbook standard-error-of-the-mean relationship, with no separate implementation or separate default to memorize. Because it is built directly on <code>.std()</code>, it inherits Lesson 137's own <code>ddof=1</code> (sample) default rather than introducing a new one: <code>s.sem(ddof=0)</code> matches <code>s.std(ddof=0) / np.sqrt(len(s))</code> exactly, confirmed directly, the same split Lesson 137 already named.</p>
+
+<h2>2 · Unlike skew()/kurt(), NaN rows are dropped from BOTH the numerator and the denominator</h2>
+<p>Confirmed directly, adding one <code>NaN</code> to the same 8 values changes nothing:</p>
+<pre><code>s_with_na = pd.Series([<span class="kw">2</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>, <span class="kw">9</span>, np.nan])
+
+s_with_na.sem()                                   <span class="cm"># 0.7559289460184544  -- identical to Section 1's 8-value result</span>
+s_with_na.std() / np.sqrt(s_with_na.count())      <span class="cm"># 0.7559289460184544  -- .count() excludes NaN too, confirmed directly</span></code></pre>
+<p>Both halves of the ratio drop the <code>NaN</code> consistently — <code>.std()</code> already ignores it when computing the spread, and dividing by <code>.count()</code> (not <code>len()</code>) means the denominator shrinks to match. There is no silent double-counting trap here; the one genuine trap is Section 3's row-count minimum.</p>
+
+<div class="callout"><strong>Confirmed directly, the constant-column case flips the pattern Lesson 138 established:</strong> a constant column (every value identical) makes <code>.skew()</code> and <code>.kurt()</code> both return <code>NaN</code>, since their formulas divide <em>by a power of</em> the standard deviation — zero in the denominator. <code>.sem()</code> instead returns a real number, <code>0.0</code>, confirmed directly on a 10-value constant Series — its formula <em>multiplies by</em> the standard deviation in the numerator, so a zero standard deviation produces a real zero, not a division-by-zero <code>NaN</code>. Three methods in the same statistics family, three different constant-column behaviors — <code>.std()</code>/<code>.var()</code> also return a real <code>0.0</code> on a constant column, matching <code>.sem()</code> here, not <code>.skew()</code>/<code>.kurt()</code>.</div>
+
+<h2>3 · sem()'s own minimum row count is lower than skew()'s or kurt()'s</h2>
+<p>Confirmed directly, looping the non-null count from 0 to 3:</p>
+<pre><code><span class="kw">for</span> n <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">4</span>):
+    pd.Series(<span class="kw">range</span>(n), dtype=<span class="kw">float</span>).sem()
+<span class="cm"># n=0 -> NaN   (no data at all)</span>
+<span class="cm"># n=1 -> NaN   (ddof=1 divides std's own denominator by zero, same Lesson 137 trap)</span>
+<span class="cm"># n=2 -> 0.5                 -- first real number</span>
+<span class="cm"># n=3 -> 0.5773502691896258</span></code></pre>
+<p>A single-value Series's <code>.sem()</code> is <code>NaN</code> for the identical reason Lesson 137 confirmed for <code>.std()</code> itself — <code>ddof=1</code> divides by <code>count - 1 = 0</code> before <code>.sem()</code> ever gets to divide again. But two values are already enough for a real <code>.sem()</code> result, confirmed directly — a lower minimum than Lesson 138's <code>.skew()</code> (needs 3) or <code>.kurt()</code> (needs 4), because <code>.sem()</code> never needs a third or fourth central moment, only the plain standard deviation Lesson 137 already covers.</p>
+
+<h2>4 · No np.sem() — pandas-only, same as skew() and kurt()</h2>
+<p>Confirmed directly:</p>
+<pre><code><span class="kw">hasattr</span>(np, <span class="str">"sem"</span>)  <span class="cm"># False</span></code></pre>
+<p>Same pattern as Lesson 138's <code>.skew()</code>/<code>.kurt()</code>, not Lesson 137's <code>.std()</code>/<code>.var()</code>: NumPy has no <code>sem</code> function of its own to disagree with, so there is no cross-library default-mismatch trap to watch for here — the only two confirmed traps are the single-row <code>NaN</code> (Section 3, inherited straight from <code>.std()</code>) and the constant-column <code>0.0</code> that looks surprising only if you expect it to echo <code>.skew()</code>/<code>.kurt()</code>'s own <code>NaN</code> (the callout above). <code>DataFrame.sem()</code> runs column-by-column exactly like the rest of this statistics family.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between std() and sem(), and when would you report sem() instead?"</strong> A strong answer, out loud: <em>"std() measures how spread out the individual values in a sample are. sem() — standard error of the mean — measures how much the sample mean itself would wander if I drew many different samples of that same size; it's exactly std() divided by the square root of the count, so it shrinks as the sample gets bigger even though std() itself doesn't. I'd report sem() instead of std() when the question is about how trustworthy an average is — like a confidence interval around a mean — rather than how spread out the raw data is. One gotcha I'd flag: a constant column gives sem() a real 0.0, not NaN, which is the opposite of what skew() and kurt() do on the same constant column, since sem()'s formula multiplies by the standard deviation instead of dividing by it."</em> The signal: naming the exact std()/sqrt(count) relationship unprompted, and contrasting the constant-column behavior against skew()/kurt() rather than assuming it behaves the same way.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.sem()</code>'s confirmed <code>std() / sqrt(count)</code> relationship, its confirmed inheritance of <code>.std()</code>'s own <code>ddof=1</code> default (Lesson 137), confirmed consistent <code>NaN</code>-dropping across both halves of the ratio, the confirmed single-row <code>NaN</code> trap (same root cause as Lesson 137), the confirmed constant-column <code>0.0</code> result (contrasted against Lesson 138's <code>.skew()</code>/<code>.kurt()</code> <code>NaN</code> on the same input), and the confirmed absence of any <code>np.sem()</code> counterpart. It does not cover confidence-interval construction from <code>sem()</code>, the Central Limit Theorem's own derivation, or <code>scipy.stats.sem()</code>'s alternate spellings, out of scope per <code>MISSION.md</code>'s "no deep statistics" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/139_sem.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/139_sem.py</code></pre>
+<p>Exercise 1 confirms the Section 1 relationship: <code>.sem()</code> equals <code>.std() / sqrt(count)</code> exactly on the same Series. Exercise 2 confirms the Section 2/3/4 contrasts: a one-element Series's <code>.sem()</code> is <code>NaN</code> (the inherited single-row trap), while a constant 10-value Series's <code>.sem()</code> is a real <code>0.0</code> — the opposite of Lesson 138's <code>.skew()</code>/<code>.kurt()</code> on the identical kind of input.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: Series.sem() equals Series.std() divided by the square root of the non-null count, exactly, on the same data. It is not an independent formula -- it is built directly on top of std(), inheriting std()'s own ddof default rather than introducing a separate one.">
+    <p class="stem">What does <code>Series.sem()</code> compute, confirmed directly against <code>.std()</code> on the same data?</p>
+    <button class="opt" data-ok>std() divided by the square root of count</button>
+    <button class="opt">std() multiplied by the square root of count</button>
+    <button class="opt">a fully independent formula, unrelated to any std</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a constant column (every value identical) makes Series.skew() and Series.kurt() both return NaN, since their formulas divide by a power of the standard deviation (zero here). Series.sem() instead returns a real 0.0 on the identical constant column, since its formula multiplies by the standard deviation in the numerator rather than dividing by it.">
+    <p class="stem">On a constant column (every value identical), what does <code>.sem()</code> return, confirmed directly, compared to <code>.skew()</code>/<code>.kurt()</code> on that same column?</p>
+    <button class="opt" data-ok>sem() is 0.0; skew()/kurt() both return NaN instead</button>
+    <button class="opt">all three return NaN, with no exceptions anywhere</button>
+    <button class="opt">all three return 0.0, matching each other exactly</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: hasattr(np, 'sem') is False. Unlike Lesson 137's std()/var() (which exist on both pandas and NumPy with different ddof defaults), sem() has no NumPy-side counterpart at all -- the same pattern Lesson 138 already confirmed for skew() and kurt().">
+    <p class="stem">Does NumPy provide its own <code>np.sem()</code> function, confirmed directly?</p>
+    <button class="opt" data-ok>No -- it is pandas-only, like skew() and kurt()</button>
+    <button class="opt">Yes -- but with a different default, unlike std()</button>
+    <button class="opt">Yes -- with the exact same default as pandas</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.sem.html"><code>Series.sem()</code></a> API reference (per <code>RESOURCES.md</code>'s pandas grouping, ~5 min) — the page documents the <code>ddof</code> parameter it inherits directly; the exact <code>std()/sqrt(count)</code> relationship, the constant-column contrast with <code>.skew()</code>/<code>.kurt()</code>, and the minimum-row-count thresholds are confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>Series.sem()</code> is new today, added right after Lesson 138's <code>Series.kurt()</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed every statistics-method candidate named across Lessons 137-139 (<code>.std()</code>/<code>.var()</code>/<code>ddof</code>, <code>.skew()</code>/<code>.kurt()</code>, <code>.sem()</code>) — a future round's own fresh scan should start clean, with nothing pre-committed, per this course's standing convention, rather than assume a successor topic here.<br><br>
+💬 Anything unclear — the std()/sqrt(count) relationship, the constant-column contrast, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

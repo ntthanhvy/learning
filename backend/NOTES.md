@@ -12656,3 +12656,131 @@ deferred many rounds running on fetched-page-truncation grounds; Lesson
 Core angle; Lesson 35's upsert/ON CONFLICT, still confirmed the same
 way; and FluentValidation and Polly/.NET resilience libraries, both
 still deliberately out of scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-25 — Lesson 143: Load shedding, now in C# too (ConcurrencyLimiter)
+
+Headless 06:00 automation run. `bin/query-progress` (the read-only
+`course_progress` dump) was attempted directly this round per this
+run's own orchestrator instructions — it required interactive approval
+with no user present, same outcome every direct `psql`-backed call has
+hit in prior rounds, so the call was not forced through. Fell back to
+the git-log idempotency check instead: `git log -1 --format=%cd
+--date=short -- backend/lessons/0142-server-sent-events-aspnetcore-
+typedresults-sseitem.html` returned `2026-11-24`, not today, and no
+`lessons/0143-*.html` file existed on disk before this round either —
+safe to proceed with day 143 without a DB confirmation. `bin/record-
+progress` itself was not tested until the end of this round per the
+standard "try once at the end" instruction; its own outcome is in the
+final report rather than here.
+
+Topic picked: Lesson 142's own closing note named two standing
+candidates — multi-tenant data models (Lesson 78, EF Core's
+`HasQueryFilter`) and load shedding (Lesson 71, via `System.Threading.
+RateLimiting`'s `ConcurrencyLimiter`). Picked load shedding: it is a
+direct single-mechanism port the same way Lessons 137-142 have all
+been (one Go lesson, one new-to-C#-angle API), whereas the
+multi-tenant/`HasQueryFilter` angle reads more like an EF Core deep
+dive than a distinct "now in C# too" port. Confirmed before writing
+that this is genuinely new ground: Lesson 118 (rate limiting) already
+cites `System.Threading.RateLimiting` and its token-bucket limiter, but
+neither `ConcurrencyLimiter` nor `AddConcurrencyLimiter` appeared
+anywhere in `backend/lessons/` or `glossary.html` via `grep` before this
+round — confirmed empty, not assumed.
+
+Verification: two `WebFetch` calls against `learn.microsoft.com`. (1)
+`aspnet/core/performance/rate-limit` (the same page Lesson 118 already
+cited) confirmed its "Concurrency limiter" section verbatim — "The
+concurrency limiter limits the number of concurrent requests. Each
+request reduces the concurrency limit by one. When a request completes,
+the limit is increased by one. Unlike the other requests limiters that
+limit the total number of requests for a specified period, the
+concurrency limiter limits only the number of concurrent requests and
+doesn't cap the number of requests in a time period" — plus the worked
+`AddConcurrencyLimiter(policyName, options => { PermitLimit;
+QueueProcessingOrder; QueueLimit })` example reused in this lesson's
+section 2, and, under the chained-limiters section, the note that
+limiters "that can't estimate when permits are available, such as
+ConcurrencyLimiter, don't provide RetryAfter metadata" — the claim
+section 5 and Q4 both rest on. (2) `dotnet/api/system.threading.
+ratelimiting.concurrencylimiter` confirmed the class's one constructor
+(`ConcurrencyLimiter(ConcurrencyLimiterOptions)`), its `IdleDuration`
+property, and that it inherits `AcquireAsync`/`AttemptAcquire`/
+`GetStatistics` from the abstract `RateLimiter` base rather than
+redeclaring them. `bin/query-progress` was the only command this round
+that hit an approval gate; no Go/`dotnet` tooling was needed since this
+lesson's only code block is C#, hand-checked against the two fetched
+pages above rather than compiled (no `dotnet` scratch project set up
+this round — the snippet is a direct copy of the docs' own
+`AddConcurrencyLimiter` shape with renamed values, not novel logic).
+
+Other verification performed via a throwaway `node` script in a scratch
+directory under the repo root (`_scratch_lesson143/`, not `/tmp`, same
+constraint as every round since Lesson 133; deleted after): (1) a quiz
+word-count check per `<div class="q">` block — first draft landed
+uneven (Q1 9/8/9/8, Q2 10/9/9/10, Q3 9/9/8/9, Q4 11/10/10/10 across
+several intermediate option rewrites), converged after a handful of
+rewrite-and-recount passes to exactly 9/9/9/9 (Q1), 10/10/10/10 (Q2),
+9/9/9/9 (Q3), 11/11/11/11 (Q4), exactly one `data-ok` and four options
+per question confirmed the same way; (2) an HTML tag-balance check
+across div/p/code/pre/h1/h2/em/strong/a/table/tr/td/th/thead/tbody/dfn/
+button/script — clean (div 7/7, p 18/18, code 59/59, pre 1/1, h1 1/1,
+h2 8/8, em 4/4, strong 4/4, a 3/3, table 1/1, tr 5/5, td 8/8, th 7/7,
+thead 1/1, tbody 1/1, dfn 1/1, button 16/16, script 3/3); the lesson
+has only one `dfn` term (`ConcurrencyLimiter` itself — load shedding as
+a concept was already a Lesson 71 term and deliberately reused, not
+redefined, same precedent Lessons 141/142 used for their own reused
+terms), confirmed to carry both `data-en=` and `data-vn=`; (3) a brace/
+paren/bracket balance check on the lesson's one `<pre><code>` block
+after stripping tags and unescaping entities — balanced (2/2 braces,
+7/7 parens, 0/0 brackets); (4) a raw-unescaped-`&` scan — zero hits;
+(5) a duplicate-term scan on `glossary.html` before adding the new row
+— zero collisions for `ConcurrencyLimiter`/`AddConcurrencyLimiter`; a
+`<tr>` count before/after the one-row addition — 430 to 431, confirming
+exactly one row added, plus a second duplicate-term scan afterward —
+zero duplicates; (6) `node --check` against `nav.js` (both before and
+after its edit), `gloss.js`, `quiz.js` — all clean; (7) a basic HTML
+well-formedness check (one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+three script tags in gloss/quiz/nav order) — clean.
+
+Registered Lesson 143 in `nav.js` (date 2026-11-25, today's actual
+generation date) right after `n: 142`. Day number used 143, matching
+this file's own day-equals-lesson-number convention, no deviation
+found. `git status --short backend/` confirmed the round's diff is
+scoped to exactly `backend/assets/nav.js`, `backend/reference/
+glossary.html`, this `backend/NOTES.md` entry, and the new `backend/
+lessons/0143-load-shedding-aspnetcore-concurrencylimiter.html`. No new
+`RESOURCES.md` line added — the cited page is the same `learn.
+microsoft.com` rate-limiting doc Lesson 118 already uses, cited inline
+in this lesson's own "Go deeper" section instead, consistent with every
+recent C#-port round's precedent. No new `learning-records/` file
+added — the topic came from Lesson 142's own standing-candidate note,
+not a new observation about the learner; `learning-records/` still has
+no entry newer than Lesson 3, so this round was paced as a normal
+sequential step per the same convention every recent round has used,
+including the two still-unconfirmed standing items (Lesson 25's
+concurrency-vocabulary retrieval quiz, Lesson 102's SignalR/WebSocket
+quiz) which remain open but untouched this round, same as prior rounds.
+`bin/record-progress backend lesson_generated --day 143 --lesson
+0143-load-shedding-aspnetcore-concurrencylimiter.html --detail
+'{"by":"launchd"}'` attempted once at the end per this run's own
+instruction; outcome noted in the run's final report.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: multi-tenant data models (Lesson 78, via EF Core's
+`HasQueryFilter` global query filters) — surfaced again this round,
+still unpicked, now two rounds running; `RateLimiter.CreateChained`
+combining a token bucket and a concurrency limiter on one named policy
+(named in the fetched rate-limit page's own "Chain limiters in a named
+policy" section, not covered in this lesson's scope line); the rate-
+limiting metrics the middleware emits (also named in the fetched page,
+out of scope); constructing a `ConcurrencyLimiter` directly rather than
+through `AddConcurrencyLimiter` (the class's own one-argument
+constructor, confirmed via the second fetched page, never shown in this
+lesson's code); and HATEOAS (Lesson 97), now checked twice (Lessons 141
+and 142) and rejected both times on a thin-C#-angle basis — still worth
+retiring as a standing candidate unless picked deliberately as a
+cold-start C# feature rather than a direct port. Go's `select`-statement
+arbitration rules, Lesson 49's dead-letter queues, and Lesson 35's
+upsert/ON CONFLICT remain deferred for the same reasons prior rounds
+have recorded; FluentValidation and Polly/.NET resilience libraries
+remain deliberately out of scope per MISSION.md's "concepts first" rule.

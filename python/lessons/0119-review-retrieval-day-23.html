@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 119 · Review day 23: retrieval across Days 116-118</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 119 · ~20 min · 25 Nov 2026</p>
+<h1>Review day 23: retrieval across Days 116-118</h1>
+<p class="byline">Day 115 (review day 22) covered Days 112, 113, and 114. Since then, three fresh days ran in a row — Day 116 (<code>urllib.parse</code>), Day 117 (<code>unicodedata</code>), Day 118 (<code>ipaddress</code>) — and Day 118's own closing notes named this exact span as the next review day. This is that review — a twenty-third retrieval day, covering exactly Days 116, 117, and 118.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 118 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth, respectively); <code>mimetypes</code>, <code>binascii</code>, <code>textwrap</code>, <code>stat</code>, <code>tracemalloc</code>, and <code>platform</code> remain genuine zero-hit candidates flagged by Day 118's own closing note. No stronger untouched fresh gap turned up this round, and the course's own settled cadence (three fresh days, then a review day: Days 112-114 → review 115, Days 116-118 → review here) says today pays down retrieval instead of forcing a fourth fresh day. Also worth noting: no newer signal appeared in <code>learning-records/</code> or a reachable DB beyond the Day 1 baseline, so this round follows the course's own settled cadence rather than a specific weak-spot pick — same situation Days 111/115 were already in.</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 116 &mdash; <code>urllib.parse</code>.</strong> After <code>parsed = urlparse(url)</code>, what type of value is <code>parsed.query</code>, and why does <code>parse_qs()</code> give every key a list of values even when a key appears only once in the URL?</p>
+<div class="callout">Fold-out answer: <code>parsed.query</code> is still one raw, unsplit string — <code>urlparse()</code> only breaks a URL into its named top-level pieces (scheme, netloc, path, query), it never parses the query string's own key/value pairs. That is exactly <code>parse_qs()</code>'s job, run as a second step on <code>.query</code>'s output. <code>parse_qs()</code> always maps every key to a <strong>list</strong> of values, even one appearing exactly once, because a query string may legally repeat the same key more than once (<code>?tag=py&amp;tag=web</code> is valid and common) — confirmed live, <code>qs["page"]</code> came back as <code>['2']</code>, a one-item list, never the bare string <code>'2'</code>.</div>
+
+<p><strong>Day 117 &mdash; <code>unicodedata</code>.</strong> Two strings print as identical text on screen, but <code>s1 == s2</code> is <code>False</code>. What's the most likely cause, and what does <code>unicodedata.normalize("NFC", s)</code> actually do about it?</p>
+<div class="callout">Fold-out answer: the most likely cause is that the same visible letter was built from a different number of underlying code points — one precomposed code point on one side (<code>é</code> as <code>U+00E9</code>), a base letter plus a separate combining mark on the other (<code>e</code> + <code>U+0301</code>). Both render identically, but <code>==</code> compares the actual code-point sequence, not the printed appearance — confirmed live, <code>len(s1)</code> was <code>4</code>, <code>len(s2)</code> was <code>5</code>, and <code>s1 == s2</code> was <code>False</code>. <code>normalize("NFC", s)</code> rewrites a string into one standard shape (composing combining marks into a single code point wherever one exists), so two strings that only differed in how a character was built become identical once both sides are normalized the same way — confirmed live, both sides equal after normalizing.</div>
+
+<p><strong>Day 118 &mdash; <code>ipaddress</code>.</strong> Why does a hand-written regex often accept an invalid IP address like <code>"192.168.1.999"</code>, and what does <code>ipaddress.ip_network()</code> give you that a plain string holding <code>"192.168.1.0/24"</code> does not?</p>
+<div class="callout">Fold-out answer: a regex built to "validate an IP" typically only checks that each piece has the right digit <em>shape</em> (one to three digits, separated by dots) — it misses that a group like <code>999</code> is out of the valid <code>0</code>&ndash;<code>255</code> range unless the pattern explicitly encodes that. <code>ipaddress.ip_address()</code> does real parsing instead of a pattern match, confirmed live raising <code>ValueError</code> on <code>"192.168.1.999"</code>. <code>ipaddress.ip_network("192.168.1.0/24")</code> returns an object supporting Python's own <code>in</code> operator for membership — confirmed live, <code>ip_address("192.168.1.10") in net</code> is <code>True</code> and <code>ip_address("192.168.2.1") in net</code> is <code>False</code>, with no manual octet math written by hand; a plain string gives you none of that, only text to split apart yourself.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 116-118's URL parsing, Unicode normalization, and IP address/network objects, none of which has a <code>DataFrame</code> or <code>ndarray</code> equivalent. Each original lesson's own boundary callout (URL construction staying a stdlib/web job before <code>pd.read_csv()</code> ever sees a response body; normalization being a per-string cleaning step done before text reaches a DataFrame; IP range checks needing a per-row function applied by hand) is recalled by name only, not re-demonstrated.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for moving a URL between one string and its named pieces in both directions, a tool for recognizing that two identical-looking strings can carry a different code-point sequence underneath, and a tool for treating an IP address and a network range as real objects instead of risky hand-parsed text. Three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are "a plain string looks like enough, until it isn't" lessons — Day 116 showed a query string needs a second parsing step beyond the first split, Day 117 showed two visually identical strings can fail <code>==</code>, and Day 118 showed a string holding an IP address gives you no validation or range-membership check at all. Day 117 also pulled a straight line back to Day 1 (string identity and <code>==</code> comparing actual content, not appearance) and Day 31 (why <code>set</code>/<code>dict</code> lookups inherit the same blind spot via <code>__eq__</code>), and Day 118 pulled one back to Day 38 (<code>re</code>, the tool people reach for first to validate an IP, and get wrong at the range edges) and Day 116 itself (a <code>netloc</code> is sometimes a bare IP, never validated there). None of the three needed a single new concept from outside what Days 1, 31, 38, and 116 had already set up — only a new stdlib tool applied to an old, familiar problem.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. The standing fresh-gap candidates remain on record from Day 118's own notes &mdash; <code>calendar</code> and <code>socket</code> (thin content and scope-depth), plus <code>mimetypes</code>, <code>binascii</code>, <code>textwrap</code>, <code>stat</code>, <code>tracemalloc</code>, and <code>platform</code> as fresh zero-hit candidates &mdash; and no other genuinely untouched stdlib corner turned up this round. Worth a full gap-scan from scratch next round rather than assuming this is exhaustive.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/119_review_retrieval_day_23.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/119_review_retrieval_day_23.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 116, 117, and 118. Exercises: round-tripping a dict of query parameters through <code>urlencode()</code> and back through <code>parse_qs()</code> to confirm they're inverses, normalizing two differently-built-but-identical-looking strings to the same form so a set-membership check that would otherwise miss finds them, and separating a list of candidate IP/CIDR strings into genuinely valid network objects versus ones that fail to parse.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="parsed.query from urlparse() is still one raw, unsplit string -- urlparse() only breaks a URL into its named top-level pieces (scheme, netloc, path, query). parse_qs() is the separate next step that parses that raw query string into individual key/value pairs, confirmed live across both lessons.">
+    <p class="stem">After <code>parsed = urlparse(url)</code>, what type of value is <code>parsed.query</code>?</p>
+    <button class="opt" data-ok>one raw string, not yet split apart into individual key/value pairs</button>
+    <button class="opt">a ready-made dict that maps each query key to its value</button>
+    <button class="opt">a list holding every path segment found inside the given URL</button>
+  </div>
+  <div class="q" data-why="s1 and s2 render identically because Unicode allows the same visible letter to be built either as one precomposed code point or as a base character followed by a separate combining mark -- confirmed live, len(s1) was 4 and len(s2) was 5, and s1 == s2 was False, because == compares the actual code-point sequence, not the printed appearance.">
+    <p class="stem">Two strings print as identical text on screen, but <code>s1 == s2</code> is <code>False</code>. What's the most likely cause?</p>
+    <button class="opt" data-ok>one letter was built from a different number of code points</button>
+    <button class="opt">the string equality operator never actually works right in this language</button>
+    <button class="opt">one of the values is secretly still a raw bytes type</button>
+  </div>
+  <div class="q" data-why="ipaddress.ip_address() does real parsing, not a pattern match -- confirmed live, it raised ValueError on '192.168.1.999' because 999 is out of range for one group, a mistake an easy-to-write regex can accept by only checking digit shape, not digit value.">
+    <p class="stem">Why does a hand-written regex often accept an invalid IP address like <code>"192.168.1.999"</code>?</p>
+    <button class="opt" data-ok>it checks digit shape only, missing that one out-of-range group</button>
+    <button class="opt">regular expressions cannot ever match any digit character at all</button>
+    <button class="opt">Python strings cannot legally contain the digit nine written twice</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/urllib.parse.html"><code>urllib.parse</code></a> for Day 116, <a href="https://docs.python.org/3/library/unicodedata.html"><code>unicodedata</code></a> for Day 117, and <a href="https://docs.python.org/3/library/ipaddress.html"><code>ipaddress</code></a> for Day 118), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day116">116</a>, <a href="../reference/glossary.html#day117">117</a>, <a href="../reference/glossary.html#day118">118</a>).<br>
+Standing fresh-gap candidates remain on record &mdash; <code>calendar</code> and <code>socket</code>, plus <code>mimetypes</code>, <code>binascii</code>, <code>textwrap</code>, <code>stat</code>, <code>tracemalloc</code>, and <code>platform</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

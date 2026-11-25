@@ -292,6 +292,8 @@
       file: "lessons/0141-feature-flags-aspnetcore-featuremanagement-featuregate.html" },
     { n: 142, date: "2026-11-24", title: "Server-Sent Events, now in C# too",
       file: "lessons/0142-server-sent-events-aspnetcore-typedresults-sseitem.html" },
+    { n: 143, date: "2026-11-25", title: "Load shedding, now in C# too",
+      file: "lessons/0143-load-shedding-aspnetcore-concurrencylimiter.html" },
   ];
 
   const REFS = [

@@ -284,6 +284,8 @@
       file: "lessons/0137-std-var-and-ddof.html" },
     { n: 138, date: "2026-11-24", title: "Series.skew() and .kurt(): shape statistics, and the min-count NaN trap",
       file: "lessons/0138-skew-and-kurt.html" },
+    { n: 139, date: "2026-11-25", title: "Series.sem(): the std()-derived ratio, and the constant-column contrast with skew()/kurt()",
+      file: "lessons/0139-sem.html" },
   ];
 
   const REFS = [

@@ -244,6 +244,8 @@
       file: "lessons/0117-unicodedata-normalization.html" },
     { n: 118, date: "2026-11-24", title: "ipaddress: IP addresses as real objects, not strings",
       file: "lessons/0118-ipaddress.html" },
+    { n: 119, date: "2026-11-25", title: "Review day 23: retrieval across Days 116-118",
+      file: "lessons/0119-review-retrieval-day-23.html" },
   ];
 
   const REFS = [

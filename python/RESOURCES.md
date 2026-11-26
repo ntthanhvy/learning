@@ -115,6 +115,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 117 — `unicodedata.normalize()` for rewriting a string into one standard Unicode shape ("NFC"/"NFD") so two strings that only differ in how a character was built become equal under `==` and under set/dict membership, and `unicodedata.name()`/`.category()` for identifying a mystery character and classifying a character's kind.
 - [Docs: `ipaddress`](https://docs.python.org/3/library/ipaddress.html)
   Use for: Day 118 — `ip_address()` for parsing and validating a single IPv4/IPv6 address (and why a hand-written regex gets range checks wrong), `ip_network()` for parsing a CIDR range and checking membership with `in`, and the `strict=False` escape hatch for building a network from an address that isn't the range's exact start.
+- [Docs: `mimetypes`](https://docs.python.org/3/library/mimetypes.html)
+  Use for: Day 120 — `guess_type()` for guessing a MIME type and compression encoding from a filename's extension alone (never from the file's real bytes), `guess_extension()` as its reverse direction, and `add_type()` for registering a project-specific extension the built-in table doesn't know.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

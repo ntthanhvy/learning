@@ -294,6 +294,8 @@
       file: "lessons/0142-server-sent-events-aspnetcore-typedresults-sseitem.html" },
     { n: 143, date: "2026-11-25", title: "Load shedding, now in C# too",
       file: "lessons/0143-load-shedding-aspnetcore-concurrencylimiter.html" },
+    { n: 144, date: "2026-11-26", title: "Multi-tenant data, now in C# too",
+      file: "lessons/0144-multi-tenant-efcore-hasqueryfilter.html" },
   ];
 
   const REFS = [

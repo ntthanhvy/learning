@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 120 · mimetypes: guessing a file's type from its name</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 120 · ~20 min · 26 Nov 2026</p>
+<h1><code>mimetypes</code>: guessing a file's type from its name</h1>
+<p class="byline">Day 116's <code>urllib.parse</code> pulled a <code>path</code> like <code>/report.csv</code> out of a URL as plain text — no step there said what <em>kind</em> of file that is. A web server answering an HTTP request, an email attaching a file, or an upload handler accepting a file all need to answer that question before they can do anything useful with the bytes: what <code>Content-Type</code> header goes with this filename? <code>mimetypes</code> is the standard-library module that answers it from the filename alone, no file contents required.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> ran first, per every prior fresh day's own discipline. <code>textwrap</code> looked like a zero-hit candidate on three separate prior rounds (Days 112, 118, 119) but turned out to be a false negative once checked directly — it's genuinely taught, as a one-paragraph aside on Day 55, with its own glossary row. <code>mimetypes</code> and <code>binascii</code> are the two that actually are zero-hit once <code>mimetypes\.</code>/<code>binascii\.</code> (not just the bare word) were grepped directly. <code>mimetypes</code> won over <code>binascii</code> for connecting straight to two already-taught lessons instead of standing alone: Day 116's <code>urllib.parse</code> path strings (never typed, never classified) and Day 6/66's file-handling lessons, where "what <code>Content-Type</code> does this file get" is a real, recurring question once a script starts serving or uploading files rather than just reading them locally. <code>calendar</code> and <code>socket</code> remain the two longest-standing ruled-out candidates (thin content and scope-depth respectively).</div>
+
+<h2>1 · <code>guess_type()</code>: a filename in, a MIME type out</h2>
+<p>A <dfn data-en="a MIME type is a short standardized string of the form major/minor (such as text/csv or image/jpeg) that labels what kind of content a file or HTTP body holds, used in the Content-Type header and by operating systems to pick a default program for a file" data-vn="giữ nguyên &quot;MIME type&quot; — chuỗi chuẩn hóa ngắn dạng major/minor (như text/csv, image/jpeg) để gán nhãn loại nội dung của 1 file hay HTTP body; dùng trong header Content-Type và để OS chọn chương trình mặc định mở file">MIME type</dfn> is the short, standardized string — <code>"text/csv"</code>, <code>"image/jpeg"</code> — that labels what kind of content something is. <code>mimetypes.guess_type()</code> reads a filename's extension and looks it up against a built-in table, with no need to open the file or inspect its actual bytes:</p>
+<pre><code><span class="kw">import</span> mimetypes
+
+<span class="kw">print</span>(mimetypes.guess_type(<span class="str">"report.csv"</span>))     <span class="cm"># confirmed live: ('text/csv', None)</span>
+<span class="kw">print</span>(mimetypes.guess_type(<span class="str">"photo.JPG"</span>))      <span class="cm"># confirmed live: ('image/jpeg', None)</span>
+<span class="kw">print</span>(mimetypes.guess_type(<span class="str">"noextension"</span>))   <span class="cm"># confirmed live: (None, None)</span></code></pre>
+<p><dfn data-en="mimetypes.guess_type(filename) returns a (type, encoding) tuple guessed from a filename's extension alone -- type is a MIME type string or None if the extension is unrecognized; the lookup is case-insensitive on the extension and never opens or reads the actual file" data-vn="giữ nguyên &quot;guess_type&quot; — trả về tuple (type, encoding) đoán từ phần mở rộng của filename; type là chuỗi MIME type hoặc None nếu extension không nhận ra; việc tra cứu không phân biệt hoa thường trên extension và không bao giờ mở hay đọc file thật">mimetypes.guess_type()</dfn> always returns a 2-item tuple, not just a type string — confirmed live, <code>"photo.JPG"</code> matched despite the uppercase extension, and an extension-less name returned <code>(None, None)</code> rather than raising. Nothing here opens the file; a <code>.csv</code> extension on an empty or even corrupted file still guesses <code>"text/csv"</code>, because the guess is purely about the name.</p>
+
+<h2>2 · The second tuple item: encoding, for compressed files</h2>
+<p>The tuple's second item answers a different question — is this file itself compressed, on top of its content type? Most files answer <code>None</code>, but a doubled extension like <code>.tar.gz</code> answers both parts at once:</p>
+<pre><code><span class="kw">print</span>(mimetypes.guess_type(<span class="str">"archive.tar.gz"</span>))
+<span class="cm"># confirmed live: ('application/x-tar', 'gzip')</span>
+<span class="kw">print</span>(mimetypes.guess_type(<span class="str">"notes.txt"</span>))
+<span class="cm"># confirmed live: ('text/plain', None)</span></code></pre>
+<p>For <code>"archive.tar.gz"</code>, the content underneath is a <code>tar</code> archive (<code>"application/x-tar"</code>) and it has been <code>gzip</code>-compressed on top — two separate, true facts about the same file, which is exactly why <code>guess_type()</code> returns them as two separate values instead of inventing a single combined MIME type for every compression format.</p>
+
+<h2>3 · <code>guess_extension()</code>: the reverse direction</h2>
+<p><code>guess_extension()</code> goes the other way — given a MIME type, what's a reasonable file extension for it? Useful when a script receives a type string (an HTTP response's <code>Content-Type</code> header, say) and needs to choose a filename to save under:</p>
+<pre><code><span class="kw">print</span>(mimetypes.guess_extension(<span class="str">"text/csv"</span>))     <span class="cm"># confirmed live: .csv</span>
+<span class="kw">print</span>(mimetypes.guess_extension(<span class="str">"image/jpeg"</span>))   <span class="cm"># confirmed live: .jpg</span></code></pre>
+<p><dfn data-en="mimetypes.guess_extension(mime_type) is the reverse of guess_type() -- given a MIME type string, it returns one reasonable file extension (with the leading dot) for it, or None if the type is unrecognized; some MIME types map to more than one valid extension, so this is a best single guess, not necessarily the only correct one" data-vn="giữ nguyên &quot;guess_extension&quot; — ngược hẳn với guess_type(): nhận 1 chuỗi MIME type, trả về 1 extension hợp lý (kèm dấu chấm) cho nó, hoặc None nếu type không nhận ra; vài MIME type map tới nhiều hơn 1 extension hợp lệ nên đây chỉ là 1 cái đoán tốt nhất, không chắc là duy nhất đúng">mimetypes.guess_extension()</dfn> picks <em>one</em> reasonable extension, not necessarily the only valid one — <code>"image/jpeg"</code> could just as legitimately be saved as <code>.jpeg</code>, but <code>.jpg</code> is what the built-in table returns by default. Treat it as a good default, not a guaranteed canonical answer.</p>
+
+<div class="callout"><strong>Extending the table — <code>add_type()</code>:</strong> the built-in table doesn't know every extension a project might invent. <code>mimetypes.add_type(mime_type, extension)</code> registers a new mapping for the rest of the running program — confirmed live, before registering <code>".myapp"</code>, <code>guess_type("thing.myapp")</code> returned <code>(None, None)</code>; after <code>mimetypes.add_type("application/x-myapp", ".myapp")</code>, the same call returned <code>('application/x-myapp', None)</code>. This only affects the current process's in-memory table, not any file on disk.</div>
+
+<h2>4 · It only ever looks at the name</h2>
+<p>This is the one trap worth naming directly: <code>guess_type()</code> is a name-based guess, not a content inspection. A file named <code>"invoice.pdf"</code> that is actually a renamed <code>.txt</code> file still guesses <code>"application/pdf"</code> — correctly reporting what the name claims, not what the bytes actually are. A full URL string works too, because <code>guess_type()</code> only looks at the trailing extension and ignores everything in front of it:</p>
+<pre><code><span class="kw">print</span>(mimetypes.guess_type(<span class="str">"https://example.com/path/report.CSV?x=1"</span>))
+<span class="cm"># confirmed live: ('text/csv', None)</span></code></pre>
+<p>For anything security-sensitive — deciding whether to trust an upload, for instance — the filename's claimed type is not proof of the actual content; that needs inspecting the real bytes (a signature/"magic number" check), which is outside this module's job entirely.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither has any notion of a MIME type — <code>pd.read_csv()</code> is told explicitly to read CSV by the function you call, not by asking <code>mimetypes</code> what a file's extension claims it is. Deciding *which* reader function to call based on an unknown file's extension is exactly the kind of small dispatch logic <code>mimetypes</code> is for, one level before any pandas call happens. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/120_mimetypes.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/120_mimetypes.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: guessing the MIME type for a list of filenames and separating recognized from unrecognized ones, reading a file's compression encoding alongside its type, and registering a new extension with <code>add_type()</code> and confirming the lookup picks it up afterward.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="mimetypes.guess_type() always returns a 2-item tuple (type, encoding) -- confirmed live, an unrecognized extension like 'noextension' returned (None, None) rather than raising an exception, and the function never opens or reads the file's actual bytes, only its name.">
+    <p class="stem">What does <code>mimetypes.guess_type("noextension")</code> return, confirmed live?</p>
+    <button class="opt" data-ok>the two-item tuple (None, None), with no exception raised</button>
+    <button class="opt">a FileNotFoundError, because the given file does not exist</button>
+    <button class="opt">the single plain string "unknown", with no tuple returned</button>
+  </div>
+  <div class="q" data-why="guess_type()'s second tuple item answers a separate question from the first -- whether the file itself is compressed. For 'archive.tar.gz', confirmed live, the result was ('application/x-tar', 'gzip'): the content is a tar archive, and it is additionally gzip-compressed on top, two true facts kept as two separate values.">
+    <p class="stem">For <code>"archive.tar.gz"</code>, why does <code>guess_type()</code> return <em>two</em> separate pieces of information?</p>
+    <button class="opt" data-ok>content type and compression are two separate true facts here</button>
+    <button class="opt">every call always duplicates the identical same string twice over</button>
+    <button class="opt">tar archives can never actually be compressed by any format</button>
+  </div>
+  <div class="q" data-why="guess_type() only ever reads the filename text, specifically its trailing extension -- it never opens the file or inspects real bytes. A renamed file (an actual .txt saved as invoice.pdf) still guesses application/pdf, correctly reporting the name's claim, not the true content, which is why it is not a security check on its own.">
+    <p class="stem">A <code>.txt</code> file gets renamed to <code>"invoice.pdf"</code>. What does <code>guess_type()</code> report for it?</p>
+    <button class="opt" data-ok>application/pdf, since only the trailing filename extension gets fully inspected</button>
+    <button class="opt">text/plain, since the real file content gets checked first here</button>
+    <button class="opt">a raised exception, since every renamed file fails this check</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/mimetypes.html"><code>mimetypes</code></a> docs, especially <code>guess_type()</code>, <code>guess_extension()</code>, and <code>add_type()</code> under "MIME type to filename extension mapping".</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day120">glossary</a> under Day 120.<br>
+Cadence note: today is fresh day 1 of a new three-fresh-then-review cycle — Days 121 and 122 should be fresh days 2 and 3, then Day 123 the next review day, spanning Days 120-122. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth respectively); <code>binascii</code>, <code>tracemalloc</code>, <code>selectors</code>, <code>sched</code>, and <code>signal</code> are the remaining fresh zero-hit candidates, the last three still skewing toward the OS/event-loop depth <code>MISSION.md</code> excludes. <code>textwrap</code> is now fully closed out as a candidate — it was already taught on Day 55 and should stop appearing on this list.<br><br>
+💬 Anything unclear — why <code>guess_type()</code> returns a tuple, or why it's not a safe way to verify an upload's real content? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

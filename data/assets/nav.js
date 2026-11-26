@@ -286,6 +286,8 @@
       file: "lessons/0138-skew-and-kurt.html" },
     { n: 139, date: "2026-11-25", title: "Series.sem(): the std()-derived ratio, and the constant-column contrast with skew()/kurt()",
       file: "lessons/0139-sem.html" },
+    { n: 140, date: "2026-11-26", title: "Series.median() and np.median(): the sorted-middle value, and the NaN-propagation trap std() doesn't have",
+      file: "lessons/0140-median-and-np-median.html" },
   ];
 
   const REFS = [

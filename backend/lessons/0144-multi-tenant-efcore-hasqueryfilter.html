@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 144 · Multi-tenant data, now in C# too (EF Core HasQueryFilter)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 144 · ~20 min</p>
+<h1>Multi-tenant data, now in C# too (EF Core HasQueryFilter)</h1>
+<p class="byline">Lesson 78 picked a shape for multi-tenant data (shared schema with a <code>tenant_id</code> column, schema-per-tenant, or database-per-tenant) and leaned on Lesson 59's row-level security to make a shared table's isolation not depend on every handler remembering <code>WHERE tenant_id = ...</code>. EF Core's shared-schema answer to that same forgotten-<code>WHERE</code> problem is a model-level setting, not a database policy: <code>HasQueryFilter</code>, a filter attached once to an entity type that EF Core then applies to every LINQ query against it automatically.</p>
+
+<h2>1 · The same gap, enforced one layer up</h2>
+<p>Lesson 59's row-level security policy lives in Postgres itself — it rewrites a query's <code>WHERE</code> clause inside the database, so even a raw <code>psql</code> session or a buggy script can't bypass it by accident. A <dfn data-en="an EF Core model-level configuration (set once per entity type in OnModelCreating via HasQueryFilter) that EF Core's query translator attaches to every LINQ query against that entity type automatically, acting as an extra Where clause the caller never has to write by hand" data-vn="global query filter (giữ nguyên) — cấu hình ở cấp model của EF Core (set 1 lần cho 1 entity type trong OnModelCreating qua HasQueryFilter), được query translator của EF Core tự gắn vào mọi LINQ query nhắm vào entity type đó, đóng vai trò 1 Where clause thêm mà caller không cần tự viết tay">global query filter</dfn> lives one layer up, inside the application's own object-relational mapper — it rewrites the LINQ query before EF Core ever generates SQL, so any code going through that <code>DbContext</code> gets the filter, but code that bypasses EF Core entirely (raw ADO.NET, a different service hitting the same database) gets no protection at all. Same forgotten-<code>WHERE</code> problem Lesson 78 named for shared schema, same "make the framework remember it instead of the developer" fix Lesson 59 used — enforced at a different point in the stack, with a correspondingly different blast radius if something reaches the database some other way.</p>
+
+<h2>2 · Soft deletion first, because it's the filter with no moving parts</h2>
+<p>Microsoft's own docs introduce <code>HasQueryFilter</code> through soft deletion, not multi-tenancy, because it's the simplest case — the filter needs no outside information, just a column on the row itself:</p>
+<pre><code><span class="kw">public class</span> Blog
+{
+    <span class="kw">public int</span> Id { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public bool</span> IsDeleted { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public string</span> Name { <span class="kw">get</span>; <span class="kw">set</span>; }
+}
+
+<span class="kw">protected override void</span> OnModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity&lt;Blog&gt;().HasQueryFilter(b =&gt; !b.IsDeleted);
+}</code></pre>
+<p>From this point on, <code>context.Blogs.ToListAsync()</code> never returns a row where <code>IsDeleted</code> is true — EF Core adds that condition itself, the same way Lesson 139's <code>SaveChanges</code> override added an audit row without the caller asking for one. Nothing about the shape of the query changes; the filter is additive, invisible until a row disappears from a result set that should have had it.</p>
+
+<h2>3 · Multi-tenancy: the filter needs to know who's asking</h2>
+<p>Soft deletion's filter only reads a column. A tenant filter needs the <em>current</em> tenant — information that isn't on the row's own type, it's on whoever opened the <code>DbContext</code>. Microsoft's docs solve this by taking the tenant ID as a constructor parameter and referencing it directly from the filter lambda:</p>
+<pre><code><span class="kw">public class</span> MultitenancyContext(<span class="kw">string</span> tenantId) : DbContext
+{
+    <span class="kw">protected override void</span> OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity&lt;Blog&gt;().HasQueryFilter(b =&gt; b.TenantId == tenantId);
+    }
+}</code></pre>
+<p>This is Lesson 78's shared-schema shape, expressed as C# instead of a Postgres policy: every <code>Blog</code> carries a <code>TenantId</code> column, and this filter is the <code>WHERE tenant_id = ...</code> that section 3 of that lesson said every query needs, attached once instead of copy-pasted into every handler. Constructing <code>MultitenancyContext</code> without a tenant ID simply isn't possible — the constructor forces the caller to supply one, so there is no code path through this context type that can query without the filter already wired in.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> it's tempting to read <code>HasQueryFilter</code> as something configured once at startup, the way <code>AddDbContext</code> is. It isn't — the filter lambda closes over <code>tenantId</code>, a value tied to one request, so a new <code>MultitenancyContext</code> gets built (and the filter re-evaluated against the current tenant) on every request, exactly like a React component re-rendering with new props rather than configuring itself once on mount.</div>
+
+<h2>4 · Escaping the filter on purpose, and the one place it quietly stops working</h2>
+<p>An admin tool or a background job legitimately needs to see every tenant's rows. <code>IgnoreQueryFilters()</code> is the documented escape hatch — one LINQ operator, applied per query, not a config flag flipped for the whole context:</p>
+<pre><code><span class="kw">var</span> allBlogs = <span class="kw">await</span> context.Blogs.IgnoreQueryFilters().ToListAsync();</code></pre>
+<p>The sharper catch is <code>Include()</code>. Microsoft's docs show a required <code>Blog</code>–<code>Post</code> relationship where <code>Blog</code> carries a query filter: querying <code>Posts</code> directly returns every post, but <code>Posts.Include(p => p.Blog)</code> returns only the posts whose blog survives the filter — because a required navigation compiles to an <code>INNER JOIN</code>, and a filtered-out <code>Blog</code> row silently drops its <code>Post</code> rows out of the join too. The fix the docs name is either making the navigation optional (an EF-generated <code>LEFT JOIN</code> instead) or putting a matching filter on <code>Post</code> itself, so both entity types agree on which tenant's rows exist before any join runs.</p>
+
+<h2>5 · Where this sits next to Lesson 78's three shapes</h2>
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 78: shared schema + Lesson 59 RLS</th><th>Lesson 144: EF Core <code>HasQueryFilter</code></th></tr></thead>
+<tbody>
+<tr><th>Enforced where</th><td>inside Postgres itself, rewriting the query's WHERE</td><td>inside EF Core, rewriting the LINQ query before SQL generation</td></tr>
+<tr><th>Covers</th><td>any connection to that database, any client</td><td>only queries made through that configured DbContext</td></tr>
+<tr><th>Needs to know the tenant from</th><td>a session variable set per connection</td><td>a value closed over by the filter lambda (e.g. a constructor parameter)</td></tr>
+<tr><th>Escape hatch</th><td><code>BYPASSRLS</code> role attribute</td><td><code>IgnoreQueryFilters()</code> per query</td></tr>
+</tbody>
+</table>
+<p>Neither replaces the other's job description from Lesson 78: the choice of shape (shared schema, schema-per-tenant, database-per-tenant) is still a schema design decision made once, independent of which language queries it. <code>HasQueryFilter</code> is what a shared-schema choice looks like from inside an EF Core codebase specifically — the C# counterpart to Lesson 59's Postgres policy, not a fourth shape.</p>
+
+<div class="interview">
+<p><strong>Q: "Our ASP.NET Core app uses EF Core against a shared multi-tenant table. How do we stop a forgotten tenant filter from leaking another tenant's rows?"</strong> A strong answer, out loud: <em>"I'd put a global query filter on the entity type in OnModelCreating, referencing the current tenant ID from something the DbContext itself holds — a constructor parameter, typically — so the filter is attached once and applies to every query automatically instead of relying on every LINQ query remembering a Where clause by hand. I'd watch for Include() on a required navigation, though — that compiles to an inner join, and a filtered-out parent row can silently drop its children out of the result too, so I'd either make the navigation optional or filter the child type the same way. And for admin tooling that legitimately needs every tenant's rows, IgnoreQueryFilters() is the explicit, per-query escape hatch — not disabling the filter globally."</em> The signal: naming where the filter lives, the join caveat as a real failure mode rather than an edge case, and that the escape hatch should be a deliberate per-query choice.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>HasQueryFilter</code>'s soft-deletion and multi-tenancy shapes, <code>IgnoreQueryFilters()</code>, and the required-navigation/<code>Include()</code> join caveat. It does not cover EF Core 10's named multiple-filters syntax (<code>HasQueryFilter("Name", ...)</code>, allowing more than one filter per entity type and selective disabling), combining filters pre-EF-10 via <code>&amp;&amp;</code> in one lambda, or the <code>IEntityTypeConfiguration&lt;TEntity&gt;</code> workaround for referencing a context-scoped value without an instance in scope — all named in the primary source but left for a dedicated lesson if picked up later.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="HasQueryFilter attaches a filter to an entity type once, in OnModelCreating, and EF Core's query translator then applies it to every LINQ query against that entity type automatically -- the same role Lesson 59's row-level security policy plays inside Postgres, just enforced one layer up inside the ORM instead of the database.">
+    <p class="stem">What does EF Core's <code>HasQueryFilter</code> do once it is configured on an entity type?</p>
+    <button class="opt" data-ok>applies automatically to every later query against that type</button>
+    <button class="opt">deletes every existing row that fails the given condition</button>
+    <button class="opt">validates incoming form fields before they reach any handler</button>
+    <button class="opt">encrypts every column value before writing it to storage</button>
+  </div>
+  <div class="q" data-why="A multi-tenancy query filter needs the current tenant ID, which isn't a property of the entity itself -- Microsoft's own docs solve this by taking the tenant ID as a DbContext constructor parameter and closing over it from the filter lambda, so a new context (and a freshly evaluated filter) is built per request rather than configured once at startup.">
+    <p class="stem">Where does a multi-tenancy <code>HasQueryFilter</code> get the current tenant ID from?</p>
+    <button class="opt" data-ok>a value the DbContext instance holds, like a constructor parameter</button>
+    <button class="opt">a hardcoded constant written directly into the entity class itself</button>
+    <button class="opt">the HTTP response status code of the preceding request alone</button>
+    <button class="opt">a fixed value read once from appsettings.json at startup only</button>
+  </div>
+  <div class="q" data-why="A required navigation compiles to an INNER JOIN, so when Include() loads a filtered entity type through that navigation, a parent row filtered out by its own query filter drops its related child rows out of the join result too -- Microsoft's own docs demonstrate exactly this mismatch between querying Posts directly and querying Posts.Include(p => p.Blog).">
+    <p class="stem">Why can <code>Posts.Include(p =&gt; p.Blog)</code> return fewer rows than querying <code>Posts</code> directly, when <code>Blog</code> has a query filter?</p>
+    <button class="opt" data-ok>the required navigation's inner join drops rows whose blog is filtered</button>
+    <button class="opt">Include() always silently ignores every query filter on any given entity</button>
+    <button class="opt">a Post entity can never itself carry its own query filter</button>
+    <button class="opt">EF Core caches the first query's result set for all calls</button>
+  </div>
+  <div class="q" data-why="IgnoreQueryFilters() is a LINQ operator applied to one specific query, not a setting that turns the filter off for the whole DbContext -- an admin tool calling it on one query sees every tenant's rows for that call alone, while every other query through the same context still has the filter applied.">
+    <p class="stem">What does calling <code>IgnoreQueryFilters()</code> on one query actually change?</p>
+    <button class="opt" data-ok>only that one query skips the filter; others still apply it</button>
+    <button class="opt">the filter is permanently removed from that entity type's own model</button>
+    <button class="opt">every other DbContext instance also stops applying filters from now on</button>
+    <button class="opt">the underlying database table itself drops its own tenant_id column now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/querying/filters">Microsoft Learn: Global Query Filters — EF Core</a> — confirmed live via <code>WebFetch</code> before writing. Source for the soft-deletion <code>Blog.IsDeleted</code> example (section 2), the <code>MultitenancyContext(string tenantId)</code> constructor-parameter pattern (section 3), <code>IgnoreQueryFilters()</code> (section 4), and the required-navigation/<code>INNER JOIN</code>/<code>Include()</code> caveat with its documented fix of making the navigation optional or filtering both entity types consistently (section 4). Lesson 78's own PostgreSQL Manual sources (Row Security Policies, Schemas) still cover the three tenant-isolation shapes themselves in full and are not re-derived here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 78's multi-tenant shapes and Lesson 59's row-level security, and continues this run's "now in C# too" series (Lessons 132, 137, 138, 139, 140, 141, 142, 143). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 144 rounds — the honest next step remains a completion signal or a user-named track. Standing candidate worth checking fresh next time: HATEOAS (Lesson 97), checked twice already and rejected both times on a thin-C#-angle basis — worth retiring unless picked deliberately as a cold-start C# feature rather than a direct port.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

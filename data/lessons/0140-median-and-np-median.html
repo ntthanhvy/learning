@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 140 · Series.median() and np.median(): the sorted-middle value, and the NaN-propagation trap std() doesn't have</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 140 · ~20 min · 26 Nov 2026</p>
+<h1>Series.median() and np.median(): the sorted-middle value, and the NaN-propagation trap std() doesn't have</h1>
+<p class="byline">Lessons 137-139 closed out a three-lesson statistics arc (<code>.std()</code>/<code>.var()</code>/<code>ddof</code>, <code>.skew()</code>/<code>.kurt()</code>, <code>.sem()</code>) and left no named successor — this round's own fresh scan grepped every lesson body and every glossary row case-insensitively for <code>np.median(</code> and <code>.median(</code>: <code>.median()</code> appears twice already (Lesson 3's missing-value fill, Lesson 49's <code>describe()</code> byline), but only ever as a value plugged into something else, never as its own topic; <code>np.median(</code> had zero hits anywhere across Lessons 1-139. A genuine gap: the two libraries' <code>median</code> functions disagree on <code>NaN</code> in a way none of Lessons 137-139 covered, since <code>.std()</code>/<code>.var()</code>/<code>.skew()</code>/<code>.kurt()</code>/<code>.sem()</code> all drop <code>NaN</code> on both sides already.</p>
+
+<h2>1 · median() is the sorted-order middle value — Lesson 3's fill value, built directly</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s_odd = pd.Series([<span class="kw">2</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>, <span class="kw">9</span>])  <span class="cm"># 7 values -- one true middle</span>
+s_odd.median()                         <span class="cm"># 5.0  -- the 4th value once sorted</span>
+
+s_even = pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>])            <span class="cm"># 4 values -- no single middle</span>
+s_even.median()                        <span class="cm"># 2.5  -- average of the 2nd and 3rd sorted values</span></code></pre>
+<p>Same <dfn data-en="the value exactly in the middle of a sorted list -- with an odd count it is the single middle element; with an even count there is no single middle element, so pandas and NumPy both average the two values straddling the center" data-vn="giữ nguyên 'median' (trung vị) -- giá trị nằm chính giữa khi sắp xếp danh sách theo thứ tự; số lượng giá trị LẺ thì median là 1 giá trị giữa duy nhất; số lượng giá trị CHẴN thì không có giá trị giữa duy nhất, nên cả pandas và NumPy đều lấy TRUNG BÌNH của 2 giá trị kề 2 bên trung tâm">median</dfn> concept Lesson 3 already used to fill missing values (it resists outliers better than the mean, since one huge value can't drag the sorted middle far) and the same number <code>describe()</code> (Lesson 49) prints on its own <code>50%</code> row — this lesson builds the method directly rather than through something else. <code>np.median()</code> computes the identical sorted-middle value on a plain array:</p>
+<pre><code>np.median(s_odd.to_numpy())   <span class="cm"># 5.0   -- identical to Series.median() above</span>
+np.median(s_even.to_numpy())  <span class="cm"># 2.5   -- identical even-count average, same rule</span></code></pre>
+
+<h2>2 · The real trap: np.median() propagates NaN; Series.median() skips it</h2>
+<p>Unlike Lessons 137-139's whole statistics family, where <code>NaN</code>-handling matched on both sides, <code>median</code> is where pandas and NumPy genuinely disagree. Confirmed directly, adding one <code>NaN</code> to the same 8 values from Lesson 137:</p>
+<pre><code>s = pd.Series([<span class="kw">2</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">7</span>, <span class="kw">9</span>, np.nan])
+
+s.median()                   <span class="cm"># 4.5   -- pandas drops the NaN, medians the remaining 8 values</span>
+np.median(s.to_numpy())      <span class="cm"># nan   -- numpy does NOT drop it -- ONE NaN poisons the whole result</span>
+np.nanmedian(s.to_numpy())   <span class="cm"># 4.5   -- the NaN-aware cousin, matches pandas exactly</span></code></pre>
+<div class="callout"><strong>Confirmed directly, why this is a sharper trap than it looks:</strong> a single stray <code>NaN</code> anywhere in a large array makes plain <code>np.median()</code> return <code>NaN</code> for the <em>entire</em> result, no error or warning raised — not a dropped row, a completely poisoned answer. Converting a pandas column to a raw array with <code>.to_numpy()</code> or <code>.values</code> and then calling <code>np.median()</code> on it (instead of just calling <code>.median()</code> on the Series directly) is exactly how this trap gets triggered in real code, usually when mixing a NumPy-only pipeline with pandas-sourced data. The fix is <code>np.nanmedian()</code>, confirmed directly to match pandas' own <code>NaN</code>-skipping behavior exactly.</div>
+
+<h2>3 · Both libraries agree once there's no NaN to disagree about</h2>
+<p>Confirmed directly, an empty Series and an all-<code>NaN</code> Series both return <code>NaN</code> on the pandas side, and <code>np.median()</code> on an empty array also returns <code>NaN</code> (with a runtime warning, not a crash):</p>
+<pre><code>pd.Series([], dtype=<span class="kw">float</span>).median()         <span class="cm"># nan  -- no data at all</span>
+pd.Series([np.nan, np.nan]).median()      <span class="cm"># nan  -- data exists, but none of it is usable</span>
+np.median(np.array([]))                   <span class="cm"># nan  -- numpy agrees here; raises a RuntimeWarning, not an exception</span></code></pre>
+<p>So the disagreement is specifically about a <em>partial</em> <code>NaN</code> — some real values mixed with some missing ones. When every value is missing (or there are no values), both libraries land on the same <code>NaN</code>, matching the pattern Lesson 137 already confirmed for a single-row <code>.std()</code>: no crash, a quiet result that still needs to be read correctly.</p>
+
+<h2>4 · np.median(axis=) reduces one axis of a 2-D array, same as np.std() would</h2>
+<p>Confirmed directly, <code>median</code> is not Series-only — <code>DataFrame.median()</code> runs column-by-column exactly like the rest of this statistics family, and <code>np.median()</code> takes the same <code>axis=</code> parameter this course has used since <code>np.percentile()</code> (Lesson 111):</p>
+<pre><code>arr = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">100</span>]])
+
+np.median(arr, axis=<span class="kw">0</span>)   <span class="cm"># [2.5, 3.5, 51.5]  -- median DOWN each column</span>
+np.median(arr, axis=<span class="kw">1</span>)   <span class="cm"># [2.0, 5.0]        -- median ACROSS each row</span>
+np.median(arr)           <span class="cm"># 3.5               -- no axis: flattens first, one single number</span></code></pre>
+<p>The <code>100</code> outlier in row 2 drags that row's own <em>mean</em> far up, but barely moves its <em>median</em> (<code>5.0</code>, the middle of <code>4, 5, 100</code>) — the same outlier-resistance Lesson 3 relied on to justify median over mean as a fill value, now visible directly in the raw array.</p>
+
+<div class="interview">
+<p><strong>Q: "You convert a pandas column to a NumPy array and call np.median() on it, and get NaN back even though you can see the column has real values. What happened?"</strong> A strong answer, out loud: <em>"np.median() doesn't skip NaN by default — if even one value in the array is NaN, the whole result comes back NaN, silently, no warning. Series.median() on the pandas side does skip NaN automatically, which is why calling .median() directly on the column gives a real number but converting to a raw array first and calling np.median() on that doesn't. The fix is np.nanmedian(), which matches pandas' own behavior exactly. I'd flag this as a reason to stay on the pandas side for a summary stat whenever there's any chance of missing data, rather than dropping to a raw array first."</em> The signal: naming the exact asymmetry (pandas skips, NumPy propagates), naming np.nanmedian() as the fix unprompted, and tying it to Lesson 137's "no crash, quietly wrong" family.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.median()</code>/<code>DataFrame.median()</code>'s confirmed sorted-middle-value behavior (including the even-count average-of-two rule), <code>np.median()</code>'s identical result on data with no missing values, the confirmed <code>NaN</code>-propagation trap (<code>np.median()</code> returns <code>NaN</code> on any partial-<code>NaN</code> array; <code>Series.median()</code> and <code>np.nanmedian()</code> both skip it), the confirmed agreement on fully-empty or all-<code>NaN</code> input, and <code>np.median()</code>'s confirmed <code>axis=</code> reduction on a 2-D array. It does not cover <code>scipy.stats</code>'s weighted-median variants or the statistical derivation of why the median resists outliers, out of scope per <code>MISSION.md</code>'s "no deep statistics" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/140_median_and_np_median.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/140_median_and_np_median.py</code></pre>
+<p>Exercise 1 confirms the Section 1 rule: an odd-count Series's <code>.median()</code> matches <code>np.median()</code> on the same values, and an even-count Series's <code>.median()</code> equals the average of its two sorted middle values. Exercise 2 confirms the Section 2 trap: on a Series with one <code>NaN</code> mixed in, <code>Series.median()</code> and <code>np.nanmedian()</code> both return the same real number, while plain <code>np.median()</code> on the identical values returns <code>NaN</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: a Series with 9 values where one is NaN still returns a real number from .median() (pandas skips NaN automatically) and from np.nanmedian() on the same values. Plain np.median() on that identical array returns NaN, since it does not skip missing values by default -- one NaN anywhere poisons the whole result.">
+    <p class="stem">A Series has 9 values, one of which is <code>NaN</code>. What does plain <code>np.median()</code> return on that Series converted to a raw array, confirmed directly?</p>
+    <button class="opt" data-ok>NaN, since it never skips any missing values</button>
+    <button class="opt">the real median of the 8 remaining values</button>
+    <button class="opt">a ValueError, raised loudly and immediately right here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: with an even count of values, there is no single middle element once sorted, so both Series.median() and np.median() average the two values straddling the center. [1, 2, 3, 4] sorted has 2 and 3 straddling the center, so the median is 2.5, not either individual value.">
+    <p class="stem">What does <code>pd.Series([1, 2, 3, 4]).median()</code> return, confirmed directly, given the even count of values?</p>
+    <button class="opt" data-ok>2.5 -- the average of the two middle sorted values</button>
+    <button class="opt">2 -- simply the lower of the two middle values</button>
+    <button class="opt">3 -- simply the higher of the two middle values</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.nanmedian() is the NaN-aware cousin of np.median(), and it matches pandas' own Series.median() NaN-skipping behavior exactly on the identical data. It is the direct fix for the trap in Section 2, not a separate unrelated function.">
+    <p class="stem">Which function, confirmed directly, matches <code>Series.median()</code>'s own <code>NaN</code>-skipping behavior when working on a raw NumPy array?</p>
+    <button class="opt" data-ok>np.nanmedian() -- it skips NaN like pandas does</button>
+    <button class="opt">np.median() -- it already skips NaN identically too</button>
+    <button class="opt">np.sort(), then manually indexing into the middle spot</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy <a href="https://numpy.org/doc/stable/reference/generated/numpy.median.html"><code>numpy.median()</code></a> API reference (per <code>RESOURCES.md</code>'s NumPy grouping, ~5 min) — the page documents the <code>axis=</code> parameter directly and links to <code>numpy.nanmedian()</code> as its own separate function; the cross-library <code>NaN</code>-propagation mismatch against <code>Series.median()</code> is confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>median</code> already had a plain entry since Lesson 3; today's confirmed NaN-propagation trap was folded into that same existing row rather than adding a duplicate.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed the one gap it found (<code>median</code>'s cross-library <code>NaN</code> mismatch) and surfaced no further named successor — a future round's own fresh scan should start clean, with nothing pre-committed, per this course's standing convention.<br><br>
+💬 Anything unclear — the NaN-propagation trap, the even-count averaging rule, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

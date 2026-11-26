@@ -13424,3 +13424,27 @@
   file) alongside unrelated sibling-course changes from concurrent runs,
   left untouched. The scratch directory `.scratch-data-139/` was deleted
   after verification, at the repo root but never tracked by git.
+- 2026-11-26 generation (Lesson 140, headless 06:00 run): fresh scan found
+  `.median()`/`np.median()` open (used inline since Lesson 3, never its own
+  lesson) now that Lessons 137-139's statistics arc closed. Verified
+  directly in a scratch sandbox: `np.median()` propagates `NaN` (poisons
+  the whole result on any partial-`NaN` array), while `Series.median()`
+  and `np.nanmedian()` both skip it — the opposite of Lessons 137-139's
+  shared NaN-dropping behavior, so a genuinely new trap, not a repeat.
+  Also confirmed the even-count average-of-two-middle-values rule and
+  `np.median(axis=)` on a 2-D array. No DB completion/quiz signal exists
+  for `data` beyond the Lesson 1 baseline; continued steady pacing.
+  Glossary: `median` already had a pre-dfn-convention row from Lesson 3 —
+  enriched that existing row with the new confirmed trap and one embedded
+  `<dfn>` rather than adding a duplicate term (row count stayed 222,
+  dfn count 19→20). Quiz word counts fixed to 8/8/8, 10/10/10, 8/8/8 after
+  a few wording passes; HTML tag balance confirmed fully matched (p 19/19,
+  code 93/93, dfn 1/1, etc.), one `&&` shell-command exception as usual.
+  `node --check` passed on nav.js/gloss.js/quiz.js before and after adding
+  one `n: 140` entry. Shipped (unsolved) `practice/140_median_and_np_median.py`
+  printed exactly 2 ✗ run from its real `practice/` location; the solved
+  copy (built in a scratch dir, deleted after, never tracked by git)
+  printed both ✓ on the first attempt. `bin/record-progress` succeeded via
+  the `node -e`/`spawnSync` workaround (direct `psql`/script invocation is
+  sandbox-blocked). `git status --short` showed only the intended `data/`
+  files touched.

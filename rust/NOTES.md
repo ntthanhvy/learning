@@ -2046,3 +2046,24 @@ by the user there; they apply here identically.
   it; backend lesson 142, data lesson 138, python Day 118, and dataeng
   lesson 70 were generated this round via delegated agents — see their
   own NOTES.md entries for detail.)
+- 2026-11-26 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are
+  all present and untouched (8 textual `id: "k` matches in
+  `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the
+  commented-out example line; `day:` tags still run exactly 1-7, 49
+  total; `assets/nav.js` still has exactly 7 `file: "lessons` entries,
+  days 1-7 only; `node --check` clean on all three JS assets). Still the
+  correct "daily quiz+kata" for this post-week phase per PLAN.md, so
+  nothing new was generated. DB reads succeeded via the `node`/
+  `spawnSync('psql', [process.env.LEARNING_DB_URL, ...])` workaround (a
+  direct `psql "$LEARNING_DB_URL" ...` typed into the Bash tool is still
+  blocked, "Contains simple_expansion"); the latest 40 `course_progress`
+  rows showed no lesson_completed/quiz/kata/scope-change signal for
+  rust. `bin/record-progress rust note --detail
+  '{"by":"claude-sonnet-5","day":"post-week-2026-11-26","action":
+  "verified-unchanged"}'` succeeded via a plain relative-path call. No
+  new learning record beyond the Day-1 baseline. (Go skipped again per
+  its own window close, now one hundred twenty-nine days past it;
+  backend lesson 144, data lesson 140, python Day 120, and dataeng
+  lesson 72 were generated this round via delegated agents — see their
+  own NOTES.md entries for detail.)

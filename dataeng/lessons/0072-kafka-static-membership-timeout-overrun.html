@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 72 · A static member's restart that overruns its own grace window</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 72 · ~20 min · 26 Nov 2026</p>
+<h1>A static member's restart that overruns its own grace window</h1>
+<p class="byline">Today's tangible win: Day 68's two statically-identified consumers, rerun with <code>warehouse-loader-2</code> deliberately kept down for <em>longer</em> than its own <code>session.timeout.ms</code> instead of well inside it — and your own <code>kafka-consumer-groups.sh --describe</code> output tracing the exact moment static membership's "no rebalance" guarantee expires and the group falls back to Day 34's ordinary dynamic-style reassignment for that one member, while <code>warehouse-loader-1</code>'s own partitions never move at any point in the sequence.</p>
+
+<div class="callout"><strong>Before today — confirm Day 68's two-consumer shape still works:</strong> today reruns Day 68's exact script and both <code>group.instance.id</code> values, only changing one sleep duration — it edits no file. Start from a clean check:
+<pre><code>grep -n "INSTANCE_ID" scripts/consume_order_events.py
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+Expected: a line reading <code>os.environ["INSTANCE_ID"]</code> printed, and <code>PartitionCount: 3</code>. If the grep finds nothing, finish Day 68 first — today changes no code, only how long one consumer stays down between restarts.</div>
+
+<h2>1 · The gap Day 68 named and never ran</h2>
+<p>Day 68 proved something true but narrow: two statically-identified consumers, one restarting <em>well inside</em> its 45-second <code>session.timeout.ms</code>, caused zero reassignment for either member. That lesson's own scope line and closing note each named the question it left sitting: what if the restart takes <em>longer</em> than the grace window instead of comfortably inside it? Day 68's text asserted the answer from the protocol alone — "that case degrades to exactly Day 34's dynamic rebalance for that one member's partitions, with <code>warehouse-loader-1</code> still unaffected" — without ever actually running a restart timed to cross that boundary. Today runs it.</p>
+<p>The question is worth asking precisely, because static membership's whole pitch is "fewer needless rebalances," and a pitch like that is only honest if its failure mode is also understood: what exactly happens the moment the one timer governing that grace window (Day 66's own finding — <code>session.timeout.ms</code> is the only lever, there's no separate, longer rejoin clock) finally runs out on a member that hasn't come back yet?</p>
+
+<h2>2 · <dfn data-en="the moment a statically-identified Kafka consumer's own session.timeout.ms finally elapses with no rejoin from that same group.instance.id -- at that instant the coordinator discards the member's reserved partition slot and reassigns it to whichever other members remain, the same ordinary rebalance a dynamic member's death would cause, and any later rejoin from that identity is treated as a brand-new member joining rather than the old slot being reclaimed" data-vn="giữ nguyên &quot;grace-window expiry&quot; — thời điểm session.timeout.ms của 1 consumer static hết hạn mà group.instance.id đó vẫn chưa rejoin -- ngay lúc đó coordinator bỏ slot partition đã giữ cho member này và chia lại cho các member còn lại, giống rebalance thông thường khi 1 dynamic member chết, và nếu identity đó rejoin sau mốc này thì bị coi là member hoàn toàn mới, không phải nhận lại đúng slot cũ">grace-window expiry</dfn>: what should happen, read off two already-confirmed facts</h2>
+<p>Nothing new needs inventing here — Day 66 and Day 68 already established both halves of this answer, just never chained together into one live run:</p>
+<table class="gloss">
+<tr><th>Already confirmed</th><th>Source</th></tr>
+<tr><td>For a static member, <code>session.timeout.ms</code> is both the heartbeat-missed clock <em>and</em> the full grace window — once it expires with no rejoin, the coordinator finally gives up and reassigns that member's partitions for good.</td><td>Day 66, Section 2</td></tr>
+<tr><td>A static member's bookkeeping is per-member, not group-wide — one member's rejoin (or failure to rejoin) never touches a healthy neighbor's own assignment.</td><td>Day 68, Section 2</td></tr>
+</table>
+<p>Chain them and the prediction is exact: if <code>warehouse-loader-2</code> stays down past its own 45-second window, the coordinator eventually treats it exactly as Day 34 treated a dynamic member's death — <code>warehouse-loader-2</code>'s partition(s) get reassigned to <code>warehouse-loader-1</code>, the only other current member. The fact that <code>warehouse-loader-2</code> was <em>configured</em> as a static member never enters into it once the window has actually closed; static membership only ever changed the outcome of a <em>timely</em> rejoin, never promised a dead-forever member's slot stays reserved indefinitely. And because the bookkeeping has always been per-member, <code>warehouse-loader-1</code> should show zero disruption of its own the entire time — not even a brief pause — since from its own point of view nothing about its own membership status changed.</p>
+<div class="callout"><strong>Bridge from Day 34:</strong> this is the same <code>ON CONFLICT (event_id) DO NOTHING</code> safety net from Day 6, now covering a third shape of redelivery risk. Day 34 showed it absorbing a dynamic-membership kill-and-reassign; Day 68 showed it absorbing a static-membership timely restart; today's late reassignment is really just Day 34's exact mechanism arriving later than usual, so the same idempotent write is the reason none of these three shapes can ever produce a duplicate row regardless of which one actually happens.</div>
+
+<h2>3 · Build: keep one consumer down past its own window, watch the late reassignment land</h2>
+<p>Reuse Day 68's script and env-var shape exactly. The only change is the second <code>sleep</code>: instead of 5 seconds (well under the 45-second <code>session.timeout.ms</code>), sleep 50 seconds (past it) before restarting <code>warehouse-loader-2</code>:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+INSTANCE_ID=warehouse-loader-1 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+INSTANCE_ID=warehouse-loader-2 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+kill -9 $CONSUMER_B
+sleep 50   <span class="cm"># past the 45s session.timeout.ms -- the grace window actually closes this time</span>
+uv run --with confluent-kafka python3 scripts/produce_order_events.py   <span class="cm"># fresh traffic so the survivor proves it now owns every partition</span>
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+INSTANCE_ID=warehouse-loader-2 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected across the three <code>--describe</code> calls — the split, then the late reassignment, then a <em>second</em> rebalance once <code>warehouse-loader-2</code> finally does come back and has to rejoin as if new:</p>
+<pre><code><span class="cm"># call 1 -- before the kill: the ordinary 2-and-1 split</span>
+warehouse-loader  order_events  0  8  8  0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  1  4  4  0  warehouse-loader-2-rdkafka-1  ...
+warehouse-loader  order_events  2  8  8  0  warehouse-loader-1-rdkafka-1  ...
+
+<span class="cm"># call 2 -- after 50s down, past session.timeout.ms: partition 1 reassigned</span>
+warehouse-loader  order_events  0  12  12  0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  1  8   8   0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  2  12  12  0  warehouse-loader-1-rdkafka-1  ...
+
+<span class="cm"># call 3 -- warehouse-loader-2 finally rejoins: a second rebalance, some partition(s) handed back</span>
+warehouse-loader  order_events  0  12  12  0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  1  8   8   0  warehouse-loader-2-rdkafka-1  ...
+warehouse-loader  order_events  2  12  12  0  warehouse-loader-1-rdkafka-1  ...</code></pre>
+<p>Read call 2 against call 1 as the actual proof: partition 1, which belonged to <code>warehouse-loader-2</code>, now belongs to <code>warehouse-loader-1</code> — the exact handoff Day 34 showed, just arriving after a 45-second wait instead of Day 34's 10-second default. Read call 3 as the cost of that handoff going the other direction: <code>warehouse-loader-2</code> rejoining after the window closed is, from the coordinator's point of view, indistinguishable from a brand-new member joining — it triggers its own fresh rebalance, exactly as Day 34's original two-consumer test showed any join doing, because the static identity's reserved slot was already discarded once the window expired. Clean up:</p>
+<pre><code>kill -9 $CONSUMER_A $CONSUMER_B</code></pre>
+
+<h2>4 · The one fact worth isolating: <code>warehouse-loader-1</code> never moves, across all three calls</h2>
+<p>Partitions 0 and 2 show the identical owner, <code>warehouse-loader-1</code>, in every single one of the three <code>--describe</code> calls above. That consumer's own offsets climb (8→12, in step with each new batch produced) but its <em>ownership</em> never changes — no pause, no reassignment, not even transiently, across a sequence that includes a neighbor's death-by-timeout and that same neighbor's later, disruptive rejoin. This is Day 68's per-member-bookkeeping finding holding under the one condition that lesson couldn't actually test: a neighbor whose static identity <em>stops working</em>, not one that reclaims it in time. The coordinator's entry for <code>warehouse-loader-1</code> was never touched by anything that happened to <code>warehouse-loader-2</code>'s entry, whether that entry's outcome was "reclaimed in time" (Day 68) or "expired and reassigned" (today).</p>
+<div class="callout">A genuinely new conclusion today's run adds, not restated from either prior lesson: static membership's benefit is strictly bounded to the member that stays within its own window. There is no sense in which a second static member's presence "buys more time" for a first one that's running late — each member's grace window is sized and spent entirely on its own, so widening <code>session.timeout.ms</code> to cover a slower restart for one consumer widens the window equally for every member in the group, including ones that never have trouble restarting quickly. That's the real cost of sizing this timer generously: it's a group-level setting with a per-member effect, not something tunable per consumer.</div>
+
+<h2>5 · Verify</h2>
+<p>The same <code>total = distinct_events</code> proof every rebalance-adjacent lesson since Day 6 has run still applies — a timeout-triggered reassignment followed by a late, disruptive rejoin is still exactly the kind of multi-actor redelivery risk an idempotent write exists for:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code>, unchanged from every prior day's version of this same check. No code changed today (only a <code>sleep</code> duration in the terminal commands above, not in any committed file), so there is nothing new to <code>py_compile</code> — Day 68's own <code>scripts/consume_order_events.py</code> is unmodified.</p>
+<p><strong>Checked live this round, not against a real broker (no reachable Kafka this sandbox round, the same standing gap every recent Kafka round has named):</strong> both <code>Consumer({...})</code> configurations above — one with <code>session.timeout.ms: 45000</code>, one deliberately constructed with a shorter <code>10000</code> to probe whether the client itself validates or clamps that value — were built for real against a freshly-installed <code>confluent-kafka==2.16.2</code> client (librdkafka 2.16.0); both succeeded with no config-rejection error, confirming the client accepts any <code>session.timeout.ms</code> a caller sets and performs no client-side floor or ceiling of its own. The actual claims this lesson rests on — that the grace window closing produces exactly Day 34's reassignment, and that the late rejoin itself triggers a second, ordinary rebalance — are Kafka's own documented static-membership protocol (KIP-345) applied to its own documented expiry case, not a live multi-process, multi-minute test this round, since no broker was reachable to run Section 3's sequence for real. Confirm all three of Section 3's <code>--describe</code> outputs, in your own environment, before quoting either claim verbatim in an interview.</p>
+
+<div class="interview">
+<p><strong>Q: "You've set up static group membership so restarts don't trigger needless rebalances. What happens if a restart just takes too long?"</strong> A strong answer, out loud: <em>"Static membership only buys time within the session.timeout.ms window — it's not an indefinite reservation. If the member doesn't rejoin before that timer expires, the coordinator gives up waiting and reassigns its partitions to whoever else is in the group, exactly the same dynamic-style rebalance you'd get without static membership at all, just arriving after a longer wait instead of the short default. And there's a second cost on the other side: if that slow member eventually does come back, the coordinator no longer recognizes it as the same reserved identity — its slot was already given away — so rejoining now looks like a brand-new member joining, which triggers its own fresh rebalance, disrupting things a second time. I confirmed both halves of this live: killed one of two statically-identified consumers, kept it down past its 45-second window, watched the coordinator hand its partition to the survivor exactly like an ordinary dynamic-membership kill would, and then watched a second rebalance fire when it finally rejoined late. The one thing that never moved through any of it was the healthy consumer's own partitions — that part of static membership's per-member bookkeeping holds regardless of how the neighbor's story ends."</em> The signal: naming static membership's grace window as bounded, not infinite, and that a too-late rejoin isn't free either — it costs a second disruption, not zero.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers one statically-identified consumer's restart deliberately timed to exceed its own <code>session.timeout.ms</code>, in a two-member group where the other member stays healthy throughout — reasoned from Kafka's documented static-membership expiry behavior and confirmed live only as valid consumer configs against the installed client, not against a real broker's actual multi-minute rebalance timing this round. It does not cover both members overrunning their windows at the same time, a broker-side <code>group.max.session.timeout.ms</code> bound that could clamp an unreasonably large client-side value (broker tuning, past this course's working-level Kafka scope per <code>MISSION.md</code>), or whether a shorter per-member <code>session.timeout.ms</code> is possible within one group — confluent-kafka's client accepted a deliberately shorter value in this round's scratch check with no rejection, but this course's <code>warehouse-loader</code> consumers have always shared one value, and nothing here tests two different values coexisting in the same group live.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by chaining two already-established facts: Day 66 showed session.timeout.ms is a static member's only grace-window timer, with no separate longer clock, and Day 68 showed static membership only changes the outcome of a timely rejoin. Once that one timer actually expires with no rejoin, the coordinator has nothing left reserving the slot and reassigns the partitions exactly as it would for any dynamic member's death -- the same mechanism Day 34 first showed.">
+    <p class="stem">What actually happens once a static member's restart takes longer than its own <code>session.timeout.ms</code>?</p>
+    <button class="opt" data-ok>Its partitions get reassigned, just like a dynamic member dying</button>
+    <button class="opt">The whole group simply waits forever for that one member</button>
+    <button class="opt">Every other member's own partitions get reassigned at once too</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: across all three --describe calls -- before the kill, after the window expired and reassignment happened, and after the late member finally rejoined and triggered its own fresh rebalance -- warehouse-loader-1's own partitions never changed owner. Static membership's bookkeeping is per-member, so nothing that happens to a neighbor's own entry, including that entry expiring and being discarded, ever touches a healthy member's own assignment.">
+    <p class="stem">Across the whole kill-wait-rejoin sequence, what happens to the healthy consumer's own partitions?</p>
+    <button class="opt" data-ok>Nothing; they stay with that one consumer the entire time</button>
+    <button class="opt">They get reassigned once, then handed back a second time</button>
+    <button class="opt">They are paused for the full 45-second window, then resume</button>
+  </div>
+  <div class="q" data-why="Once the grace window has expired and the coordinator has already reassigned the slot away, a static member rejoining late has no reserved identity left to reclaim -- from the coordinator's point of view it looks exactly like a brand-new member joining the group, which triggers its own ordinary rebalance, the same disruption Day 34 showed any join causing. Static membership never promised protection against this second disruption; it only ever covered a rejoin within the window.">
+    <p class="stem">What happens when the late-restarting consumer finally does come back, after its window already expired?</p>
+    <button class="opt" data-ok>It rejoins as a new member, causing its own rebalance</button>
+    <button class="opt">It instantly reclaims its own old partitions, with no rebalance</button>
+    <button class="opt">The coordinator refuses that whole late rejoin outright, forever now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> remain this course's standing citation for consumer-group and rebalance mechanics since Day 5, and the same static-membership section Days 66 and 68 already used documents the expiry case directly: a static member that fails to rejoin before its session timeout is treated as a departure, triggering ordinary rebalance for its partitions — not fetched fresh live this round (no working <code>WebFetch</code> tool, the same recurring gap prior rounds have each named), so confirm the exact expiry wording against the live page before quoting it verbatim in an interview. The <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a>, already this course's primary source for Days 5–6/34/50/55/58/66/68, cover <code>session.timeout.ms</code> as plain consumer config with no documented client-side floor beyond the broker's own — confirmed live this round by constructing a deliberately short value with no rejection from the installed client.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 72.<br>
+<strong>Next up:</strong> this round closed Day 68's own named gap (a restart overrunning its window, run against the two-consumer shape). Left open: both members overrunning their windows simultaneously, and the broker-side <code>group.max.session.timeout.ms</code> bound named in today's scope line as real but out of this course's working-level Kafka depth. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty-eight rounds, 35-72) — still worth a human granting it once. Day 71's own two Airflow follow-ups (<code>map_index_template</code>, an <code>XComArg</code> passed directly to <code>.expand_kwargs()</code>) and Day 70's dbt follow-up (model-level constraints for a composite key) remain open too. With today's round, Kafka has had the most recent fresh-gap attention (closing a four-round-old named TODO); a future round's gap-scan should weigh dbt or Airflow next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why a late rejoin costs a second rebalance instead of reclaiming the old slot, or where the broker's own timeout bounds would come in? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

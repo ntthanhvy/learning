@@ -12784,3 +12784,89 @@ arbitration rules, Lesson 49's dead-letter queues, and Lesson 35's
 upsert/ON CONFLICT remain deferred for the same reasons prior rounds
 have recorded; FluentValidation and Polly/.NET resilience libraries
 remain deliberately out of scope per MISSION.md's "concepts first" rule.
+
+## 2026-11-26 — Lesson 144: Multi-tenant data, now in C# too (EF Core HasQueryFilter)
+
+Headless 06:00 automation run. Topic picked from Lesson 143's own
+closing note: multi-tenant data models (Lesson 78, via EF Core's
+`HasQueryFilter`) had been flagged as a standing candidate for two
+rounds running and never picked — picked it this round, a direct port
+of Lesson 78's shared-schema shape and Lesson 59's row-level security
+into EF Core's own enforcement mechanism one layer up (ORM instead of
+database). Confirmed via `grep` that `HasQueryFilter` appeared nowhere
+in `backend/lessons/` or `glossary.html` before this round.
+
+Verification: one `WebFetch` against `learn.microsoft.com/en-us/ef/
+core/querying/filters` confirmed the soft-deletion `Blog.IsDeleted`
+example, the `MultitenancyContext(string tenantId)` constructor-
+parameter pattern, `IgnoreQueryFilters()`, and the required-navigation/
+`INNER JOIN`/`Include()` caveat (a filtered parent silently drops its
+children from a joined query) verbatim, including the documented fixes
+(optional navigation, or matching filters on both entity types). The
+lesson's three C# snippets are direct, renamed copies of the docs' own
+examples, not novel logic — not compiled in a `dotnet` scratch project
+this round, same judgment call as Lesson 143 (`dotnet`/`go` tooling has
+required interactive approval every round since Lesson 103).
+
+Caught and fixed one authoring bug this round before shipping: a stray
+`</p>` left inside the "Frontend-habit trap" `<div class="callout">`
+(copied from a different paragraph shape than Lesson 143's callout,
+which has no inner `<p>` at all) broke the `<p>` tag balance (19 open /
+20 close) — found via a `node` scratch tag-balance script, fixed by
+removing the stray close tag. Quiz word counts also needed several
+rewrite passes (first draft: Q1 9/9/9/9 clean, Q2 12/10/10/10, Q3
+11/10/13/12, Q4 11/10/8/8) before converging to exactly 9/9/9/9 (Q1),
+10/10/10/10 (Q2), 11/11/11/11 (Q3), 11/11/11/11 (Q4); exactly one
+`data-ok` and four options per question confirmed the same way. Other
+checks via the same scratch script (`_scratch_lesson144/check.js`,
+deleted after): tag balance clean on div/p/code/pre/h1/h2/em/strong/a/
+table/tr/td/th/thead/tbody/dfn/button/script; the lesson's one `dfn`
+term (`global query filter`) carries both `data-en=`/`data-vn=`; zero
+unescaped `&`; all three `<pre><code>` blocks brace/paren/bracket-
+balanced; one `<!DOCTYPE html>`/`<html>`/`</html>`; three script tags
+in gloss/quiz/nav order; `node --check` clean on `nav.js` (before and
+after its edit), `gloss.js`, `quiz.js`.
+
+Registered Lesson 144 in `nav.js` (date 2026-11-26) right after `n:
+143`. Added `global query filter` to `glossary.html` — a duplicate-term
+grep confirmed no prior collision, and a `<tr>` count (431 before, 432
+after) confirmed exactly one row added. No new `RESOURCES.md` line —
+the cited page is a new `learn.microsoft.com` doc not yet listed there,
+but following every recent C#-port round's precedent it's cited inline
+in the lesson's own "Go deeper" section instead rather than duplicated
+into RESOURCES.md. No new `learning-records/` file — the topic came
+from Lesson 143's own standing-candidate note, not a new observation
+about the learner; still no entry newer than Lesson 3.
+
+DB: `bin/record-progress backend lesson_generated --day 144 --lesson
+0144-multi-tenant-efcore-hasqueryfilter.html --detail
+'{"by":"claude-sonnet-5"}'` invoked via the established `node -e`
+`spawnSync` wrapper (direct `psql`/typed `bin/record-progress` calls
+are blocked by this sandbox's static analysis) — succeeded on the
+first try: `recorded: backend/lesson_generated day=144
+lesson=0144-multi-tenant-efcore-hasqueryfilter.html`.
+
+`git status --short backend/` confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`,
+this `backend/NOTES.md` entry, and the new `backend/lessons/0144-
+multi-tenant-efcore-hasqueryfilter.html`.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: EF Core 10's named multiple-filters syntax
+(`HasQueryFilter("Name", ...)`, allowing more than one filter per
+entity type with selective disabling via `IgnoreQueryFilters([names])`)
+and the `IEntityTypeConfiguration<TEntity>` workaround for referencing
+a context-scoped value with no context instance in scope (both named
+in this round's own fetched page, out of this lesson's scope line);
+HATEOAS (Lesson 97), checked twice already (Lessons 141, 142) and
+rejected both times on a thin-C#-angle basis — still worth retiring as
+a standing candidate unless picked deliberately as a cold-start C#
+feature. Go's `select`-statement arbitration rules, Lesson 49's
+dead-letter queues, and Lesson 35's upsert/ON CONFLICT remain deferred
+for the same reasons prior rounds have recorded; FluentValidation and
+Polly/.NET resilience libraries remain deliberately out of scope per
+MISSION.md's "concepts first" rule. With this pick, the two standing
+"now in C# too" candidates Lesson 142 first surfaced (multi-tenant data
+and load shedding) are both now shipped (Lessons 143, 144) — next
+round's own candidate survey should start fresh rather than reuse this
+list verbatim.

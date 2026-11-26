@@ -246,6 +246,8 @@
       file: "lessons/0118-ipaddress.html" },
     { n: 119, date: "2026-11-25", title: "Review day 23: retrieval across Days 116-118",
       file: "lessons/0119-review-retrieval-day-23.html" },
+    { n: 120, date: "2026-11-26", title: "mimetypes: guessing a file's type from its name",
+      file: "lessons/0120-mimetypes.html" },
   ];
 
   const REFS = [

@@ -8345,3 +8345,101 @@ along the Phase 2 spine, adapted to the learning records.
   gap-scan should weigh dbt or Kafka next, or whichever named follow-up or
   learner signal turns up first, rather than assuming any one of the three
   by default.
+
+- 2026-11-26 (headless 06:00 run, Day 72 generated): seventy-second lesson,
+  `0072-kafka-static-membership-timeout-overrun.html`. Confirmed via the
+  filesystem that no `lessons/0072-*.html` existed and no `n: 72` row was in
+  `assets/nav.js` before starting; `bin/record-progress` (this round's own
+  idempotency check, successful this time — no approval-gate decline) also
+  showed no prior `dataeng` row for today. Read `MISSION.md`, `PLAN.md`,
+  this file's tail through Day 71's close, the single baseline learning
+  record (still the only file in `learning-records/`), and `RESOURCES.md`
+  before picking anything. **Topic choice:** Days 70 and 71 each closed a
+  named gap (dbt, then Airflow) and each said the next round should weigh
+  Kafka. Day 68's own scope line and closing note named a concrete, bounded
+  follow-up it did not build: a statically-identified consumer's restart
+  deliberately timed to exceed its own `session.timeout.ms`, to show live
+  that it degrades to Day 34's ordinary dynamic-style reassignment for that
+  one member while a healthy second member stays untouched throughout — Day
+  68 had only asserted that outcome from the protocol, never run it. Grepped
+  every lesson for `session.timeout.ms` past Day 68 and found no later round
+  had already built this, confirming the gap was real and unclosed. Picked
+  this over Day 70's own named dbt follow-up (a composite-key model-level
+  constraint) because that lesson's own scope line says this project's
+  tables never need one — building it would mean inventing a table the
+  domain doesn't have, where Day 68's Kafka gap reuses the exact two-consumer
+  script already in place. No pandas, no Python-language teaching, no
+  API/idempotency re-derivation (grepped the finished lesson for all three
+  and found none beyond the existing `ON CONFLICT` bridge every rebalance
+  lesson since Day 6 already uses) — none applied or needed this round.
+  **Content:** no file in the learner's repo changes — today reruns Day 68's
+  existing `scripts/consume_order_events.py` and its `INSTANCE_ID` env-var
+  shape unmodified, with one `sleep` duration widened past 45s instead of
+  under it, so the grace window actually closes. Chains two already-taught
+  facts (Day 66: `session.timeout.ms` is a static member's only grace-window
+  timer; Day 68: bookkeeping is per-member) into one live-run prediction, new
+  this round: a late rejoin after the window has closed is treated as a
+  brand-new member joining, costing a second, ordinary rebalance rather than
+  reclaiming the old slot — named explicitly as a conclusion this round adds,
+  not restated from either prior lesson.
+  **Verification:** no reachable Kafka broker this sandbox round (the
+  standing gap every recent Kafka round has named), so Section 3's actual
+  multi-minute, multi-process timing rests on Kafka's documented
+  static-membership expiry behavior (KIP-345), not a live run. What was
+  confirmed live: two scratch `Consumer({...})` configs — one with
+  `session.timeout.ms: 45000`, one deliberately shorter at `10000` — were
+  both constructed successfully against a freshly-installed
+  `confluent-kafka==2.16.2` client (librdkafka 2.16.0) with no
+  config-rejection error, confirming the client enforces no floor of its own
+  on this value. Scratch work used `.scratch_dataeng_verify/` under the repo
+  root per this file's own documented convention (`/tmp` out of bounds this
+  sandbox round); deleted after, confirmed via `ls -d` returning "No such
+  file or directory" post-cleanup. No Python file in the learner's repo
+  changed today (only a terminal `sleep` argument, not committed code), so no
+  `py_compile` step applied; no dbt snippet either, so no `dbt parse` step,
+  the same shape prior pure-Kafka rounds used.
+  Quiz word counts verified with a small Node script (the same workaround
+  recent rounds used), stripping HTML tags and counting whitespace-split
+  tokens per option. First draft came up uneven on two of three questions
+  (10/11/10 and 10/9/7) — several word-for-word edit passes, re-running the
+  script after each edit, to reach a clean 10/10/10 split on all three. HTML
+  structure verified via paired open/close tag counts on every tag that
+  appears (`div` 8/8, `p` 21/21, `code` 63/63, `button` 9/9, `script` 3/3,
+  `dfn` 1/1, `pre` 5/5, `h2` 8/8, `h1` 1/1, `em` 10/10, `strong` 6/6, `a`
+  3/3, `span` 5/5, `table` 1/1, `tr` 3/3, `td` 4/4, `th` 2/2) and a bare-`&`
+  regex scan — zero bare `&` found.
+  Grepped the whole glossary for `grace-window expiry` and `grace window
+  expiry` before writing the new `<dfn>` — zero hits, confirming the term is
+  genuinely new. `reference/glossary.html` re-checked after appending Day
+  72's section: `h2` 71/71, `table` 71/71, `tr` 242/242, `td` 513/513, `th`
+  213/213, zero bare `&`, and a duplicate-term scan across all 171 terms in
+  the first column — zero duplicates. `node --check` clean on `nav.js` after
+  today's edit.
+  Added one new glossary term — `grace-window expiry` — under a new Day 72
+  section.
+  No new `RESOURCES.md` line this round: both citations (Kafka Design docs,
+  confluent-kafka Python client docs) were already this course's standing
+  sources, reused for a later section of the same material Days 5/6/34/50/
+  55/58/66/68 already cited.
+  Registered Lesson 72 in `assets/nav.js` right after the `n: 71` entry,
+  dated 2026-11-26.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a named follow-up inside Day 68's own scope line and closing note,
+  not a new durable fact about the learner distinct from the single
+  2026-09-14 baseline record on file, the same reasoning recent rounds have
+  each used.
+  **Next up:** both members overrunning their windows simultaneously, and
+  the broker-side `group.max.session.timeout.ms`/`group.min.session.
+  timeout.ms` bounds (named in today's scope line as real but past this
+  course's working-level Kafka depth) remain open, bounded follow-ups. Day
+  71's own two Airflow follow-ups (`map_index_template`, an `XComArg` passed
+  directly to `.expand_kwargs()`) and Day 70's dbt follow-up (model-level
+  constraints for a composite key, blocked on this project never having one)
+  remain open too. The `airflow db migrate`/`airflow dags test`
+  approval-gate block remains the standing, unresolved environment
+  limitation (now thirty-eight rounds, 35-72) — still worth a human granting
+  it once. With today's round, Kafka has had the most recent fresh-gap
+  attention (closing a four-round-old named TODO); a future round's gap-scan
+  should weigh dbt or Airflow next, or whichever named follow-up or learner
+  signal turns up first, rather than assuming any one of the three by
+  default.

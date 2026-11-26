@@ -84,6 +84,7 @@
     { n: 69, date: "2026-11-23", title: "Airflow dynamic task mapping: one task per city, not one task for all", file: "lessons/0069-airflow-dynamic-task-mapping.html" },
     { n: 70, date: "2026-11-24", title: "dbt model contracts: closing Day 14's primary_key and foreign_key gap", file: "lessons/0070-dbt-primary-foreign-key-constraints.html" },
     { n: 71, date: "2026-11-25", title: "Airflow .expand_kwargs() and .partial(): closing Day 69's two named gaps", file: "lessons/0071-airflow-expand-kwargs-and-partial.html" },
+    { n: 72, date: "2026-11-26", title: "A static member's restart that overruns its own grace window", file: "lessons/0072-kafka-static-membership-timeout-overrun.html" },
   ];
 
   const REFS = [

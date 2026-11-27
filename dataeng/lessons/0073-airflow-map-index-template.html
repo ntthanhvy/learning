@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 73 · Airflow map_index_template: naming a mapped instance, not just numbering it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 73 · ~20 min · 27 Nov 2026</p>
+<h1>Airflow map_index_template: naming a mapped instance, not just numbering it</h1>
+<p class="byline">Today's tangible win: <code>city_sla_check</code>'s four mapped <code>check_city_sla</code> instances, which have shown up in every log and UI view since Day 69 as the bare integers <code>map_index=0..3</code>, now render as <code>Hanoi</code>, <code>Ho Chi Minh City</code>, <code>Da Nang</code> and <code>Hue</code> instead — one new keyword argument on the decorated task, confirmed this round with a real <code>DagBag</code> parse and a direct read of the installed package's own rendering code, since no live scheduler was reachable to run the template for real.</p>
+
+<div class="callout"><strong>Before today — confirm Day 71's DAG still parses:</strong> today edits <code>dags/city_sla_check.py</code> in place, adding one keyword to the existing <code>@task</code> decorator on <code>check_city_sla</code> — it touches nothing else in the file. Start from a clean parse:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If Day 71's <code>.partial(threshold_minutes=45).expand_kwargs(list_city_configs())</code> shape isn't in place yet, build that first — today's one keyword is an addition to it, not a replacement.</div>
+
+<h2>1 · The gap Day 69 and Day 71 each named and left for later</h2>
+<p>Both of this project's mapped-task lessons flagged the same cosmetic gap without closing it. Day 69's scope line named <code>map_index_template</code> as "naming mapped instances something more readable than a bare integer," right after it taught <code>.expand()</code> over four cities. Day 71 repeated the same line almost verbatim after adding <code>.expand_kwargs()</code> and <code>.partial()</code> to the same task. Neither lesson needed it to make its own point — Day 69 was about the fan-out existing at all, Day 71 about two arguments varying together — but both left the resulting UI genuinely harder to read than it has to be: four task instances named <code>check_city_sla[0]</code> through <code>check_city_sla[3]</code>, and knowing which index is Hanoi means cross-referencing <code>list_city_configs()</code>'s own list order by hand.</p>
+<p>That's a real cost once a DAG run fails. The Airflow UI's Grid and Graph views, and every <code>airflow tasks states-for-dag-run</code>-style listing, show the bare integer — not the city, not the dict that produced it. Grepped every lesson past Day 71 for <code>map_index_template</code> and found it named only in scope-line prose, never built, confirming the gap is still exactly what both lessons left it as.</p>
+
+<h2>2 · <dfn data-en="a Jinja template string set on a TaskFlow-decorated task (or passed to .partial()), rendered once per mapped instance against that instance's own resolved op_kwargs, whose output becomes the human-readable label Airflow shows in place of the mapped instance's bare integer index in the UI, logs and task-instance API -- rendered twice: once early, best-effort, right before the task body runs, and once again after it finishes, in case the template needs the task's own return value" data-vn="giữ nguyên &quot;map_index_template&quot; — chuỗi template Jinja set trên task đã decorate TaskFlow (hoặc truyền vào .partial()), render 1 lần cho MỖI instance mapped dựa trên op_kwargs đã resolve riêng của instance đó, kết quả render trở thành label dễ đọc mà Airflow hiện thay cho map index nguyên dạng số trong UI, log và task-instance API -- render 2 lần: 1 lần sớm, best-effort, ngay trước khi task chạy, và 1 lần nữa sau khi task chạy xong, phòng khi template cần dùng return value của task">map_index_template</dfn>: one Jinja string, rendered per instance from that instance's own arguments</h2>
+<p>Add it as a keyword on the <code>@task</code> decorator itself, not on <code>.expand()</code>/<code>.expand_kwargs()</code>:</p>
+<pre><code><span class="kw">@task</span>(map_index_template=<span class="str">"{{ task.op_kwargs['city'] }}"</span>)
+<span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>, min_orders: <span class="kw">int</span>, threshold_minutes: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+    ...</code></pre>
+<p>Confirmed this round with a real <code>DagBag</code> parse against exactly this change: the string lands untouched in <code>partial_kwargs['map_index_template']</code>, the DAG imports with zero errors, and <code>is_mapped</code>, <code>upstream</code> and the rest of Day 71's already-confirmed structure are all unaffected — this keyword changes a label only, nothing about scheduling.</p>
+<p>Reading the installed <code>apache-airflow==3.3.1</code> package's own execution-time code directly (<code>airflow.sdk.execution_time.task_runner</code>, the module that actually runs a task once the scheduler has handed it off) shows exactly when and how the string turns into a real label:</p>
+<ul>
+<li><code>task.map_index_template</code> is added to the Jinja template context under the key <code>map_index_template</code>, alongside the usual <code>dag</code>, <code>task</code>, <code>ti</code> and <code>params</code> every templated field already gets.</li>
+<li>A private function, <code>_render_map_index(context, ti, log)</code>, does the actual work: <code>jinja_env.from_string(template).render(context)</code> — plain Jinja, the same engine and environment every other templated field in this course (Day 10's <code>{{ var() }}</code>, Day 19's <code>{{ ds }}</code>) already uses.</li>
+<li>At render time, <code>context["task"]</code> is set to <code>ti.task</code> — and for a mapped task instance, that is the <em>unmapped</em>, per-instance operator Day 71 already confirmed exists (the one <code>.expand_kwargs()</code> produces one of, per dict). Its <code>op_kwargs</code> is that one instance's own resolved arguments, not the full list — so <code>{{ task.op_kwargs['city'] }}</code> reads "Hanoi" on the Hanoi instance and "Hue" on the Hue instance, never the other three.</li>
+<li>The render happens <strong>twice</strong>: once early, right before the task body executes, with whatever context is available then (best-effort — if it fails, the error is swallowed and logged at debug level, since a partial label beats a crashed task), and once again right after the task body finishes, with the fuller post-execution context. The second render overwrites the first only if it produces a different, non-empty string — so a template that only needs <code>op_kwargs</code>, like today's, settles on its final value from the first render already.</li>
+<li>The result lands on <code>ti.rendered_map_index</code>, a dedicated field threaded through every task-instance state-change call this round's source read found (running, success, failed, retry) and sent back to the API server as its own value — not reused from any existing templated field, confirming it is a first-class label, not a side effect of logging.</li>
+</ul>
+<div class="callout">A genuinely new finding this round, not assumed from Day 69's or Day 71's own text: the double-render exists specifically so a template referencing the task's own <em>return value</em> (via <code>{{ ti.xcom_pull(...) }}</code>-style access, not used in today's build) can still produce a correct label — the early render is a best-effort placeholder visible while the task is still running, and the real label is only guaranteed accurate after the task finishes and the second render runs. Today's template only reads <code>op_kwargs</code>, available before the task body ever runs, so both renders would already agree in this specific case — but the two-pass design is there for templates that need more than that.</div>
+
+<h2>3 · Build: add the keyword, confirm the parse, read the label back with real Jinja</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/city_sla_check.py</code> — the only change from Day 71's version is the one keyword on <code>check_city_sla</code>'s decorator:</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+CITY_CONFIGS = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"min_orders"</span>: <span class="kw">50</span>},
+    {<span class="str">"city"</span>: <span class="str">"Ho Chi Minh City"</span>, <span class="str">"min_orders"</span>: <span class="kw">100</span>},
+    {<span class="str">"city"</span>: <span class="str">"Da Nang"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hue"</span>, <span class="str">"min_orders"</span>: <span class="kw">20</span>},
+]
+
+
+<span class="kw">@dag</span>(
+    dag_id=<span class="str">"city_sla_check"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+)
+<span class="kw">def</span> city_sla_check():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> list_city_configs() -&gt; <span class="kw">list</span>[<span class="kw">dict</span>]:
+        <span class="cm"># TODO: replace the hardcoded list with a real query -- per-city</span>
+        <span class="cm"># order counts from stg_orders, to pick each min_orders floor from</span>
+        <span class="cm"># real volume instead of a number typed in by hand.</span>
+        <span class="kw">return</span> CITY_CONFIGS
+
+    <span class="kw">@task</span>(map_index_template=<span class="str">"{{ task.op_kwargs['city'] }}"</span>)  <span class="cm"># new today</span>
+    <span class="kw">def</span> check_city_sla(city: <span class="kw">str</span>, min_orders: <span class="kw">int</span>, threshold_minutes: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+        <span class="cm"># TODO: query mart_delivery_sla for this city; if today's order</span>
+        <span class="cm"># count &gt;= min_orders, raise ValueError when share_over_45_min's</span>
+        <span class="cm"># minute threshold (threshold_minutes) is exceeded, else skip the</span>
+        <span class="cm"># verdict as too-low-volume to act on.</span>
+        ...
+
+    check_city_sla.partial(threshold_minutes=<span class="kw">45</span>).expand_kwargs(list_city_configs())
+
+
+city_sla_check()
+</code></pre>
+<p>The two task bodies' own TODOs are unchanged from Day 71 — today's build is the one decorator keyword, not new query logic.</p>
+
+<h2>4 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags')
+t = bag.dags['city_sla_check'].get_task('check_city_sla')
+print('is_mapped:', t.is_mapped)
+print('map_index_template:', t.map_index_template)
+print('partial_kwargs op_kwargs:', t.partial_kwargs['op_kwargs'])
+"</code></pre>
+<p>Expected — the same structural facts this round's own scratch parse printed:</p>
+<pre><code>is_mapped: True
+map_index_template: {{ task.op_kwargs['city'] }}
+partial_kwargs op_kwargs: {'threshold_minutes': 45}</code></pre>
+<p>That confirms the parse accepts the new keyword and changes nothing about the mapping structure — not the actual rendered label, which only exists once a real task instance runs. To see the rendered label itself without a live scheduler, render the same template with plain Jinja2 against each city's own <code>op_kwargs</code>, exactly how <code>_render_map_index</code> does it internally:</p>
+<pre><code>uv run --with jinja2 python3 -c "
+from jinja2 import Environment
+
+class FakeTask:
+    def __init__(self, op_kwargs):
+        self.op_kwargs = op_kwargs
+
+env = Environment()
+template = \"{{ task.op_kwargs['city'] }}\"
+for cfg in [
+    {'city': 'Hanoi', 'min_orders': 50, 'threshold_minutes': 45},
+    {'city': 'Ho Chi Minh City', 'min_orders': 100, 'threshold_minutes': 45},
+    {'city': 'Da Nang', 'min_orders': 20, 'threshold_minutes': 45},
+    {'city': 'Hue', 'min_orders': 20, 'threshold_minutes': 45},
+]:
+    print(env.from_string(template).render(task=FakeTask(cfg)))
+"</code></pre>
+<p>Expected:</p>
+<pre><code>Hanoi
+Ho Chi Minh City
+Da Nang
+Hue</code></pre>
+<p>Once Airflow's own <code>airflow db migrate</code>/<code>airflow dags test</code> approval gate is available in your own environment (unavailable in this sandbox, see the scope line), running the DAG for real and opening the Grid view will show these same four strings in place of <code>[0]</code> through <code>[3]</code> — the live scheduler runs the identical render this script just simulated by hand. Commit the edited <code>dags/city_sla_check.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your DAG has a mapped task with a dozen instances. How do you make a failure in the Airflow UI actually actionable without opening every log?"</strong> A strong answer, out loud: <em>"By default a mapped instance shows up as a bare integer index, so a failure just tells you 'instance 7 failed' — you have to go cross-reference the upstream list by hand to know what that even means. map_index_template fixes that: it's a Jinja string set on the task itself, rendered once per instance against that instance's own op_kwargs, and the result replaces the integer everywhere Airflow shows that instance — the Grid view, the logs, the task-instance API. For a task mapped over cities, something like task.op_kwargs['city'] turns 'instance 7 failed' into 'Da Nang failed,' which is immediately actionable. It's purely a label, though — it doesn't change scheduling, retries or dependencies, and it's rendered twice internally, once as a best-effort early guess and once for real after the task finishes, so a template that depends on the task's own output still resolves correctly."</em> The signal: naming it as a readability fix with zero effect on scheduling semantics, and knowing it's rendered from the instance's own resolved arguments, not the full mapped list.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers setting <code>map_index_template</code> on a TaskFlow-decorated task and reading its rendered label back from <code>op_kwargs</code>, on the same <code>city_sla_check</code> DAG Days 69 and 71 built. It does not cover templating from the task's own return value (the double-render exists for this case; today's template doesn't need it), setting <code>map_index_template</code> via <code>.partial()</code> instead of the decorator (both are documented as valid; this build used the decorator since it reads closer to the task definition), or an <code>XComArg</code> passed directly to <code>.expand_kwargs()</code> instead of the plain list this project already uses — still a real, bounded follow-up named by Day 69 and repeated by Day 71, not touched this round either. No live Airflow scheduler or metadata database was reachable this sandbox round (the standing <code>airflow db migrate</code> approval gate, unavailable again, now thirty-nine rounds, 35-73), so the actual rendered label inside a real Grid view rests on a direct read of the installed package's own rendering source plus a hand-run Jinja simulation of that exact code path, not a live <code>airflow dags test</code> run.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by reading the installed apache-airflow==3.3.1 package's own execution-time source directly: map_index_template is a Jinja string set on the task (via the decorator or .partial()), rendered once per mapped instance against that instance's own op_kwargs, and the output replaces the bare integer index everywhere Airflow shows that instance -- the Grid view, logs and task-instance API. It changes no scheduling behavior at all.">
+    <p class="stem">What does <code>map_index_template</code> actually change about a mapped task instance?</p>
+    <button class="opt" data-ok>Only its own displayed label, never its scheduling or dependencies</button>
+    <button class="opt">Which upstream list each mapped instance pulls its arguments from</button>
+    <button class="opt">How many separate task instances the mapping call actually creates</button>
+  </div>
+  <div class="q" data-why="Confirmed this round by reading _render_map_index and the context-building code around it directly: at render time context['task'] is set to ti.task, which for a mapped instance is the unmapped, per-instance operator Day 71 already confirmed exists -- its op_kwargs holds only that one instance's own resolved arguments, not the full list every instance was mapped over.">
+    <p class="stem">When the template reads <code>task.op_kwargs['city']</code>, which city's value does the Hanoi instance actually render?</p>
+    <button class="opt" data-ok>Only Hanoi's value, from that one instance's own resolved arguments</button>
+    <button class="opt">The first city from the whole list every instance mapped</button>
+    <button class="opt">All four cities joined together, since every instance shares op_kwargs</button>
+  </div>
+  <div class="q" data-why="Confirmed this round by reading task_runner.py's own two call sites for _render_map_index directly: the template renders once early, best-effort, right before the task body executes (with errors suppressed so a label failure never crashes the task), and once again after the task finishes, so a template that depends on the task's own return value still ends up correct once the real result exists.">
+    <p class="stem">Why does Airflow render <code>map_index_template</code> twice instead of once?</p>
+    <button class="opt" data-ok>A template reading the task's own return value needs it</button>
+    <button class="opt">Airflow always double-renders every single templated field it ever has</button>
+    <button class="opt">The first render shown is only a cached value, always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/dynamic-task-mapping.html">Dynamic Task Mapping</a> doc, already this course's citation since Day 69, documents <code>map_index_template</code> in its own section, reused here rather than re-fetched as a new line. Not fetched live this round either (no working <code>WebFetch</code> tool, the same recurring gap Days 17, 23, 26, 31, 34, 35, 45, 54, 56, 69 and 71 each hit) — today's behavioral claims instead came from reading the installed <code>apache-airflow==3.3.1</code> package's own <code>airflow.sdk.execution_time.task_runner</code> module directly (the <code>_render_map_index</code> function and its two call sites), confirmed against a real <code>DagBag</code> parse of the edited DAG and a hand-run Jinja2 render simulating the exact same code path. Confirm the doc's own wording against the live page before quoting it verbatim in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 73.<br>
+<strong>Next up:</strong> this round closed one of Day 69's and Day 71's two shared named follow-ups. Left open, named again today: an <code>XComArg</code> passed directly to <code>.expand_kwargs()</code> instead of a plain list, and templating <code>map_index_template</code> from a task's own return value rather than its input <code>op_kwargs</code> (the double-render this lesson explained the reason for, but didn't build). Day 70's dbt follow-up (model-level constraints for a composite key) remains blocked — this project's tables still don't have a genuine composite-key use case. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now thirty-nine rounds, 35-73) — still worth a human granting it once. Separately, this round fixed a real, already-known bug: Days 45 and 51's own published Verify blocks called <code>DagBag(dag_folder='dags', include_examples=False)</code>, a keyword-argument shape confirmed this round (and first found by Day 69) to raise <code>TypeError: DagBag.__init__() got an unexpected keyword argument 'include_examples'</code> against the pinned Airflow 3.3.1 — both lines now read <code>DagBag(dag_folder='dags')</code>, confirmed live to parse with zero import errors and no loss of either lesson's own stated behavior, since a plain folder-scoped <code>DagBag</code> never loaded Airflow's bundled example DAGs into either lesson's single-DAG folder regardless of the keyword. With today's round, Airflow has had the most recent fresh-gap attention (closing a named TODO plus the 45/51 bug fix); a future round's gap-scan should weigh dbt or Kafka next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why the render happens twice, or what templating from the task's own return value would actually look like? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 141 · Series.cov() and np.cov(): the unscaled number behind corr(), and the matrix-shape trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 141 · ~20 min · 27 Nov 2026</p>
+<h1>Series.cov() and np.cov(): the unscaled number behind corr(), and the matrix-shape trap</h1>
+<p class="byline">Lesson 140's own closing note left no named successor — this round's own fresh scan grepped every lesson body case-insensitively for <code>.cov(</code> and <code>np.cov(</code>: zero hits anywhere across Lessons 1-140, confirmed by a second pass over <code>NOTES.md</code> and the glossary too. <code>.corr()</code> (Lesson 50) got its own lesson back in Lesson 50, but its quieter sibling <code>.cov()</code> — the raw, unscaled number <code>.corr()</code> is actually built from — never has, a genuine gap and a natural companion to Lesson 137's <code>ddof</code> arc.</p>
+
+<h2>1 · cov() measures the same "move together" idea as corr() — just not squeezed onto -1..1</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5), reusing Lesson 50's own reps table:</p>
+<pre><code>demo = pd.DataFrame({
+    <span class="str">"rep"</span>:             [<span class="str">"Mai"</span>, <span class="str">"Long"</span>, <span class="str">"Chi"</span>, <span class="str">"Huy"</span>, <span class="str">"Trang"</span>],
+    <span class="str">"calls_made"</span>:      [10, 25, 15, 40, 30],
+    <span class="str">"deals_closed"</span>:    [2, 6, 3, 9, 7],
+    <span class="str">"office_size_sqm"</span>: [12, 30, 15, 8, 45],
+})
+
+demo[<span class="str">"calls_made"</span>].cov(demo[<span class="str">"deals_closed"</span>])    <span class="cm"># 34.25</span>
+demo[<span class="str">"calls_made"</span>].corr(demo[<span class="str">"deals_closed"</span>])   <span class="cm"># 0.9958962509386671</span></code></pre>
+<p>Both numbers describe the identical relationship between the same two columns, confirmed directly to be mathematically tied together: <dfn data-en="a Series/DataFrame method measuring how two numeric columns vary together in their own original units, unscaled -- positive means they tend to rise and fall together, negative means they move in opposite directions, but unlike corr() the raw number has no fixed -1..1 range and its SIZE depends on the columns' own units, so it cannot be compared across different column pairs" data-vn="giữ nguyên 'cov()' (covariance, hiệp phương sai) — đo mức độ 2 cột SỐ biến đổi cùng nhau, giữ nguyên ĐƠN VỊ gốc, KHÔNG chuẩn hoá; số DƯƠNG là cùng tăng cùng giảm, số ÂM là ngược hướng nhau; KHÁC corr() ở chỗ không bị giới hạn trong khoảng -1..1, độ lớn phụ thuộc đơn vị của chính 2 cột đó nên KHÔNG so sánh được giữa các cặp cột khác nhau">cov()</dfn> is <code>corr()</code> multiplied back out by each column's own spread: <code>cov = corr × std(A) × std(B)</code>, confirmed directly (<code>0.9958962509386671 × 11.957... × 2.880...</code> lands on the same <code>34.25</code>). <code>corr()</code> is <code>cov()</code> divided by both standard deviations to force the result onto a fixed -1..1 scale — <code>cov()</code> is the same relationship before that normalization step, still carrying the original columns' own units, which is exactly why a raw <code>34.25</code> cannot be compared against a covariance computed from a completely different pair of columns the way a <code>corr()</code> number always can.</p>
+
+<h2>2 · Whole-DataFrame cov(): a full matrix, var() sitting on its own diagonal</h2>
+<p>Confirmed directly, calling <code>cov()</code> on the whole DataFrame (no column selected) computes every pairwise combination at once, the same matrix shape Lesson 50 confirmed for <code>corr()</code>:</p>
+<pre><code>demo[[<span class="str">"calls_made"</span>, <span class="str">"deals_closed"</span>, <span class="str">"office_size_sqm"</span>]].cov()
+<span class="cm">--                  calls_made  deals_closed  office_size_sqm
+-- calls_made           142.50         34.25            31.25
+-- deals_closed          34.25          8.30            10.50
+-- office_size_sqm       31.25         10.50           234.50</span>
+
+demo[<span class="str">"calls_made"</span>].var()   <span class="cm"># 142.5 -- exactly the matrix's own top-left diagonal cell</span></code></pre>
+<p>Confirmed directly: every diagonal cell of a covariance matrix is just that column's own <code>.var()</code> — a column's covariance with itself reduces to its own variance, since <code>ddof</code>'s sample-vs-population split (Lesson 137) runs underneath <code>.cov()</code> too, defaulting to the same <code>ddof=1</code> sample formula. A one-element Series's <code>.cov()</code> inherits the identical single-row trap already confirmed for <code>.std()</code>/<code>.var()</code>: dividing by <code>count - 1 = 0</code> returns a silent <code>NaN</code>, no crash, confirmed directly on <code>pd.Series([5.0]).cov(pd.Series([3.0]))</code>.</p>
+
+<h2>3 · The real trap: np.cov() always returns a matrix, even for two plain 1-D arrays</h2>
+<p>Unlike Lesson 140's <code>median</code> trap (a genuine <code>NaN</code>-handling mismatch), <code>cov()</code>'s cross-library disagreement is about <strong>shape</strong>, not missing-data defaults. Confirmed directly, both <code>ddof</code> defaults actually already agree here — a pleasant contrast to Lesson 137's <code>.std()</code>/<code>.var()</code> split:</p>
+<pre><code>a = demo[<span class="str">"calls_made"</span>].to_numpy()
+b = demo[<span class="str">"deals_closed"</span>].to_numpy()
+
+np.cov(a, b)
+<span class="cm">-- array([[142.5 ,  34.25],
+--        [ 34.25,   8.3 ]])</span></code></pre>
+<div class="callout"><strong>Confirmed directly, why this is the sharper trap than it looks:</strong> <code>np.cov(a, b)</code> does NOT return the single cross-covariance number the way <code>Series.cov()</code> does — it returns the full 2x2 matrix, bundling in each array's own variance along the diagonal. The actual number matching <code>demo["calls_made"].cov(demo["deals_closed"])</code> sits buried at <code>np.cov(a, b)[0, 1]</code> (or equivalently <code>[1, 0]</code>, since the matrix is always symmetric), confirmed directly to equal <code>34.25</code> exactly. Code that naively does <code>np.cov(a, b)</code> expecting one number back, the same instinct <code>Series.cov()</code> trains, gets a whole array instead — no error, just the wrong shape silently flowing into whatever runs next. Confirmed directly, <code>np.cov(a, b, ddof=1)</code> (pandas' own implicit default) reproduces the exact matrix above, and <code>np.cov(a, b, ddof=0)</code> gives a different, smaller matrix — so the two libraries' <em>defaults</em> genuinely agree (both sample, <code>ddof=1</code>), unlike Lesson 137's <code>.std()</code>/<code>.var()</code>; <code>np.cov()</code>'s own default parameter is actually spelled <code>ddof=None</code>, which falls back to behaving like <code>ddof=1</code> unless a separate <code>bias=True</code> keyword is also passed.</div>
+
+<h2>4 · min_periods=, and NaN handling matches corr()'s own pairwise rule</h2>
+<p>Confirmed directly, <code>Series.cov()</code> drops <code>NaN</code> the same pairwise way Lesson 50 confirmed for <code>corr()</code> — only rows missing in either compared column, not a whole-table dropna:</p>
+<pre><code>a2 = pd.Series([<span class="kw">1.0</span>, <span class="kw">2</span>, np.nan, <span class="kw">4</span>, <span class="kw">5</span>])
+b2 = pd.Series([<span class="kw">2.0</span>, np.nan, <span class="kw">3</span>, <span class="kw">8</span>, <span class="kw">10</span>])
+
+a2.cov(b2)                   <span class="cm"># 8.666666666666668  -- computed from the 3 complete pairs only</span>
+a2.cov(b2, min_periods=4)    <span class="cm"># NaN  -- refuses: fewer than 4 complete pairs exist</span></code></pre>
+<p><code>min_periods=</code> is the confirmed guardrail <code>corr()</code> doesn't name as loudly: rather than silently computing from however few complete pairs happen to remain, it returns <code>NaN</code> if the count of usable pairs falls below the threshold given — useful whenever a near-empty overlap between two columns would otherwise produce a technically-real but practically-meaningless number. <code>np.cov()</code> on the raw arrays shows the opposite, blunter failure mode: confirmed directly, a plain <code>NaN</code> anywhere poisons every cell of the matrix that touches it, matching Lesson 140's own <code>np.median()</code>-propagation trap rather than introducing a new one.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between cov() and corr(), and when would you reach for cov() specifically?"</strong> A strong answer, out loud: <em>"corr() is cov() divided by both columns' own standard deviations, forced onto a fixed -1 to 1 scale, which is why corr() is comparable across completely different column pairs and cov() isn't -- a covariance of 34 between calls and deals means nothing next to a covariance of 10,000 between revenue in dollars and headcount, since the raw number still carries each column's own units. I'd reach for cov() directly mostly as a building block -- it's literally what variance becomes when you correlate a column with itself, and it's what portfolio-risk and some PCA-style calculations actually operate on -- but for a plain 'do these move together' question in a report, corr() is almost always the more honest number to show, because its scale means the same thing regardless of which columns are being compared."</em> The signal: naming the exact formula relationship (cov = corr × std × std) and the units caveat unprompted, not just repeating "they're related" vaguely.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.cov()</code>/<code>DataFrame.cov()</code>'s confirmed relationship to <code>corr()</code> (<code>cov = corr × std(A) × std(B)</code>), the confirmed diagonal-is-variance property of a whole-DataFrame covariance matrix, the confirmed single-row <code>NaN</code> trap inherited from <code>ddof=1</code>, <code>np.cov()</code>'s confirmed always-returns-a-matrix shape (even for two plain 1-D arrays, needing <code>[0, 1]</code> indexing to reach the one number <code>Series.cov()</code> would give directly), the confirmed agreement between both libraries' <code>ddof</code> defaults here, and the confirmed pairwise-dropna/<code>min_periods=</code>/matrix-wide-NaN-poisoning behavior around missing values. It does not cover portfolio-variance or PCA-style use of a full covariance matrix, out of scope per <code>MISSION.md</code>'s "no deep statistics" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/141_cov.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/141_cov.py</code></pre>
+<p>Exercise 1 confirms the Section 1 formula: <code>Series.cov()</code> between two columns equals <code>corr() × std(A) × std(B)</code>. Exercise 2 confirms the Section 3 trap: <code>np.cov()</code> on two raw 1-D arrays returns a 2x2 matrix whose off-diagonal cell, not the whole return value, is the one number matching <code>Series.cov()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: cov = corr * std(A) * std(B). corr() is cov() after dividing out both columns' own standard deviations, which is exactly what forces corr() onto a fixed -1..1 scale while cov() keeps the original units and has no fixed range.">
+    <p class="stem">Confirmed directly, how does <code>Series.cov()</code> relate to <code>Series.corr()</code> between the same two columns?</p>
+    <button class="opt" data-ok>cov equals corr times each column's own standard deviation</button>
+    <button class="opt">cov equals corr squared, with no other factors involved</button>
+    <button class="opt">the two are unrelated, each from a separate formula</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.cov(a, b) on two plain 1-D arrays returns a full 2x2 matrix, not a single number -- the off-diagonal cell at [0, 1] (or [1, 0]) is the one value matching Series.cov(), while the diagonal cells hold each array's own variance.">
+    <p class="stem">Confirmed directly, what does <code>np.cov(a, b)</code> return when <code>a</code> and <code>b</code> are two plain 1-D NumPy arrays?</p>
+    <button class="opt" data-ok>a 2x2 matrix, the matching number off its diagonal</button>
+    <button class="opt">a single float, always matching Series.cov() exactly, every time</button>
+    <button class="opt">a TypeError, since np.cov() needs one 2-D array always</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: min_periods= makes Series.cov() return NaN if fewer complete pairs than the given threshold remain, rather than silently computing from whatever few pairs happen to overlap. Without it, cov() still computes pairwise -- dropping only rows missing in either compared column -- same rule Lesson 50 confirmed for corr().">
+    <p class="stem">Confirmed directly, what does passing <code>min_periods=4</code> to <code>Series.cov()</code> do when only 3 complete pairs exist?</p>
+    <button class="opt" data-ok>returns NaN instead of computing from too few pairs</button>
+    <button class="opt">raises a ValueError immediately, refusing to run at all</button>
+    <button class="opt">pads the missing pair with zero, then computes normally</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.cov.html"><code>Series.cov()</code></a> API reference (per <code>RESOURCES.md</code>'s pandas User Guide grouping, ~5 min) — the page documents <code>min_periods=</code> directly and cross-links <code>DataFrame.cov()</code>'s whole-matrix form; the <code>np.cov()</code> matrix-shape behavior and the <code>cov = corr × std × std</code> relationship are confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>Series.cov()</code> was added today, placed right after Lesson 139's <code>Series.sem()</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed the one gap it found (<code>.cov()</code>/<code>np.cov()</code>) and surfaced no further named successor — a future round's own fresh scan should start clean, with nothing pre-committed, per this course's standing convention.<br><br>
+💬 Anything unclear — the cov/corr relationship, the np.cov() matrix shape, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

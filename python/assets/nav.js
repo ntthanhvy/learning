@@ -248,6 +248,8 @@
       file: "lessons/0119-review-retrieval-day-23.html" },
     { n: 120, date: "2026-11-26", title: "mimetypes: guessing a file's type from its name",
       file: "lessons/0120-mimetypes.html" },
+    { n: 121, date: "2026-11-27", title: "tracemalloc: watching where memory actually goes",
+      file: "lessons/0121-tracemalloc.html" },
   ];
 
   const REFS = [

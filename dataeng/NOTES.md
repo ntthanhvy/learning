@@ -8443,3 +8443,133 @@ along the Phase 2 spine, adapted to the learning records.
   should weigh dbt or Airflow next, or whichever named follow-up or learner
   signal turns up first, rather than assuming any one of the three by
   default.
+
+- 2026-11-27 (headless 06:00 run, Day 73 generated): seventy-third lesson,
+  `0073-airflow-map-index-template.html`. Confirmed via the filesystem that
+  no `lessons/0073-*.html` existed and no `n: 73` row was in `assets/nav.js`
+  before starting. Read `MISSION.md`, `PLAN.md`, this file's tail through
+  Day 72's close, the single baseline learning record (still the only file
+  in `learning-records/` — no `practice/` directory in this course either,
+  reconfirmed), and `RESOURCES.md` before picking anything. **Topic choice:**
+  Day 72's own closing note said Kafka had the most recent fresh-gap
+  attention and a future round should weigh dbt or Airflow next. Ran a fresh
+  gap-scan via a sub-agent across every PLAN.md Phase 2a (dbt) and Phase 2c
+  (Airflow) sub-topic against all 72 existing lessons — all fourteen listed
+  sub-topics are already taught, confirming the spine itself has no
+  undisputed gap left; the real remaining gaps are named follow-ups inside
+  recent lessons' own scope lines, the same standing convention this course
+  has used for many rounds. Of those: Day 70's composite-key constraint
+  stays blocked (this project's tables still have no genuine composite-key
+  use case — grepped for "composite" and found only prior histogram/
+  constraint lessons, no new candidate table). Day 69's and Day 71's two
+  shared Airflow follow-ups — `map_index_template` and an `XComArg` passed
+  directly to `.expand_kwargs()` — were both still open (grepped every
+  lesson past Day 71 for each; found only scope-line prose, never built).
+  Picked `map_index_template`: a clean, bounded, self-contained addition to
+  the existing `city_sla_check` DAG (Days 69/71) that needed no new file and
+  no live scheduler to verify meaningfully. No pandas, no Python-language
+  teaching (one decorator keyword on an existing TaskFlow function, not new
+  language ground), no API/idempotency re-derivation (grepped the finished
+  lesson for all three and found none) — none applied or needed this round.
+  **Content:** edited Day 71's `dags/city_sla_check.py` in place — added
+  `map_index_template="{{ task.op_kwargs['city'] }}"` to the `@task`
+  decorator on `check_city_sla`, no other change. New depth this round, not
+  restated from Day 69's or Day 71's own text: read the installed
+  `apache-airflow==3.3.1` package's own `airflow.sdk.execution_time.
+  task_runner` module directly and found the template renders *twice* —
+  once early and best-effort right before the task body runs (errors
+  suppressed), once again after the task finishes — specifically so a
+  template referencing the task's own return value still resolves
+  correctly; and that `context["task"]` at render time is the per-instance
+  *unmapped* operator (the same per-instance operator Day 71 already
+  confirmed `.expand_kwargs()` produces one of per dict), so `op_kwargs`
+  resolves to that one instance's own arguments, never the full mapped
+  list. The result is pushed to a dedicated `ti.rendered_map_index` field
+  threaded through every task-instance state-change call, confirmed a
+  first-class label rather than a side effect of logging.
+  **Verification:** `WebFetch` was not reachable this round (declined, the
+  same recurring gap Days 17, 23, 26, 31, 34, 35, 45, 54, 56, 69 and 71 each
+  hit) — fell back to reading the installed package's own source directly,
+  the same technique recent Airflow rounds used. Installed cleanly via `uv
+  run --with "apache-airflow==3.3.1"` (confirmed `DagBag.__init__`'s own
+  signature has no `include_examples` parameter at all — see the bug-fix
+  note below). Built a real scratch DAG with exactly today's
+  `map_index_template="{{ task.op_kwargs['city'] }}"` shape and parsed it
+  with a real `DagBag(dag_folder='dags')` — zero import errors,
+  `is_mapped: True`, `map_index_template` stored unchanged in
+  `partial_kwargs`, `partial_kwargs['op_kwargs'] == {'threshold_minutes':
+  45}`, matching the lesson's own published Verify block exactly. Read
+  `_render_map_index` and its two call sites in `task_runner.py` directly to
+  confirm the double-render and the `context["task"]` binding described
+  above. Simulated the actual rendering with real Jinja2 (`uv run --with
+  jinja2`) against a stand-in object exposing `op_kwargs`, confirming all
+  four cities render to their own bare name with no cross-contamination —
+  the same code path `_render_map_index` calls (`jinja_env.from_string(
+  template).render(context)`), just without a live Airflow scheduler.
+  `uv run python3 -m py_compile` clean on the full edited DAG file. What was
+  **not** confirmed live: the actual rendered label inside a real Grid view
+  rests on this round's source read plus the Jinja simulation, not a live
+  `airflow dags test` run, the same standing `airflow db migrate`
+  approval-gate limitation named every Airflow round since Day 35 (now
+  thirty-nine rounds, 35-73) — hit again this round exactly as expected,
+  flagged in the lesson's scope line. No dbt snippet in this lesson (pure
+  Airflow/Python), so no `dbt parse` step applied this round, the same
+  shape prior pure-Airflow rounds used.
+  Quiz word counts verified with a small Node script (the same workaround
+  recent rounds used), stripping HTML tags and counting whitespace-split
+  tokens per option. First draft came up uneven on all three questions
+  (9/10/9, 10/12/9, 11/8/13) — many word-for-word edit passes, one option at
+  a time, re-running the script after each edit, to reach a clean 10/10/10
+  split on all three. HTML structure verified via paired open/close tag
+  counts on every tag that appears (`div` 7/7, `p` 21/21, `code` 95/95,
+  `button` 9/9, `script` 3/3, `dfn` 1/1, `pre` 7/7, `h2` 7/7, `h1` 1/1, `em`
+  3/3, `strong` 5/5, `a` 2/2, `span` 58/58, `ul` 1/1, `li` 5/5) and a bare-`&`
+  regex scan — zero bare `&` found.
+  Grepped the whole glossary for `map_index_template` and `map index
+  template` before writing the new `<dfn>` — zero hits, confirming the term
+  is genuinely new. `reference/glossary.html` re-checked after appending
+  Day 73's section: `h2` 72/72, `table` 72/72, `tr` 244/244, `td` 516/516,
+  `th` 216/216, zero bare `&`, and a duplicate-term scan across all 172
+  terms in the first column — zero duplicates. `node --check` clean on
+  `nav.js` after today's edit.
+  Added one new glossary term — `map_index_template` — under a new Day 73
+  section.
+  No new `RESOURCES.md` line this round: the Dynamic Task Mapping doc was
+  already promoted to a real citation by Day 71 and is reused here for a
+  later section of the same page.
+  Registered Lesson 73 in `assets/nav.js` right after the `n: 72` entry,
+  dated 2026-11-27.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named follow-up shared by Day 69's and Day 71's own scope
+  lines, not a new durable fact about the learner distinct from the single
+  2026-09-14 baseline record on file, the same reasoning recent rounds have
+  each used.
+  **Separately, a scoped bug fix:** Day 69 first found, and Day 71's own
+  closing note left open, that Days 45 and 51's own published Verify blocks
+  call `DagBag(dag_folder='dags', include_examples=False)` — confirmed live
+  this round that `DagBag.__init__` in the pinned Airflow 3.3.1 has no
+  `include_examples` parameter at all, so that exact call raises
+  `TypeError: DagBag.__init__() got an unexpected keyword argument
+  'include_examples'` (reproduced live against a real scratch DAG folder).
+  Fixed both lines to read `DagBag(dag_folder='dags')`, the narrow
+  carved-out exception to this course's own "don't rewrite existing
+  lessons" rule since this is a correctness fix, not content revision —
+  confirmed live afterward that the corrected call parses a single-DAG
+  folder with zero import errors and loads no stray example DAGs, so
+  neither lesson's own stated behavior or expected output changes, only the
+  keyword that was never valid against this pinned version.
+  **Next up:** this round closed one of Day 69's and Day 71's two shared
+  named follow-ups. Left open, named again today: an `XComArg` passed
+  directly to `.expand_kwargs()` instead of a plain list, and templating
+  `map_index_template` from a task's own return value rather than its input
+  `op_kwargs` (the double-render this lesson explained the reason for, but
+  didn't build). Day 70's dbt follow-up (model-level constraints for a
+  composite key) remains blocked — this project's tables still don't have a
+  genuine composite-key use case. The `airflow db migrate`/`airflow dags
+  test` approval-gate block remains the standing, unresolved environment
+  limitation (now thirty-nine rounds, 35-73) — still worth a human granting
+  it once. With today's round, Airflow has had the most recent fresh-gap
+  attention (closing a named TODO plus the 45/51 bug fix); a future round's
+  gap-scan should weigh dbt or Kafka next, or whichever named follow-up or
+  learner signal turns up first, rather than assuming any one of the three
+  by default.

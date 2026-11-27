@@ -117,6 +117,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 118 — `ip_address()` for parsing and validating a single IPv4/IPv6 address (and why a hand-written regex gets range checks wrong), `ip_network()` for parsing a CIDR range and checking membership with `in`, and the `strict=False` escape hatch for building a network from an address that isn't the range's exact start.
 - [Docs: `mimetypes`](https://docs.python.org/3/library/mimetypes.html)
   Use for: Day 120 — `guess_type()` for guessing a MIME type and compression encoding from a filename's extension alone (never from the file's real bytes), `guess_extension()` as its reverse direction, and `add_type()` for registering a project-specific extension the built-in table doesn't know.
+- [Docs: `tracemalloc`](https://docs.python.org/3/library/tracemalloc.html)
+  Use for: Day 121 — `start()`/`is_tracing()` for turning allocation tracing on and checking it, `take_snapshot()`/`Snapshot.compare_to()` for pointing at the exact source line responsible for memory growth between two points in time (confirmed live against Day 1's mutable-default-argument trap), and `get_traced_memory()`/`reset_peak()` for a quick current/peak byte count without a full snapshot diff.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

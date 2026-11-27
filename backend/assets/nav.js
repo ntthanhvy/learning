@@ -296,6 +296,8 @@
       file: "lessons/0143-load-shedding-aspnetcore-concurrencylimiter.html" },
     { n: 144, date: "2026-11-26", title: "Multi-tenant data, now in C# too",
       file: "lessons/0144-multi-tenant-efcore-hasqueryfilter.html" },
+    { n: 145, date: "2026-11-27", title: "Naming more than one query filter",
+      file: "lessons/0145-efcore-named-query-filters.html" },
   ];
 
   const REFS = [

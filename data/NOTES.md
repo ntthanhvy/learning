@@ -13448,3 +13448,115 @@
   the `node -e`/`spawnSync` workaround (direct `psql`/script invocation is
   sandbox-blocked). `git status --short` showed only the intended `data/`
   files touched.
+- 2026-11-27 generation (Lesson 141, headless run): confirmed before writing
+  anything that no `lessons/0141-*.html` existed and no `n: 141` entry
+  existed in `nav.js` — not a duplicate run. No `lesson_completed`/quiz/
+  weak-spot row has ever been recorded for `data` beyond routine
+  `lesson_generated` rows, so this round continued steady sequential pacing
+  rather than reshaping format. Read `MISSION.md` (unmodified), this file's
+  own tail, `RESOURCES.md`, the sole `learning-records/` baseline file, and
+  Lesson 140's own HTML plus its matching
+  `practice/140_median_and_np_median.py` in full as the structural
+  template. Topic choice: ran this round's own fresh scan per this course's
+  standing convention (Lesson 140 itself left no named successor) — grepped
+  every lesson body case-insensitively for a wide batch of still-plausible
+  pandas/NumPy statistics and array methods (`.quantile(`, `.mode(`,
+  `cumsum/cumprod/cummax/cummin(`, `.clip(`, `nlargest/nsmallest(`,
+  `.rank(`, `pct_change(`, `idxmax/idxmin(`, `.diff(`, `value_counts(`,
+  `.ewm(`, `.expanding(`) and found every one of them already covered by an
+  existing lesson; separately grepped for `.cov(`, `.mad(`, and
+  `np.cov(`/`np.corrcoef(`/`np.ptp(`/`np.average(` — `.cov()` and `.mad()`
+  returned zero hits anywhere across Lessons 1-140 and the glossary, the
+  only genuine gaps found. Picked `.cov()`/`np.cov()` over `.mad()`: a
+  natural, closely related companion to Lesson 50's own `.corr()` (the
+  unscaled number `corr()` is built from) rather than a third largely
+  superseded dispersion statistic. Verified directly in a scratch sandbox
+  (pandas 3.1.1, numpy 2.5.5, `uv run --with pandas`) rather than trusting
+  memory: confirmed `cov = corr × std(A) × std(B)` exactly on Lesson 50's
+  own reps table (`34.25 == 0.9958962509386671 × 11.957... × 2.880...`);
+  confirmed a whole-DataFrame `.cov()` matrix's diagonal exactly equals each
+  column's own `.var()`; confirmed a one-element Series's `.cov()` returns a
+  silent `NaN`, the same `ddof=1` single-row root cause Lesson 137 already
+  confirmed for `.std()`/`.var()`. The headline trap this round's own fresh
+  scan surfaced and verified directly, twice: `np.cov(a, b)` on two plain
+  1-D arrays does NOT return one number the way `Series.cov()` does — it
+  returns a full 2x2 matrix (`[[var(a), cov(a,b)], [cov(a,b), var(b)]]`),
+  with the one value matching `Series.cov()` sitting off the diagonal at
+  `[0, 1]`; confirmed directly this is a shape trap, not a repeat of Lesson
+  140's NaN-propagation trap — separately confirmed both libraries' `ddof`
+  defaults actually AGREE here (`np.cov()`'s own default, spelled
+  `ddof=None`, behaves as `ddof=1` unless `bias=True` is also passed,
+  matching pandas' own sample-formula default exactly), a genuine contrast
+  with Lesson 137's confirmed `.std()`/`.var()` default mismatch. Also
+  confirmed directly `Series.cov()`'s NaN handling is pairwise dropna,
+  matching Lesson 50's own `corr()` behavior exactly (same 3-complete-pairs
+  example for both); confirmed `min_periods=` returns `NaN` if fewer
+  complete pairs remain than the given threshold, instead of silently
+  computing from too few; confirmed `np.cov()` on a raw array containing a
+  `NaN` poisons every matrix cell that touches it, matching Lesson 140's own
+  `np.median()` trap rather than introducing a new NaN-handling rule. Did
+  not build out portfolio-variance or PCA-style use of a full covariance
+  matrix, out of scope per `MISSION.md`'s "no deep statistics" line. Added
+  exactly one new glossary row, "Series.cov()" — directly after Lesson
+  139's `Series.sem()` entry — confirmed via a scripted row count (222 → a
+  `tr` count of 223 including the header row, zero duplicates found across
+  every first-column term). `tr`/`td`/`th`/`dfn`/`table` balance on the
+  glossary confirmed 223/223, 666/666, 3/3, 21/21, 1/1 via occurrence-count
+  regex equivalents. The one `<dfn>` tag used in the lesson body
+  (`Series.cov()`, one combined term) was also embedded verbatim into the
+  glossary row's own third column, matching the established duplicate-markup
+  convention. Also included an explicit `.interview` callout div, matching
+  this course's standing rule. Verification performed mechanically via a
+  scratch directory `.scratch-data-141/` created at the repo root (deleted
+  after, never tracked by git, matching every prior round's own precedent):
+  (1) a quiz-word-count script found the first draft mismatched across two
+  of three questions (9/9/8, 11/8/10, 9/9/9) and, after several rounds of
+  wording trims re-verified against the script's own exact tokenization
+  each time (not hand-counted) — one early trim attempt broke the regex
+  parser used for scripted checks when a stray trailing `>` was accidentally
+  left on its own line inside a `data-why` attribute, caught and fixed
+  before the word-count script was re-run — confirmed exactly 9/9/9 across
+  all three questions, one `data-ok` per question throughout; (2) an HTML
+  tag-balance script confirmed fully balanced on the lesson file: html/head/
+  body 1/1/1, div 6/6, p 19/19, h1 1/1, h2 8/8, strong 5/5, button 9/9,
+  script 3/3, dfn 1/1, span 34/34, em 2/2, a 2/2, title 1/1, code 100/100,
+  pre 5/5, zero raw unescaped `&` outside the lesson's own
+  `cd ~/learning/data && uv run ...` shell command appearing once inside its
+  own `<pre><code>` block (matching every prior round's own precedent for
+  that exact exception). `node --check` confirmed `nav.js`, `gloss.js`, and
+  `quiz.js` all still parse as valid JavaScript, both before and after
+  adding one `n: 141` entry and one `0141-cov` file reference to `nav.js`.
+  The first run of the shipped (unsolved) `practice/141_cov.py`, run
+  directly from its real `practice/` location via `uv run --with pandas
+  python3`, printed exactly 2 ✗ with no raw traceback, as expected. Building
+  the solved copy inside `.scratch-data-141/` (deleted after, never tracked
+  by git) first printed one ✗ despite visibly-correct values — root cause
+  confirmed directly: `.std()`/`.var()` on a pandas Series return
+  `numpy.float64`, so an `abs(...) < 1e-9` comparison built from them
+  returns `numpy.bool`, and `numpy.bool(True) is True` evaluates `False` in
+  Python, silently failing the shipped file's own `is True` check pattern —
+  fixed by wrapping every exercise-level boolean in `bool(...)` explicitly
+  in the shipped file itself (not just the solved copy), re-verified the
+  shipped file still printed the identical 2 ✗ after that fix, then
+  rebuilt the solved copy from the corrected shipped file and confirmed both
+  ✓ and "All green" on that next attempt. Re-ran the real shipped file
+  directly from its `practice/` location again afterward and reproduced the
+  identical original all-✗ result, confirming the solved copy's edits never
+  leaked back into the shipped baseline. `bin/record-progress data
+  lesson_generated --day 141 --lesson 0141-cov.html --detail
+  '{"by":"claude-sonnet-5"}'` ran successfully via direct call, no
+  workaround needed this round. This round's own fresh scan closed the one
+  gap it found (`.cov()`/`np.cov()`) and separately confirmed `.mad()` as
+  the nearest still-open candidate surfaced but not built out (not built
+  out this round to keep the lesson focused on one closely-related `corr()`
+  companion rather than two unrelated dispersion statistics) — tomorrow's
+  round owes a brand new fresh scan with nothing pre-committed, per this
+  course's standing convention. No new `data/learning-records/` entry was
+  added — routine lesson, no new completion/quiz signal since mid-October.
+  No new `RESOURCES.md` line was added — the cited pandas `Series.cov()` API
+  reference is already covered by the existing "Docs: pandas User Guide"
+  grouping. `git status --short data/` is expected to show only the intended
+  `data/` files touched (`data/assets/nav.js`, `data/reference/glossary.html`,
+  new `data/lessons/0141-cov.html`, new `data/practice/141_cov.py`, and this
+  file). The scratch directory `.scratch-data-141/` was deleted after
+  verification, at the repo root but never tracked by git.

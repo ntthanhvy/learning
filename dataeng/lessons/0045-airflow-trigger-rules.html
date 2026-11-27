@@ -67,7 +67,7 @@ load_raw &gt;&gt; dbt_build &gt;&gt; check_dead_letters_task</code></pre>
 <h2>4 · Verify: load the DAG, read every task's trigger rule back</h2>
 <pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
 from airflow.models import DagBag
-bag = DagBag(dag_folder='dags', include_examples=False)
+bag = DagBag(dag_folder='dags')
 dag = bag.get_dag('food_delivery_pipeline')
 for t in sorted(dag.tasks, key=lambda t: t.task_id):
     print(t.task_id, '->', t.trigger_rule)

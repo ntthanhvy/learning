@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 145 · Naming more than one query filter</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 145 · ~20 min</p>
+<h1>Naming more than one query filter</h1>
+<p class="byline">Lesson 144 showed <code>HasQueryFilter</code> once per entity type — soft deletion, or a tenant check, never both. That wasn't a simplification for the lesson's sake: before EF Core 10, calling <code>HasQueryFilter</code> a second time on the same entity type doesn't add a second filter, it <em>replaces</em> the first one. A real app usually wants both soft deletion and tenant isolation on the same table at once. This lesson covers the two ways EF Core lets you get there: the old workaround, and the new first-class answer.</p>
+
+<h2>1 · The trap: the second call wins, silently</h2>
+<p>Lesson 144's two filters — soft deletion on <code>IsDeleted</code>, tenant isolation on <code>TenantId</code> — look like they'd stack if you just call the method twice:</p>
+<pre><code>modelBuilder.Entity&lt;Blog&gt;().HasQueryFilter(b =&gt; !b.IsDeleted);
+<span class="kw">// The following overwrites the previous query filter:</span>
+modelBuilder.Entity&lt;Blog&gt;().HasQueryFilter(b =&gt; b.TenantId == tenantId);</code></pre>
+<p>After both lines run, only the tenant check survives. The soft-deletion filter isn't combined with it, isn't kept as a fallback — it's gone, with no error or warning at build or run time. A deleted row from the correct tenant comes right back in a query result, because the one filter EF Core kept never mentions <code>IsDeleted</code> at all. This is exactly the kind of silent-replace bug Lesson 144's own "frontend-habit trap" callout warned about with a different mechanism: the API shape looks additive (two separate calls, like adding two CSS classes), but the actual behavior is last-write-wins.</p>
+
+<h2>2 · Before EF Core 10: one filter, joined by hand</h2>
+<p>The documented fix pre-dates named filters: don't call <code>HasQueryFilter</code> twice, call it once with both conditions joined by <code>&amp;&amp;</code> in a single lambda:</p>
+<pre><code>modelBuilder.Entity&lt;Blog&gt;()
+    .HasQueryFilter(b =&gt; !b.IsDeleted &amp;&amp; b.TenantId == tenantId);</code></pre>
+<p>This works, and it's still the only option on EF Core versions before 10. But Microsoft's own docs name its real limitation: once the two conditions are merged into one <code>&amp;&amp;</code> expression, they can't be addressed separately again. <code>IgnoreQueryFilters()</code> turns off <em>both</em> conditions for a query, because from EF Core's point of view there's only ever been one filter — it has no idea that a human reads it as two concerns. An admin tool that wants to see soft-deleted rows for the current tenant, without also leaking every other tenant's rows, has no way to ask for that.</p>
+
+<h2>3 · EF Core 10: give each filter a name</h2>
+<p><dfn data-en="an EF Core 10+ overload of HasQueryFilter that takes a string name as its first argument, letting more than one query filter be attached to the same entity type -- each named filter is tracked and can be selectively disabled on its own, instead of a second HasQueryFilter call silently overwriting the first" data-vn="named query filter -- overload của HasQueryFilter từ EF Core 10+, nhận 1 string name làm argument đầu, cho phép gắn nhiều hơn 1 query filter vào cùng 1 entity type -- mỗi filter có tên được track riêng và có thể tắt riêng lẻ, thay vì gọi HasQueryFilter lần 2 sẽ âm thầm ghi đè lần đầu">Named query filters</dfn>, introduced in EF Core 10 (currently in preview per Microsoft's own docs), remove the overwrite trap entirely — each call gets a string name as its first argument, and both filters are kept, chained rather than replaced:</p>
+<pre><code>modelBuilder.Entity&lt;Blog&gt;()
+    .HasQueryFilter(<span class="st">"SoftDeletionFilter"</span>, b =&gt; !b.IsDeleted)
+    .HasQueryFilter(<span class="st">"TenantFilter"</span>, b =&gt; b.TenantId == tenantId);</code></pre>
+<p>Both conditions apply to every query against <code>Blog</code>, same as the <code>&amp;&amp;</code> version — but now EF Core tracks them as two separate, independently addressable filters rather than one fused expression. The name is purely a label for managing the filter later; it has no effect on the generated SQL, which still ANDs every active filter's condition together the same way the manual <code>&amp;&amp;</code> version did.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> the string name doesn't look like it should matter — plenty of React/CSS APIs take a name purely for debugging (a component's <code>displayName</code>, say) with zero runtime effect beyond a label in dev tools. Here the name is the only handle you get for turning one filter off without turning off the other; skip naming a filter and you're back to the pre-EF-10 all-or-nothing behavior, even on EF Core 10.</div>
+
+<h2>4 · Disabling one filter, not both</h2>
+<p>Naming the filters is what makes selective disabling possible. <code>IgnoreQueryFilters()</code> with no arguments still turns off every filter on the entity type, named or not:</p>
+<pre><code><span class="kw">var</span> allBlogs = <span class="kw">await</span> context.Blogs.IgnoreQueryFilters().ToListAsync();</code></pre>
+<p>Starting in EF Core 10, passing a list of names to the same method disables only those filters, leaving the rest active:</p>
+<pre><code><span class="kw">var</span> allBlogs = <span class="kw">await</span> context.Blogs.IgnoreQueryFilters([<span class="st">"SoftDeletionFilter"</span>]).ToListAsync();</code></pre>
+<p>This query sees soft-deleted rows — the named filter is off — but still only the current tenant's rows, because <code>"TenantFilter"</code> was never named in the list and keeps running. That's the admin-tool case section 2 couldn't express with a single merged <code>&amp;&amp;</code> filter: see everything a normal query hides for one reason, while every other guardrail Lesson 78 and Lesson 144 put in place stays up.</p>
+
+<h2>5 · The other half: no context instance to reference</h2>
+<p>Lesson 144's tenant filter leaned on a constructor parameter the <code>DbContext</code> itself holds: <code>MultitenancyContext(string tenantId)</code>, referenced directly from the filter lambda inside <code>OnModelCreating</code>. That works because <code>OnModelCreating</code> is a method <em>on</em> the context, with a live <code>this</code> available. Model configuration split out into its own <code><dfn data-en="an EF Core interface for moving one entity type's model configuration (property mappings, keys, relationships, query filters) out of OnModelCreating into its own class, applied via modelBuilder.ApplyConfiguration -- keeps a large model's configuration organized, one file per entity type, instead of one long OnModelCreating method" data-vn="IEntityTypeConfiguration -- interface của EF Core để tách config model (property mapping, key, relationship, query filter) của 1 entity type ra khỏi OnModelCreating, thành class riêng, áp dụng qua modelBuilder.ApplyConfiguration -- giúp model lớn có cấu trúc gọn, mỗi entity type 1 file, thay vì 1 OnModelCreating dài">IEntityTypeConfiguration&lt;TEntity&gt;</dfn></code> class doesn't have that — Microsoft's docs call this out directly as "an additional complication": a query filter written inside <code>Configure</code> has no context instance to read a tenant ID from at all.</p>
+<p>The documented workaround looks like it shouldn't work:</p>
+<pre><code><span class="kw">private sealed class</span> CustomerEntityConfiguration : IEntityTypeConfiguration&lt;Customer&gt;
+{
+    <span class="kw">private readonly</span> SomeDbContext _context = <span class="kw">null</span>!;
+
+    <span class="kw">public void</span> Configure(EntityTypeBuilder&lt;Customer&gt; builder)
+    {
+        builder.HasQueryFilter(d =&gt; d.TenantId == _context.TenantId);
+    }
+}</code></pre>
+<p>That <code>null!</code> field is never assigned a real context — it exists purely so the filter lambda has something typed to write <code>_context.TenantId</code> against. EF Core's query translator doesn't evaluate this lambda as ordinary C# that would throw a <code>NullReferenceException</code> on a null field; it reads the lambda as an expression tree and compiles <code>_context.TenantId</code> into a parameterized reference, resolved against the real, live context instance at query time — the same translate-don't-execute step that turns <code>b =&gt; !b.IsDeleted</code> into a SQL <code>WHERE</code> clause rather than running C# row by row. The dummy field is a syntax anchor for the expression tree, not a value that's ever read at runtime.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Calling HasQueryFilter a second time on the same entity type does not add a second filter alongside the first -- it replaces the first filter outright, with no error or warning at build or run time, which is exactly why Lesson 144's own soft-deletion and tenant filters were never shown stacked on one entity type.">
+    <p class="stem">Before EF Core 10, what happens when <code>HasQueryFilter</code> is called twice on the same entity type?</p>
+    <button class="opt" data-ok>the second call replaces the first filter outright now</button>
+    <button class="opt">both filters combine using an automatic OR condition now</button>
+    <button class="opt">EF Core throws a build-time error about duplicate filters</button>
+    <button class="opt">the first filter always wins over any later call</button>
+  </div>
+  <div class="q" data-why="The documented pre-EF-10 workaround is to call HasQueryFilter once with both conditions joined by &amp;&amp; inside one lambda -- this works, but Microsoft's own docs name the real cost: once merged, the two conditions can never be addressed or disabled separately again.">
+    <p class="stem">What is the documented workaround for two filter conditions before EF Core 10?</p>
+    <button class="opt" data-ok>join both conditions with &amp;&amp; inside one single lambda</button>
+    <button class="opt">call HasQueryFilter from two separate DbContext subclasses instead now</button>
+    <button class="opt">store the second condition's value in a new column</button>
+    <button class="opt">wrap the second filter inside a try/catch around SaveChanges</button>
+  </div>
+  <div class="q" data-why="Named query filters, new in EF Core 10, give each HasQueryFilter call a string name as its first argument so multiple filters stack on one entity type instead of overwriting each other -- the name's only job is letting IgnoreQueryFilters later target that one filter by name without disabling the others.">
+    <p class="stem">What does a filter's string name enable in EF Core 10's <code>HasQueryFilter("Name", ...)</code>?</p>
+    <button class="opt" data-ok>disabling that one named filter later, without touching others</button>
+    <button class="opt">renaming the underlying database table column at runtime now</button>
+    <button class="opt">running that filter's condition only inside unit test runs</button>
+    <button class="opt">making that filter apply to every other unrelated type</button>
+  </div>
+  <div class="q" data-why="EF Core's query translator reads a query filter lambda as an expression tree rather than executing it as ordinary C#, so a field typed null! never actually gets dereferenced at runtime -- the translator compiles _context.TenantId into a parameterized reference resolved against the real context instance when the query runs, the same translate-don't-execute step that turns any filter lambda into SQL.">
+    <p class="stem">Why doesn't the <code>IEntityTypeConfiguration</code> workaround's <code>null!</code> context field crash at query time?</p>
+    <button class="opt" data-ok>the filter lambda gets translated to SQL, never run</button>
+    <button class="opt">EF Core silently catches every NullReferenceException it ever throws</button>
+    <button class="opt">the null! keyword fully disables that entity's filter now</button>
+    <button class="opt">SomeDbContext overrides equality so null always compares as true</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/querying/filters">Microsoft Learn: Global Query Filters — EF Core</a> (same page Lesson 144 cites, re-fetched and re-confirmed this round via <code>WebFetch</code>) — source for the "Using multiple query filters" section's overwrite-on-second-call behavior and its exact code sample (section 1), the pre-EF-10 <code>&amp;&amp;</code> workaround and its stated limitation (section 2), the EF Core 10 named-filter syntax and its "currently in preview" status (section 3), the <code>IgnoreQueryFilters([names])</code> overload (section 4), and the "Query filters and IEntityTypeConfiguration" section's exact <code>CustomerEntityConfiguration</code> code sample (section 5).</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 144's <code>HasQueryFilter</code> and Lesson 78's multi-tenant shapes. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 145 rounds — the honest next step remains a completion signal or a user-named track. Standing candidate worth checking fresh next time: HATEOAS (Lesson 97), checked twice already (Lessons 141, 142) and rejected both times on a thin-C#-angle basis — worth retiring unless picked deliberately as a cold-start C# feature rather than a direct port.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

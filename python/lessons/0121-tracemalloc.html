@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 121 · tracemalloc: watching where memory actually goes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 121 · ~20 min · 27 Nov 2026</p>
+<h1><code>tracemalloc</code>: watching where memory actually goes</h1>
+<p class="byline">Day 1 named the mutable-default-argument trap and showed it produce a <em>wrong answer</em>. It never showed the other half of that bug: the shared default list also keeps growing, forever, as long as the program runs — a silent memory leak with no exception to catch it. <code>tracemalloc</code> is the standard-library module that answers "which line of code is actually responsible for this memory," turning that kind of leak from a guess into a measured fact.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> ran first, per every prior fresh day's own discipline — <code>tracemalloc\.</code> and <code>binascii\.</code> (not just the bare word, to catch false positives the way Day 118 and 120 did) both came back zero-hit. <code>tracemalloc</code> won over <code>binascii</code> for connecting directly to already-taught material instead of standing alone: it turns Day 1's mutable-default-argument trap from a prose warning into something measured live, and it is a genuine language-level diagnostic tool (part of understanding how Python itself allocates objects), not an encoding-format aside. <code>calendar</code> and <code>socket</code> remain the two longest-standing ruled-out candidates (thin content and scope-depth respectively); <code>selectors</code>, <code>sched</code>, and <code>signal</code> stay parked as skewing toward the OS/event-loop depth <code>MISSION.md</code> excludes.</div>
+
+<h2>1 · Turning tracing on, and why a snapshot needs it first</h2>
+<p><code>tracemalloc</code> is off by default — tracking every allocation has a real cost, so Python only pays it once <code>tracemalloc.start()</code> is called. Calling <code>tracemalloc.take_snapshot()</code> before that raises, confirmed live:</p>
+<pre><code><span class="kw">import</span> tracemalloc
+
+<span class="kw">print</span>(tracemalloc.is_tracing())      <span class="cm"># confirmed live: False</span>
+tracemalloc.take_snapshot()         <span class="cm"># confirmed live: raises RuntimeError</span>
+<span class="cm"># "the tracemalloc module must be tracing memory allocations to take a snapshot"</span>
+
+tracemalloc.start()
+<span class="kw">print</span>(tracemalloc.is_tracing())      <span class="cm"># confirmed live: True</span></code></pre>
+<p><dfn data-en="tracemalloc.start() turns on allocation tracing for the rest of the process; tracemalloc.is_tracing() reports whether tracing is currently on; tracemalloc.take_snapshot() raises RuntimeError if called before start(), because there is nothing recorded yet to snapshot" data-vn="giữ nguyên &quot;tracemalloc.start()&quot; — bật tracking allocation cho phần còn lại của process; is_tracing() báo đang bật hay không; take_snapshot() raise RuntimeError nếu gọi trước start(), vì chưa có gì được ghi lại để snapshot">tracemalloc.start()</dfn> is the one-time setup step every example below assumes has already run.</p>
+
+<h2>2 · A snapshot, and comparing two of them</h2>
+<p>A <code>Snapshot</code> is a frozen record of every traced allocation at one moment, tagged with the file and line that created it. One snapshot alone is rarely useful — the real move is taking two, before and after some suspect code, and comparing them:</p>
+<pre><code>tracemalloc.start()
+
+<span class="kw">def</span> make_big_list():
+    <span class="kw">return</span> [i * i <span class="kw">for</span> i <span class="kw">in</span> <span class="builtin">range</span>(50000)]
+
+before = tracemalloc.take_snapshot()
+big = make_big_list()
+after = tracemalloc.take_snapshot()
+
+diff = after.compare_to(before, <span class="str">"lineno"</span>)
+<span class="kw">print</span>(diff[0])
+<span class="cm"># confirmed live: ".../file.py:4: size=1996 KiB (+1996 KiB), count=49986 (+49986), average=41 B"</span></code></pre>
+<p><dfn data-en="snapshot.compare_to(other_snapshot, 'lineno') returns a list of StatisticDiff entries, one per source line that allocated memory, sorted by size change descending -- each entry's .size_diff, .count_diff, and str() report exactly how many bytes and objects that specific line is responsible for between the two snapshots" data-vn="giữ nguyên &quot;compare_to&quot; — trả về list StatisticDiff, mỗi phần tử ứng với 1 dòng code đã allocate memory, sắp theo mức tăng size giảm dần; mỗi entry có .size_diff, .count_diff và str() báo đúng số byte, số object dòng đó chịu trách nhiệm giữa 2 snapshot">snapshot.compare_to()</dfn> points at line 4 — exactly the comprehension inside <code>make_big_list()</code> — not a vague "memory went up somewhere" guess. The top entry is sorted first because it's the single biggest contributor to the growth between the two snapshots.</p>
+
+<h2>3 · Proving Day 1's trap live: the leak behind the wrong answer</h2>
+<p>Day 1 showed <code>def add_item(item, basket=[]):</code> producing an accumulating basket across calls — a correctness bug. <code>tracemalloc</code> shows the same function is also a memory leak, confirmed live, by pointing straight at the <code>.append()</code> line as the thing still growing 10,000 calls later:</p>
+<pre><code><span class="kw">def</span> add_item(item, basket=[]):
+    basket.append(item)   <span class="cm"># line 2 -- this is what compare_to() points at</span>
+    <span class="kw">return</span> basket
+
+before = tracemalloc.take_snapshot()
+<span class="kw">for</span> i <span class="kw">in</span> <span class="builtin">range</span>(10000):
+    add_item(i)
+after = tracemalloc.take_snapshot()
+
+top = after.compare_to(before, <span class="str">"lineno"</span>)[0]
+<span class="kw">print</span>(top)
+<span class="cm"># confirmed live: ".../file.py:2: size=304 KiB (+304 KiB), count=9743 (+9743), average=32 B"</span>
+<span class="kw">print</span>(<span class="builtin">len</span>(add_item.__defaults__[0]))
+<span class="cm"># confirmed live: 10000</span></code></pre>
+<p>Nothing here is special to <code>tracemalloc</code>'s own bookkeeping — line 2 is the real <code>.append()</code> call, growing by one entry every single call, exactly matching the default list's own length of <code>10000</code> read straight off the function object. This is the difference between suspecting a leak from a slowly climbing memory graph and pointing at the exact line causing it.</p>
+
+<h2>4 · Current and peak usage, without a diff</h2>
+<p>For a quick "how much am I using right now" check, <code>get_traced_memory()</code> skips the two-snapshot dance entirely:</p>
+<pre><code>current, peak = tracemalloc.get_traced_memory()
+<span class="kw">print</span>(current, peak)   <span class="cm"># confirmed live: 2046698 2047192 (bytes)</span>
+
+tracemalloc.reset_peak()
+current, peak = tracemalloc.get_traced_memory()
+<span class="kw">print</span>(current, peak)   <span class="cm"># confirmed live: 2046767 2046767 -- peak now equals current</span></code></pre>
+<p><dfn data-en="tracemalloc.get_traced_memory() returns a (current, peak) tuple of byte counts for memory tracemalloc is tracking since start() -- current is the live total right now, peak is the highest current has ever reached since start() (or since the last reset_peak()); reset_peak() resets that running peak down to the current value without stopping tracing" data-vn="giữ nguyên &quot;get_traced_memory()&quot; — trả về tuple (current, peak) tính bằng byte; current là tổng hiện tại đang sống, peak là mức cao nhất current từng đạt từ lúc start() (hoặc từ lần reset_peak() gần nhất); reset_peak() đưa peak về bằng current mà không tắt tracing">tracemalloc.get_traced_memory()</dfn> only counts memory <code>tracemalloc</code> itself is tracking — allocations from before <code>start()</code> was called, or memory a C extension allocated outside Python's own allocator, don't show up here at all.</p>
+
+<div class="callout"><strong>Turning tracing off:</strong> <code>tracemalloc.stop()</code> clears all recorded traces and stops the overhead — confirmed live, <code>is_tracing()</code> reports <code>False</code> right after, and calling <code>get_traced_memory()</code> again after <code>stop()</code> raises the same <code>RuntimeError</code> shape Section 1 showed for <code>take_snapshot()</code> before <code>start()</code>. There's no "pause," only on or off.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> pandas and NumPy have their own memory profile entirely — a DataFrame's columns live in contiguous typed buffers, and <code>tracemalloc</code> reports that underlying buffer allocation as one block, not broken down per row the way it breaks down a plain Python list. Profiling that buffer-level picture is a <code>data/</code>-side topic, if it comes up at all; this lesson is about Python-level object allocation, which every script makes regardless of which libraries it imports. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/121_tracemalloc.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/121_tracemalloc.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: taking a before/after snapshot pair around a function call and reading off the top <code>compare_to()</code> entry's line number, confirming a leaking accumulator function's growth scales with how many times it's called, and reading <code>current</code>/<code>peak</code> from <code>get_traced_memory()</code> before and after <code>reset_peak()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="tracemalloc.take_snapshot() requires tracing to already be on -- confirmed live, calling it before tracemalloc.start() raises RuntimeError with a message stating tracing must be active, rather than returning an empty snapshot or silently doing nothing.">
+    <p class="stem">What happens calling <code>tracemalloc.take_snapshot()</code> before <code>tracemalloc.start()</code>, confirmed live?</p>
+    <button class="opt" data-ok>it raises RuntimeError, since tracing was never turned on</button>
+    <button class="opt">it returns an empty snapshot, with every value zeroed</button>
+    <button class="opt">it silently starts tracing first, then takes the snapshot</button>
+  </div>
+  <div class="q" data-why="compare_to() with 'lineno' groups the diff by source line, sorted by size change -- confirmed live on make_big_list(), the top entry pointed exactly at the comprehension's own line number, the specific line actually responsible for the growth between the two snapshots, not a vague whole-program total.">
+    <p class="stem">After <code>after.compare_to(before, "lineno")</code>, what does the top entry in the result point at?</p>
+    <button class="opt" data-ok>the specific source line responsible for the biggest growth</button>
+    <button class="opt">the single busiest function across the entire running program</button>
+    <button class="opt">a random sampled line, chosen freshly on each run</button>
+  </div>
+  <div class="q" data-why="Day 1's mutable-default-argument trap keeps one shared list object alive across every call to the function, since Python only evaluates a default value once at def time -- confirmed live, after 10000 calls to add_item(), compare_to() pointed straight at the .append() line as still growing, matching the shared default list's own length of 10000 read off add_item.__defaults__.">
+    <p class="stem">Why does Day 1's <code>def add_item(item, basket=[]):</code> trap also show up as a leak under <code>tracemalloc</code>?</p>
+    <button class="opt" data-ok>one shared default list keeps growing across every single call</button>
+    <button class="opt">tracemalloc always flags any function that uses a default argument</button>
+    <button class="opt">appending to a list reallocates memory for every past entry</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/tracemalloc.html"><code>tracemalloc</code></a> docs, especially <code>start()</code>, <code>take_snapshot()</code>/<code>Snapshot.compare_to()</code>, and <code>get_traced_memory()</code>/<code>reset_peak()</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day121">glossary</a> under Day 121.<br>
+Cadence note: today is fresh day 2 of the current three-fresh-then-review cycle — Day 122 should be fresh day 3, then Day 123 the next review day, spanning Days 120-122. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth respectively); <code>binascii</code> is the one remaining fresh zero-hit candidate from the prior round's list, alongside <code>selectors</code>, <code>sched</code>, and <code>signal</code> if a heavier single-module topic doesn't turn up first — all three still skewing toward the OS/event-loop depth <code>MISSION.md</code> excludes.<br><br>
+💬 Anything unclear — why a snapshot needs two calls to be useful, or how this connects back to Day 1's default-argument trap? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

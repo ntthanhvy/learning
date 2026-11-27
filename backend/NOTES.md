@@ -12870,3 +12870,139 @@ MISSION.md's "concepts first" rule. With this pick, the two standing
 and load shedding) are both now shipped (Lessons 143, 144) — next
 round's own candidate survey should start fresh rather than reuse this
 list verbatim.
+
+## 2026-11-27 — Lesson 145: Naming more than one query filter
+
+Headless run. Confirmed before starting that Lesson 145 didn't already
+exist: no `lessons/0145-*.html` file on disk, and `nav.js`'s last entry
+was still `n: 144, date: "2026-11-26"` with no `n: 145` anywhere —
+safe to proceed. No `lesson_completed`/quiz/weak-spot signal recorded
+for backend beyond routine `lesson_generated` rows this round either, so
+paced as a normal sequential step, same as every recent round.
+
+Topic picked from Lesson 144's own closing note: EF Core 10's named
+multiple-filters syntax (`HasQueryFilter("Name", ...)`, letting more
+than one filter stack on one entity type, plus selective disabling via
+`IgnoreQueryFilters([names])`) and the `IEntityTypeConfiguration<TEntity>`
+dummy-context workaround, both named in that lesson's own scope line as
+explicitly deferred. Confirmed via `grep` across `backend/lessons/` and
+`glossary.html` that neither `HasQueryFilter("` (named-argument form) nor
+`IEntityTypeConfiguration` appeared anywhere outside Lesson 144's own
+scope-line prose before this round — genuinely uncovered, not just an
+unpicked list item taken on faith. Also checked the other five standing
+candidates named in this round's own brief (HATEOAS, Go's `select`
+arbitration, dead-letter queues, upsert/`ON CONFLICT`) via the same
+`grep` sweep; all still confirmed covered only at their original lesson
+or not at all, nothing newly available there — this lesson's pick was
+the clear direct continuation of Lesson 144 specifically, matching the
+"named follow-up from the immediately preceding lesson" pattern recent
+rounds have used when available.
+
+Verification: one `WebFetch` against `learn.microsoft.com/en-us/ef/
+core/querying/filters` — the same page Lesson 144 cites — re-fetched and
+re-confirmed this round rather than trusted from memory. Confirmed
+verbatim: calling `HasQueryFilter` twice on one entity type overwrites
+the first filter rather than combining it (the exact "Using multiple
+query filters" code sample showing the overwrite with its own inline
+comment); the pre-EF-10 `&&`-joined-single-lambda workaround and its
+documented limitation (can't selectively disable once merged); the EF
+Core 10 (currently in preview) named-filter syntax and its chained,
+non-overwriting `.HasQueryFilter("SoftDeletionFilter", ...)
+.HasQueryFilter("TenantFilter", ...)` example; the `IgnoreQueryFilters()`
+no-argument form (disables all) versus the new `IgnoreQueryFilters(["Soft
+DeletionFilter"])` list-of-names overload; and the "Query filters and
+IEntityTypeConfiguration" section's exact `CustomerEntityConfiguration`
+sample, including the `private readonly SomeDbContext _context = null!;`
+dummy field. The lesson's five C# snippets are direct, renamed-or-verbatim
+copies of the docs' own examples, not novel logic — not compiled in a
+`dotnet` scratch project this round; `command -v dotnet` was not even
+attempted directly since every round since Lesson 103 has hit an
+interactive-approval gate on `dotnet`/`go` tooling, same judgment call as
+Lessons 143 and 144. Verified by careful reading against the fetched page
+instead.
+
+Caught and fixed two authoring bugs this round before shipping, both via
+a throwaway `node` scratch script (`.scratch-backend-145/check.js`,
+created under the repo root per this round's own constraint, not `/tmp`,
+deleted after): (1) a raw unescaped `&&` left inside a quiz `data-why`
+attribute (needed `&amp;&amp;`, same entity as everywhere else in HTML
+attribute text) — caught by the zero-unescaped-`&` scan, fixed; (2) a
+stray `</p>` inside a `<div class="callout">` with no inner `<p>` at all
+(copied from a different paragraph shape, same bug class Lesson 144 hit
+in its own callout) — broke `<p>` tag balance (21 open / 22 close),
+fixed by removing the stray close tag. The two literal `&&` C# operators
+inside actual `<pre><code>` blocks were already correctly escaped as
+`&amp;&amp;` from first draft, matching Lesson 144's own precedent for
+code-block entity escaping.
+
+Quiz word counts needed several rewrite passes to converge: first
+mechanical count (via the same scratch script, counting words after
+unescaping `&amp;` back to `&` so `&&`-as-one-token wouldn't skew
+counts) read Q1 8/9/9/10, Q2 9/8/10/9, Q3 9/9/9/10, Q4 11/9/11/9 — not
+9/9/9/9 anywhere on the first pass, unlike some recent rounds' single-
+pass successes. Converged after four rewrite-and-recount passes to
+exactly 9/9/9/9 on all four questions; exactly one `data-ok` and four
+options per question confirmed the same way. Other checks via the same
+scratch script: tag balance clean on div/p/code/pre/h1/h2/em/strong/a/
+table/tr/td/th/thead/tbody/dfn/button/script (div 6/6, p 21/21, code
+45/45, pre 6/6, h1 1/1, h2 7/7, em 4/4, strong 3/3, a 2/2, dfn 2/2,
+button 16/16, script 3/3, table/tr/td/th/thead/tbody all 0/0 — this
+lesson has no comparison table, unlike Lesson 144); the lesson's two
+`dfn` terms (`Named query filters`, `IEntityTypeConfiguration<TEntity>`)
+both carry `data-en=`/`data-vn=`; zero unescaped `&` after the fix
+above; all six `<pre><code>` blocks brace/paren/bracket-balanced after
+stripping tags and unescaping entities; one `<!DOCTYPE html>`/`<html>`/
+`</html>`; three script tags in gloss/quiz/nav order; `node --check`
+clean on `nav.js` (before and after its edit), `gloss.js`, `quiz.js`.
+Also noticed and fixed a smaller style slip: the first draft used a
+`class="str"` span for C# string literals, but the established
+convention across Lessons 141/143/144 is `class="st"` (neither is
+actually styled in `course.css` — both fall through to default text
+color — but matched the existing convention for consistency rather than
+inventing a third variant).
+
+Registered Lesson 145 in `nav.js` (date 2026-11-27, today's actual
+generation date) right after `n: 144`. Added two rows to `glossary.html`
+— `named query filter` and `IEntityTypeConfiguration<TEntity>` — a
+duplicate-term grep confirmed no prior collision for either before
+adding, a `<tr>` count (432 before, 434 after) confirmed exactly two
+rows added, and a second duplicate-term grep afterward confirmed each
+term appears exactly once. No new `RESOURCES.md` line — the cited page
+is the same `learn.microsoft.com` global-query-filters doc Lesson 144
+already cites inline rather than duplicating into `RESOURCES.md`, same
+precedent followed here. No new `learning-records/` file — the topic
+came from Lesson 144's own standing-candidate note, not a new
+observation about the learner; `learning-records/` still has no entry
+newer than Lesson 3.
+
+DB: `bin/record-progress backend lesson_generated --day 145 --lesson
+0145-efcore-named-query-filters.html --detail
+'{"by":"claude-sonnet-5"}'` invoked directly (not via the `node -e`
+`spawnSync` wrapper some recent rounds needed) — succeeded on the first
+try: `recorded: backend/lesson_generated day=145
+lesson=0145-efcore-named-query-filters.html`.
+
+`git status --short backend/` confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`,
+this `backend/NOTES.md` entry, and the new `backend/lessons/0145-
+efcore-named-query-filters.html`.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: the "Query filters and required navigations" section's
+`Include()`/`INNER JOIN` caveat already got its own treatment in Lesson
+144 section 4, so no further angle surfaced there this round; the
+`modelBuilder.Entity<Post>().HasQueryFilter(...)` matching-filter fix
+from that same section was named in Lesson 144 but not re-explored here
+either, still available if a dedicated lesson on filter/join interaction
+is ever wanted. HATEOAS (Lesson 97), checked twice already (Lessons
+141, 142) and rejected both times on a thin-C#-angle basis — still
+worth retiring as a standing candidate unless picked deliberately as a
+cold-start C# feature. Go's `select`-statement arbitration rules,
+Lesson 49's dead-letter queues, and Lesson 35's upsert/ON CONFLICT
+remain deferred for the same reasons prior rounds have recorded, all
+unchanged by this round's own fresh grep sweep; FluentValidation and
+Polly/.NET resilience libraries remain deliberately out of scope per
+MISSION.md's "concepts first" rule. With Lesson 144's own two named
+follow-ups both shipped now, next round's candidate survey should start
+fresh rather than lean on this list, same note Lesson 144 left for
+itself and then honored this round.

@@ -288,6 +288,8 @@
       file: "lessons/0139-sem.html" },
     { n: 140, date: "2026-11-26", title: "Series.median() and np.median(): the sorted-middle value, and the NaN-propagation trap std() doesn't have",
       file: "lessons/0140-median-and-np-median.html" },
+    { n: 141, date: "2026-11-27", title: "Series.cov() and np.cov(): the unscaled number behind corr(), and the matrix-shape trap",
+      file: "lessons/0141-cov.html" },
   ];
 
   const REFS = [

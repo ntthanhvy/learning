@@ -250,6 +250,8 @@
       file: "lessons/0120-mimetypes.html" },
     { n: 121, date: "2026-11-27", title: "tracemalloc: watching where memory actually goes",
       file: "lessons/0121-tracemalloc.html" },
+    { n: 122, date: "2026-11-28", title: "binascii: bytes as hex text, and a fast checksum",
+      file: "lessons/0122-binascii.html" },
   ];
 
   const REFS = [

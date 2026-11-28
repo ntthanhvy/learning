@@ -8573,3 +8573,127 @@ along the Phase 2 spine, adapted to the learning records.
   gap-scan should weigh dbt or Kafka next, or whichever named follow-up or
   learner signal turns up first, rather than assuming any one of the three
   by default.
+
+- 2026-11-28 (headless 06:00 run, Day 74 generated): seventy-fourth lesson,
+  `0074-kafka-static-membership-simultaneous-overrun.html`. Confirmed via the
+  filesystem that no `lessons/0074-*.html` existed and no `n: 74` row was in
+  `assets/nav.js` before starting. Read `MISSION.md`, `PLAN.md`, `RESOURCES.md`,
+  the single baseline learning record (still the only file in
+  `learning-records/`, no `practice/` directory in this course either,
+  reconfirmed), and this file's tail through Day 73's close before picking
+  anything. **DB access:** per the orchestrator's brief, both `psql
+  "$LEARNING_DB_URL"` and `bin/query-progress` are blocked in this sandboxed
+  session (a static content-level guard on the former, no user present to
+  grant interactive approval on the latter) — paced from learning-records and
+  file state alone, as documented. **Topic choice:** Day 73's own closing
+  note said Airflow had the two most recent rounds (71, 73) and a future
+  round should weigh dbt or Kafka next. Ran a fresh gap-scan via a sub-agent
+  across PLAN.md's Phase 2a (dbt) and Phase 2b (Kafka) spines against all 73
+  existing lessons: every top-level bullet in both already has a dedicated
+  lesson (confirmed independently by Days 48-50's own prior finding that the
+  literal spine has been fully exhausted since then), so the only live
+  candidates are named follow-ups inside recent lessons' own scope lines, the
+  same standing convention this course has used for many rounds. Of those:
+  Day 70's dbt composite-key constraint stays blocked (grepped the whole
+  project's domain in PLAN.md — restaurants/couriers/orders/order_events/
+  fct_orders/dims/mart are all single-column-keyed; no genuine multi-column
+  natural key exists anywhere, and no lesson since has introduced one). Day
+  71's and Day 73's shared Airflow follow-up (`XComArg` into
+  `.expand_kwargs()`, and templating `map_index_template` from a task's own
+  return value) is open but Airflow, not dbt/Kafka, so deprioritized per the
+  rotation hint. Day 72's own named gap — "both members overrunning their
+  windows simultaneously" — was confirmed still open (grepped 0072's own
+  scope line and closing note) and is the one concrete, bounded, buildable
+  dbt-or-Kafka candidate this round found; picked it. No pandas, no
+  Python-language teaching, no API/idempotency re-derivation (grepped the
+  finished lesson for all three and found none, consistent with every prior
+  Kafka round) — none applied or needed this round.
+  **Content:** reruns Day 68's two-consumer `scripts/consume_order_events.py`
+  script unmodified, only changing how many consumers are killed and for how
+  long (both past their 45s `session.timeout.ms` instead of one, per Day
+  72's exact shape). New depth this round, not restated from Day 66's,
+  68's or 72's own text: chained those three lessons' already-confirmed
+  facts (each static member's `session.timeout.ms` is its own independent
+  clock; expiry only reassigns that member's own partitions to whoever is
+  *currently present*) forward to the case where nobody is currently
+  present — concluding that an empty group leaves every partition with no
+  recorded owner at all (not "reassigned to nobody"), until a single rejoin
+  triggers one rebalance that hands that lone member every partition the
+  group owns, including ones it never held before. Framed the generalization
+  explicitly: per-member bookkeeping isolation (proven Days 66/68/72) and
+  group availability (a count across every member's presence, which can hit
+  zero regardless of isolation) are different claims, the first never having
+  promised the second — bridged to Day 50's producer-side `BufferError`
+  finding as the same shape from the other end of the pipe.
+  **Verification:** `WebFetch` was not reachable this round (declined, the
+  same recurring gap many prior rounds have each hit) — fell back to
+  reasoning from Kafka's own documented static-membership protocol (KIP-345)
+  chained across both members, the same technique Days 66/68/72 each used.
+  Built a scratch directory (`.scratch_dataeng_74/`, deleted after) and
+  constructed two real `Consumer({...})` configs for real with a
+  freshly-installed `confluent-kafka` client via `uv run --with
+  confluent-kafka python3 check_config.py` — output: `consumer 1 constructed
+  ok`, `consumer 2 constructed ok`, `both static identities constructed with
+  no config-rejection error`, confirming two static identities sharing one
+  group still construct cleanly with no special handling needed for the
+  "both might expire" case. `uv run python3 -m py_compile check_config.py`
+  was clean. No live Kafka broker was reachable this sandbox round (the same
+  standing gap every recent Kafka round has named), so the actual
+  empty-group `--describe` output and the single-rejoin rebalance timing in
+  Section 3 rest on Kafka's documented group-coordinator behavior
+  (a partition's owner is whichever member the last rebalance assigned it
+  to; with zero members present, the last rebalance assigned it to nobody),
+  not a live multi-process, multi-minute test this round — flagged in the
+  lesson's own scope line and verify block rather than asserted as directly
+  observed. No dbt snippet in this lesson (pure Kafka/Python), so no `dbt
+  parse` step applied this round, the same shape prior pure-Kafka rounds
+  (66, 68, 72) used.
+  Quiz word counts verified with a small Node script (the same workaround
+  recent rounds used), stripping HTML tags and counting whitespace-split
+  tokens per option. First draft came up uneven on all three questions
+  (9/11/8, 10/10/11, 13/10/9) — several word-for-word edit passes, one
+  option at a time, re-running the script after each edit, to reach a clean
+  10/10/10 split on all three (all nine options exactly 10 words). HTML
+  structure verified via paired open/close tag counts on every tag that
+  appears (`div` 8/8, `p` 21/21, `code` 59/59, `button` 9/9, `script` 3/3,
+  `dfn` 1/1, `pre` 5/5, `h2` 8/8, `h1` 1/1, `em` 13/13, `strong` 6/6, `a`
+  3/3, `span` 5/5, `table` 1/1, `tr` 4/4, `th` 2/2, `td` 6/6) and a bare-`&`
+  regex scan — zero bare `&` found.
+  Grepped the whole glossary and all lesson files for "empty-group gap"
+  before writing the new `<dfn>` — zero hits outside today's own new
+  lesson, confirming the term is genuinely new. `reference/glossary.html`
+  re-checked after appending Day 74's section: `h2` 73/73, `table` 73/73,
+  `tr` 246/246, `td` 519/519, `th` 219/219, zero bare `&`, and a
+  duplicate-term scan across all 173 terms in the first column — zero
+  duplicates. `node --check` clean on `nav.js` after today's edit.
+  Added one new glossary term — `empty-group gap` — under a new Day 74
+  section.
+  No new `RESOURCES.md` line this round: the Apache Kafka Design docs and
+  the confluent-kafka Python client docs were already promoted to real
+  citations by Day 5 and reused here for a later angle on the same
+  consumer-group mechanics, the same pattern Days 34/50/55/58/66/68/72 used.
+  Registered Lesson 74 in `assets/nav.js` right after the `n: 73` entry,
+  dated 2026-11-28.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a named follow-up in Day 72's own scope line, not a new durable
+  fact about the learner distinct from the single 2026-09-14 baseline
+  record on file, the same reasoning recent rounds have each used.
+  Ran `git status --short -- dataeng/` before finishing: only
+  `assets/nav.js` (modified), `reference/glossary.html` (modified), and
+  `lessons/0074-kafka-static-membership-simultaneous-overrun.html` (new,
+  untracked) — no cross-course contamination.
+  **Next up:** this round closed Day 72's own named gap (both members
+  overrunning their windows at once). Left open, named again today: more
+  than two members overrunning simultaneously, and the broker-side
+  `group.max.session.timeout.ms` bound, still out of this course's
+  working-level Kafka depth per `MISSION.md`. Day 71's and Day 73's shared
+  Airflow follow-up (`XComArg` into `.expand_kwargs()`, and templating
+  `map_index_template` from a task's own return value) and Day 70's dbt
+  follow-up (model-level constraints for a composite key, still blocked)
+  both remain open too. The `airflow db migrate`/`airflow dags test`
+  approval-gate block remains the standing, unresolved environment
+  limitation (now forty rounds, 35-74) — still worth a human granting it
+  once. With today's round, Kafka has had the most recent fresh-gap
+  attention; a future round's gap-scan should weigh dbt or Airflow next, or
+  whichever named follow-up or learner signal turns up first, rather than
+  assuming any one of the three by default.

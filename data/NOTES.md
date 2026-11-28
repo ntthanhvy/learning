@@ -13560,3 +13560,114 @@
   new `data/lessons/0141-cov.html`, new `data/practice/141_cov.py`, and this
   file). The scratch directory `.scratch-data-141/` was deleted after
   verification, at the repo root but never tracked by git.
+- 2026-11-28 generation (Lesson 142, headless 06:00 run): DB access for the
+  Neon progress database was unreachable in this sandboxed session —
+  `psql "$LEARNING_DB_URL"` is blocked by a static content-level guard on
+  that variable name, and the interactive helper `bin/query-progress`
+  requires approval with no user present to grant it, both confirmed blocked
+  before starting. Paced today's lesson from `learning-records/` and file
+  state alone, per the documented fallback: the sole `learning-records/`
+  file remains the Lesson-1 baseline (no `lesson_completed`/quiz/weak-spot
+  signal has ever been recorded for `data` beyond routine `lesson_generated`
+  rows), so this round continued steady sequential pacing rather than
+  reshaping format. Confirmed before writing anything that no
+  `lessons/0142-*.html` existed and no `n: 142` entry existed in `nav.js` —
+  not a duplicate run. Read `MISSION.md` (unmodified), this file's own tail,
+  `RESOURCES.md`, the baseline learning-record, and Lessons 140/141's own
+  HTML plus matching practice files in full as the structural template.
+  Topic choice: Lesson 141's own closing note named `.mad()` as the nearest
+  surfaced-but-not-built candidate from its prior fresh scan — checked
+  directly in a scratch sandbox first rather than trusting the old note:
+  `pd.Series([1,2,3,4,5]).mad()` raises `AttributeError` on pandas 3.1.1,
+  confirmed removed from the library entirely in the pandas 2.0 cleanup, so
+  it is dead API and a poor pick for an interview-prep lesson. Ran this
+  round's own fresh fresh scan instead, per this course's standing
+  convention of never pre-committing to a prior round's leftover without
+  re-checking it: grepped every lesson body and the glossary
+  case-insensitively for `ptp(`, `kurtosis`, `autocorr`, `histogram2d`,
+  `np.gradient`, `np.interp(`, `trapz`/`trapezoid`, `polyfit`, `corrcoef`,
+  `meshgrid`, `np.outer`, `np.inner`, `np.dot`, `matmul`, `einsum`,
+  `np.cross`, `linalg`, and `np.random` — only `ptp(` returned zero hits
+  anywhere across Lessons 1-141 and the glossary; every other name checked
+  was already covered or judged out of scope per `MISSION.md`'s "no deep
+  NumPy/linear algebra" line (`linalg`, `matmul`, `einsum`, `np.cross`,
+  `meshgrid`, `np.outer`/`np.inner`/`np.dot` all fall under that exclusion).
+  Picked `np.ptp()`: a live, documented NumPy function with zero prior
+  coverage, closely related to this course's own `.max()`/`.min()` and
+  `np.percentile()`/`np.median()` (Lessons 111, 140) lessons, and confirmed
+  directly to hide a genuinely sharp trap worth a full lesson. Verified
+  directly in a scratch sandbox (pandas 3.1.1, numpy 2.5.5, `uv run --with
+  pandas`) rather than trusting memory: confirmed `np.ptp(arr) ==
+  arr.max() - arr.min()` exactly; confirmed it runs directly on a pandas
+  Series or DataFrame with no `.to_numpy()` conversion needed first
+  (matching the `np.argmax()`/`np.argmin()` pattern from Lesson 93), while
+  `hasattr(pd.Series([1,2,3]), "ptp")` is `False` — confirmed `Series.ptp()`/
+  `DataFrame.ptp()` were removed from pandas in the same 2.0 cleanup that
+  dropped `.mad()`. Confirmed `np.ptp(df, axis=0)` matches each column's own
+  `.max() - .min()` exactly, the same per-column reduction shape Lesson 140
+  confirmed for `np.median(arr, axis=0)`. The headline trap this round's own
+  fresh scan surfaced and verified directly, twice: `np.ptp()` on a narrow
+  integer dtype silently overflows — `np.array([-128, 127],
+  dtype=np.int8)` has a true range of `255`, which cannot fit in `int8`
+  (`-128` to `127`), so `np.ptp()` on it returns `-1` (confirmed, reproducing
+  a `RuntimeWarning: overflow encountered in scalar subtract` rather than an
+  exception), not the correct `255`; confirmed the identical wrong `-1`
+  persists even when the narrow-dtype array sits inside a pandas Series
+  (`np.ptp(pd.Series([-128, 127], dtype="int8"))`); confirmed widening to
+  `int64` first (`np.ptp(arr_i8.astype(np.int64))`) fixes it, returning the
+  correct `255`; confirmed `uint8` is not immune either, just differently
+  bounded (a range fitting `0..255` computes correctly, e.g. `np.ptp(np.array([10,
+  250], dtype=np.uint8))` is `240`); confirmed float arrays never hit this
+  trap, since floats don't wrap on overflow. Tied this directly to Lesson
+  62's own memory-optimization `.astype()` downcasting as the realistic
+  setup for this trap in practice. Separately confirmed `NaN` anywhere
+  poisons the whole `np.ptp()` result, matching Lesson 140's own
+  `np.median()` propagation trap; confirmed an empty array raises
+  `ValueError: zero-size array to reduction operation maximum which has no
+  identity` instead of quietly returning `NaN` — a genuine contrast with
+  `np.median()`'s own quiet-`NaN` behavior on empty input, not a repeat.
+  Added exactly one new glossary row, "np.ptp()" — directly after Lesson
+  141's `Series.cov()` entry; confirmed via a scripted tag-count check
+  (`table`/`tr`/`td`/`th`/`dfn` balanced 1/1, 224/224, 669/669, 3/3, 22/22)
+  and confirmed the lesson's one `<dfn>` tag matches the glossary row's
+  embedded copy verbatim via a direct string-equality check, matching the
+  established duplicate-markup convention. Also included an explicit
+  `.interview` callout div, matching this course's standing rule. Quiz word
+  counts required several rounds of trimming/padding against a scripted
+  exact-tokenization check (not hand-counted) before landing on 8/8/8,
+  10/10/10, 10/10/10 across the three questions, one `data-ok` per question
+  throughout. An HTML tag-balance script confirmed the lesson file fully
+  balanced: html/head/body 1/1/1, div 6/6, p 21/21, h1 1/1, h2 8/8, strong
+  4/4, button 9/9, script 3/3, dfn 1/1, span 38/38, em 2/2, a 2/2, title 1/1,
+  code 103/103, pre 6/6, with exactly one raw unescaped `&&` (two raw `&`
+  characters) inside the lesson's own `cd ~/learning/data && uv run ...`
+  shell command in its own `pre`/`code` block — the same established
+  exception as every prior round, invoked once. `node --check` confirmed
+  `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid JavaScript,
+  both before and after adding one `n: 142` entry and one `0142-np-ptp` file
+  reference to `nav.js`. The first run of the shipped (unsolved)
+  `practice/142_np_ptp.py`, run directly from its real `practice/` location
+  via `uv run --with pandas python3`, printed exactly 2 ✗ with no raw
+  traceback, as expected. Building the solved copy inside a scratch
+  directory `.scratch-data-142/` (created at the repo root, deleted after,
+  never tracked by git) printed both ✓ and "All green" on the first
+  attempt, no further fixes needed. Re-ran the real shipped file directly
+  from its `practice/` location again afterward and reproduced the
+  identical original all-✗ result, confirming the solved copy's edits never
+  leaked back into the shipped baseline. `bin/record-progress data
+  lesson_generated --day 142 --lesson 0142-np-ptp.html --detail
+  '{"by":"claude-sonnet-5"}'` ran successfully via direct call, no
+  workaround needed this round. This round's own fresh scan closed the one
+  gap it found (`np.ptp()`) and separately confirmed `.mad()` is dead API
+  (removed from pandas 2.0, not worth a lesson) — a future round's own
+  fresh scan should start clean, with nothing pre-committed, per this
+  course's standing convention. No new `data/learning-records/` entry was
+  added — routine lesson, no new completion/quiz signal since mid-October.
+  No new `RESOURCES.md` line was added — the cited NumPy `numpy.ptp()` API
+  reference is already covered by the existing "Docs: NumPy fundamentals —
+  broadcasting" grouping. `git status --short data/` showed only the
+  intended `data/` files touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0142-np-ptp.html`, new
+  `data/practice/142_np_ptp.py`, and this file). The scratch directory
+  `.scratch-data-142/` was deleted after verification, at the repo root but
+  never tracked by git.

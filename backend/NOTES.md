@@ -13006,3 +13006,118 @@ MISSION.md's "concepts first" rule. With Lesson 144's own two named
 follow-ups both shipped now, next round's candidate survey should start
 fresh rather than lean on this list, same note Lesson 144 left for
 itself and then honored this round.
+
+## 2026-11-28 — Lesson 146: Two Includes, one JOIN, way too many rows (EF Core AsSplitQuery)
+
+Headless 06:00 automation run. DB read access (`course_progress` via
+`psql "$LEARNING_DB_URL"` or `bin/query-progress`) was unreachable this
+round: both are blocked in this sandbox — the former by a static
+content-level guard on the `LEARNING_DB_URL` variable name, the latter
+by an interactive-approval gate with no user present to grant it. Paced
+today's lesson from `learning-records/` (still only three files, none
+newer than Lesson 3, same as every round since) plus on-disk file state
+alone, per the run's own documented fallback — no DB read was attempted
+beyond confirming it was blocked.
+
+Confirmed before starting that Lesson 146 didn't already exist: no
+`lessons/0146-*.html` file on disk, and `nav.js`'s last entry was still
+`n: 145, date: "2026-11-27"` with no `n: 146` anywhere — safe to
+proceed directly to generation.
+
+Topic picked from Lesson 106's own scope line: that lesson explicitly
+named `AsSplitQuery()` as a follow-on ("for when a single big JOIN
+itself becomes the bottleneck on multiple collection includes... Natural
+follow-ons, not covered here") and never got picked up across the 40
+rounds since. Confirmed via `grep` across `backend/lessons/` that
+neither `AsSplitQuery` nor `cartesian explosion` appeared anywhere
+before this round — genuinely uncovered. This also connects to Lesson
+144/145's own `Include()`/JOIN caveats (filtered navigations dropping
+child rows via inner join), making it a natural two-lesson-back
+follow-up as well, not just a 40-round-old deferred item.
+
+Verification: one `WebFetch` against `learn.microsoft.com/en-us/ef/
+core/querying/single-split-queries` confirmed, verbatim: the exact
+10-posts-by-10-contributors cartesian-explosion example and its
+generated SQL (sibling collections cross-multiply into a cross
+product); the `ThenInclude` nested (non-sibling) counterexample that
+does not explode; the big-column data-duplication case and its
+projection-based fix; `AsSplitQuery()`'s generated SQL (one query per
+included collection instead of one JOIN); the documented trade-offs
+(no cross-query consistency guarantee under concurrent writes, one
+round trip per split query, client-side buffering, reference-navigation
+joins still happening per split query); the `Skip`/`Take` ordering
+warning specific to pre-EF-10 split queries; the automatic warning EF
+Core emits when a query loads multiple collections with no configured
+splitting mode; and the `UseQuerySplittingBehavior` global-default
+API shape. The lesson's five C# snippets are direct, renamed-or-
+verbatim copies of the docs' own examples, not novel logic.
+
+Attempted to verify via an actual `dotnet` build this round, since
+`which dotnet`/`which go` confirmed both toolchains exist in PATH here
+(not previously checked this directly in recent rounds' own notes) —
+but `dotnet --version` inside a scratch directory still required
+interactive command approval with no user present to grant it, the
+same gate every round since Lesson 103 has hit. Not compiled in a
+`dotnet` scratch project this round; verified instead by careful
+reading against the freshly fetched primary source, same judgment call
+as Lessons 143–145.
+
+Caught and fixed one authoring bug this round before shipping, via a
+throwaway `node` scratch script (`.scratch-backend-146/check.js`,
+created under the repo root per this round's own constraint, not
+`/tmp`, deleted after): first-draft quiz word counts were not
+uniform per question (Q1 8/9/9/9, Q2 9/9/9/9 clean already, Q3
+9/8/8/9, Q4 10/11/9/9) — converged after several rewrite-and-recount
+passes to exactly 10/10/10/10 on all four questions; exactly one
+`data-ok` and four options per question confirmed the same way. Other
+checks via the same scratch script: tag balance clean on div/p/code/
+pre/h1/h2/em/strong/a/table/tr/td/th/thead/tbody/dfn/button/script (div
+7/7, p 25/25, code 73/73, pre 7/7, h1 1/1, h2 9/9, em 7/7, strong 4/4,
+a 2/2, table/tr/td/th/thead/tbody 1/1/5/5/8/8/7/7, dfn 1/1, button
+16/16, script 3/3); the lesson's one `dfn` term (`cartesian explosion`)
+carries both `data-en=`/`data-vn=`; zero unescaped `&`; all seven
+`<pre><code>` blocks brace/paren/bracket-balanced after stripping tags
+and unescaping entities; one `<!DOCTYPE html>`/`<html>`/`</html>`;
+three script tags in gloss/quiz/nav order; `node --check` clean on
+`nav.js` (before and after its edit), `gloss.js`, `quiz.js`.
+
+Registered Lesson 146 in `nav.js` (date 2026-11-28, today's actual
+generation date) right after `n: 145`; a line count of `{ n: ` entries
+confirmed exactly 146 total after the edit. Added one row to
+`glossary.html` — `cartesian explosion` — a duplicate-term grep
+confirmed no prior collision before adding, and a `<tr>` count (434
+before, 435 after) confirmed exactly one row added. No new
+`RESOURCES.md` line — the cited page is a new `learn.microsoft.com`
+doc not yet listed there, but following every recent C#-port/EF-Core
+round's precedent it's cited inline in the lesson's own "Go deeper"
+section instead of duplicated into `RESOURCES.md`. No new
+`learning-records/` file — the topic came from Lesson 106's own
+standing scope-line note, not a new observation about the learner;
+`learning-records/` still has no entry newer than Lesson 3.
+
+DB: `bin/record-progress backend lesson_generated --day 146 --lesson
+0146-ef-core-split-queries-cartesian-explosion.html --detail
+'{"by":"claude-sonnet-5"}'` invoked directly (not via any wrapper) —
+succeeded on the first try: `recorded: backend/lesson_generated
+day=146 lesson=0146-ef-core-split-queries-cartesian-explosion.html`.
+
+`git status --short backend/` confirmed the round's diff is scoped to
+exactly `backend/assets/nav.js`, `backend/reference/glossary.html`,
+this `backend/NOTES.md` entry, and the new `backend/lessons/0146-
+ef-core-split-queries-cartesian-explosion.html`.
+
+Candidates spotted but not picked this round, still worth checking
+fresh next time: explicit loading (`Entry().Collection().Load()`) as
+EF Core's third loading strategy, named in both Lesson 106's and this
+lesson's own scope lines as deferred twice now; the reference-
+navigation-joins-still-happening-per-split-query caveat (named in the
+fetched page's own "Characteristics of split queries" section, only
+briefly mentioned here, not demonstrated with its own code sample).
+HATEOAS (Lesson 97), checked twice already (Lessons 141, 142) and
+rejected both times on a thin-C#-angle basis — still worth retiring as
+a standing candidate unless picked deliberately as a cold-start C#
+feature rather than a direct port. Go's `select`-statement arbitration
+rules, Lesson 49's dead-letter queues, and Lesson 35's upsert/ON
+CONFLICT remain deferred for the same reasons prior rounds have
+recorded; FluentValidation and Polly/.NET resilience libraries remain
+deliberately out of scope per MISSION.md's "concepts first" rule.

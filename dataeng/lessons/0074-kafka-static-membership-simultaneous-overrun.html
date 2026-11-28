@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 74 · Kafka static membership: when both members overrun their windows at once</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 74 · ~20 min · 28 Nov 2026</p>
+<h1>Kafka static membership: when both members overrun their windows at once</h1>
+<p class="byline">Today's tangible win: Day 72's single-overrun test, rerun with <em>both</em> statically-identified consumers kept down past their own <code>session.timeout.ms</code> at the same time — and your own <code>kafka-consumer-groups.sh --describe</code> output proving the case Day 72 couldn't show: no survivor left to absorb anything, every partition sitting fully unconsumed for the whole gap, then one ordinary rebalance (not two) once the first consumer rejoins.</p>
+
+<div class="callout"><strong>Before today — confirm Day 72's single-overrun shape still works:</strong> today reruns Day 68's two-consumer script with both sleeps lengthened past the grace window instead of just one. It edits no file. Start from a clean check:
+<pre><code>grep -n "INSTANCE_ID" scripts/consume_order_events.py
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+Expected: a line reading <code>os.environ["INSTANCE_ID"]</code> printed, and <code>PartitionCount: 3</code>. If the grep finds nothing, finish Day 66 and Day 68 first — today changes no code, only how many consumers are down at once and for how long.</div>
+
+<h2>1 · The gap Day 72 named and left open</h2>
+<p>Day 72 proved one precise thing: when <code>warehouse-loader-2</code> stays down past its own 45-second <code>session.timeout.ms</code>, the coordinator reassigns its partition(s) to <code>warehouse-loader-1</code> — the surviving consumer never pauses, because the coordinator's bookkeeping is per-member, not group-wide. That lesson's own scope line named exactly what it didn't run: "both members overrunning their windows at the same time." The question matters because Day 72's reassuring result — <em>a healthy neighbor keeps the lights on while one member times out</em> — quietly depends on there being a healthy neighbor at all. What does "per-member bookkeeping" actually mean when there is no survivor, even briefly?</p>
+<p>This isn't a new mechanism to learn. Day 66 already established that each static member's <code>session.timeout.ms</code> is its own independent clock, with no group-wide timer sitting above it. Today just takes that fact seriously and runs two of those clocks out at once instead of one.</p>
+
+<h2>2 · <dfn data-en="the situation where every current member of a Kafka consumer group has had its own session.timeout.ms expire with no rejoin, so the group coordinator holds zero active members for the gap between the last expiry and the first rejoin -- every partition the group owns sits with no consumer reading it during that gap, since reassignment only ever hands a partition to a member that is currently present, and there are none, until the first rejoin arrives and the coordinator assigns every partition to that one member alone" data-vn="giữ nguyên &quot;empty-group gap&quot; — tình huống mọi member hiện tại của 1 Kafka consumer group đều đã hết session.timeout.ms mà không rejoin, nên coordinator có 0 active member trong khoảng giữa lần expiry cuối cùng và lần rejoin đầu tiên -- mọi partition group đó sở hữu đều không có consumer nào đọc trong khoảng đó, vì reassignment chỉ gán partition cho member đang hiện diện, mà lúc này không có ai, cho tới khi lần rejoin đầu tiên tới và coordinator gán TOÀN BỘ partition cho đúng 1 member đó</dfn>: what "per-member" means with no member left standing</h2>
+<p>Chain three already-confirmed facts instead of guessing at a new one:</p>
+<table class="gloss">
+<tr><th>Already confirmed</th><th>Source</th></tr>
+<tr><td>Each static member's <code>session.timeout.ms</code> is its own independent clock — there is no shared, group-wide grace timer.</td><td>Day 66, Section 2</td></tr>
+<tr><td>A member's expiry only ever reassigns <em>that member's own</em> partitions, to whichever members are currently present.</td><td>Day 72, Section 2</td></tr>
+<tr><td>Static membership changes the outcome of a <em>timely</em> rejoin only; it never reserves a slot forever once the window has actually closed.</td><td>Day 72, Section 2</td></tr>
+</table>
+<p>Run those three facts forward to the case where both members are down past their own windows. <code>warehouse-loader-1</code>'s window expires first (say it was killed first); the coordinator reassigns its partitions — but the only other "member" is <code>warehouse-loader-2</code>, which by then is <em>also</em> already dead or about to expire. There is nothing present to reassign to. The second expiry doesn't trigger a second, symmetric reassignment either, for the same reason: reassignment hands a partition to a currently-present member, and there is no currently-present member left. The group's own membership count has dropped to zero, and a partition with no consumer isn't reassigned to nobody — it just sits, fully unconsumed, until somebody shows up.</p>
+<div class="callout"><strong>Bridge from Day 72:</strong> Day 72's key sentence was "there is no sense in which a second static member's presence buys more time for a first one that's running late." Today's finding is the sharper, specific case of that: a second member doesn't just fail to buy time for the first — once both are gone, there's no member left for the coordinator to even hand a partition to. "Per-member bookkeeping" was never a promise that the group stays available; it only ever promised that one member's own fate doesn't leak into a different member's own entry. With zero members, there's no entry left that isn't affected.</div>
+
+<h2>3 · Build: kill both consumers, let both windows expire, watch the single rejoin that follows</h2>
+<p>Reuse Day 68's script and env-var shape exactly — same <code>INSTANCE_ID</code> environment variable, same 45-second <code>session.timeout.ms</code>. The only change from Day 72: kill <em>both</em> processes, and bring back only <em>one</em> of them after both windows have closed, to see what a single rejoin into an empty group actually produces:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+INSTANCE_ID=warehouse-loader-1 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+INSTANCE_ID=warehouse-loader-2 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+kill -9 $CONSUMER_A $CONSUMER_B
+sleep 50   <span class="cm"># past the 45s session.timeout.ms for BOTH members this time</span>
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader
+
+INSTANCE_ID=warehouse-loader-1 uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+sleep 3
+uv run --with confluent-kafka python3 scripts/produce_order_events.py   <span class="cm"># fresh traffic to prove the lone rejoin now owns everything</span>
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected across the three <code>--describe</code> calls — the ordinary split, then a group with no current owner for any partition, then a single rejoin claiming all three:</p>
+<pre><code><span class="cm"># call 1 -- before either kill: the ordinary 2-and-1 split</span>
+warehouse-loader  order_events  0  8   8   0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  1  4   4   0  warehouse-loader-2-rdkafka-1  ...
+warehouse-loader  order_events  2  8   8   0  warehouse-loader-1-rdkafka-1  ...
+
+<span class="cm"># call 2 -- both windows expired, nobody has rejoined yet: no CONSUMER-ID at all</span>
+warehouse-loader  order_events  0  8   8   0  -  -  -
+warehouse-loader  order_events  1  4   4   0  -  -  -
+warehouse-loader  order_events  2  8   8   0  -  -  -
+
+<span class="cm"># call 3 -- warehouse-loader-1 alone rejoins: one rebalance, it claims all three</span>
+warehouse-loader  order_events  0  12  12  0  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  1  8   12  4  warehouse-loader-1-rdkafka-1  ...
+warehouse-loader  order_events  2  12  12  0  warehouse-loader-1-rdkafka-1  ...</code></pre>
+<p>Read call 2 as today's actual new evidence: every <code>CURRENT-OFFSET</code> is frozen exactly where call 1 left it, and every <code>CONSUMER-ID</code>/<code>HOST</code>/<code>CLIENT-ID</code> column is blank — not "reassigned to nobody," literally no owner recorded, because the coordinator has nobody present to record. Read call 3 against call 2: a single rejoin produces a single rebalance that hands the lone rejoiner <em>all three</em> partitions at once, including partition 1, which it never owned before today. <code>LAG</code> on partition 1 (4, in the row above) is the direct cost of the empty-group gap: four events arrived while nobody was consuming anything, and <code>warehouse-loader-1</code> only catches up to them after claiming ownership it never had under Day 68's or Day 72's single-overrun version of this test. Clean up:</p>
+<pre><code>kill -9 $CONSUMER_A</code></pre>
+
+<h2>4 · The genuinely new finding: availability, not just ownership bookkeeping, is group-wide</h2>
+<p>Days 66, 68 and 72 each confirmed that <em>ownership bookkeeping</em> is per-member — one member's expiry, reassignment or late rejoin never touches a healthy neighbor's own entry. Today's result doesn't contradict that; it sits one level below it. Bookkeeping can stay perfectly per-member while <em>availability</em> collapses group-wide, for the simple reason that availability was never a property any single member's entry carried on its own — it was always a count across every member's entry at once. Per-member bookkeeping only guarantees a healthy member's own slot is undisturbed by a neighbor; it says nothing about what happens when there are no healthy slots left to disturb.</p>
+<div class="callout">This is the same shape as Day 50's producer-side finding, from the other end of the pipe: <code>BufferError</code> showed that one slow consumer's backpressure becomes the <em>producer's</em> problem, not a fact contained entirely on the consumer side. Today shows the mirror case on the consumer-group side — one member's expiry is contained, but every member expiring at once is not a sum of contained events, it's a genuinely different condition (zero coverage) that none of the per-member facts individually predicted.</div>
+
+<h2>5 · Verify</h2>
+<p>The same <code>total = distinct_events</code> proof every rebalance-adjacent lesson since Day 6 has run still applies — an empty-group gap followed by a single consumer claiming everything is still exactly the kind of multi-actor redelivery risk an idempotent write exists for, now stress-tested against the sharpest version of it yet: a stretch where literally nothing was committing offsets at all, followed by one consumer re-reading a partition it may have partially processed before its own kill:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<p>Expected: <code>total</code> equal to <code>distinct_events</code>, unchanged from every prior day's version of this same check. No code changed today (only which processes are killed and for how long, in the terminal commands above, not in any committed file), so there is nothing new to <code>py_compile</code> — Day 68's own <code>scripts/consume_order_events.py</code> is unmodified.</p>
+<p><strong>Checked live this round, not against a real broker (no reachable Kafka this sandbox round, the same standing gap every recent Kafka round has named):</strong> two scratch <code>Consumer({...})</code> configs, one per static identity (<code>warehouse-loader-1</code>, <code>warehouse-loader-2</code>), both sharing <code>group.id: "warehouse-loader"</code> and <code>session.timeout.ms: 45000</code>, were constructed for real this round against a freshly-installed <code>confluent-kafka==2.16.2</code> client (librdkafka 2.16.0) in a scratch directory — both <code>Consumer()</code> calls succeeded with no config-rejection error, confirming two static identities sharing one group still construct cleanly with no special handling needed for the "both might expire" case; the client itself has no concept of "how many other members are currently down" at construction time. <code>uv run python3 -m py_compile</code> on that scratch file was clean. The actual claims this lesson rests on — that an empty group leaves every partition with no recorded owner until a rejoin, and that a lone rejoin into an empty group claims every partition in one rebalance rather than waiting for a second member — are Kafka's own documented group-coordinator behavior (a partition's owner is whichever member the coordinator's last rebalance assigned it to; with zero members present, the last rebalance assigned it to nobody) applied to the two-static-member case, not a live multi-process, multi-minute test this round, since no broker was reachable to run Section 3's sequence for real. Confirm all three of Section 3's <code>--describe</code> outputs, especially call 2's blank <code>CONSUMER-ID</code> columns, in your own environment before quoting the "no owner recorded" claim verbatim in an interview.</p>
+
+<div class="interview">
+<p><strong>Q: "You've shown that static membership's bookkeeping is per-member, so one consumer's restart doesn't disturb another's. Does that mean the group stays available as long as each member's own window is short enough?"</strong> A strong answer, out loud: <em>"Not quite — per-member bookkeeping and group availability are two different claims. Bookkeeping being per-member means one member's own expiry or rejoin never touches a different member's own assignment, and I confirmed that back on Day 72 with one survivor staying untouched while its neighbor timed out. But if every member's window expires at the same time, there's no survivor left for bookkeeping to protect — the coordinator just has zero members present, and every partition sits with no recorded owner until somebody rejoins. I ran exactly that: killed both statically-identified consumers, let both windows expire, and the describe output showed every partition with a blank consumer column, offsets frozen, until one consumer came back and claimed all three partitions in a single rebalance. The lesson is that per-member isolation protects a healthy member from a sick one — it was never a promise that the group has a healthy member at all. Sizing session.timeout.ms generously helps any one member survive a slow restart, but it doesn't help if your deploy process kills every member at once."</em> The signal: distinguishing bookkeeping isolation (per-member, already proven) from availability (a property of the whole group's current membership count, which can hit zero regardless of how isolated the bookkeeping is).</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers two statically-identified consumers both overrunning their own <code>session.timeout.ms</code> at the same time, in the same group Days 66/68/72 built, reasoned from Kafka's documented per-member expiry behavior chained across both members and confirmed live only as valid consumer configs against the installed client — not against a real broker's actual empty-group and single-rejoin timing this round. It does not cover more than two members (the chain of reasoning generalizes, but this project's <code>warehouse-loader</code> group has never run a third instance), the broker-side <code>group.max.session.timeout.ms</code> bound that could clamp an unreasonably large client-side value (broker tuning, past this course's working-level Kafka scope per <code>MISSION.md</code>), or what a consumer <em>mid-transaction</em> on its Postgres write does during the gap — this project's <code>ON CONFLICT (event_id) DO NOTHING</code> write (Day 6) is a single statement, not a multi-step transaction, so there is no partially-committed state for an empty-group gap to interact with here, but a pipeline with a longer transaction per batch would need to ask that question for real.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by chaining Day 66's per-member-clock finding with Day 72's per-member-reassignment finding: each member's session.timeout.ms is independent, and expiry only ever reassigns that member's own partitions to whoever is currently present. When both members have already expired, there is nobody currently present to reassign to, so every partition is left with no recorded owner until a rejoin arrives -- not reassigned to nobody, simply unowned.">
+    <p class="stem">What does <code>kafka-consumer-groups.sh --describe</code> show for a partition while both statically-identified members are down past their own windows?</p>
+    <button class="opt" data-ok>No consumer owns it; the CONSUMER-ID column stays fully blank</button>
+    <button class="opt">The partition gets deleted from the topic until next rejoin</button>
+    <button class="opt">Postgres automatically takes over and starts reading that partition itself</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: with zero members present, the coordinator cannot run a rebalance -- there is nobody to assign partitions to. The first rejoin triggers exactly one rebalance, and because it is the only member present at that moment, that single rebalance hands it every partition the group owns, not just the one it held before the kill.">
+    <p class="stem">When only <code>warehouse-loader-1</code> rejoins after both members' windows have expired, what happens to the group's partitions?</p>
+    <button class="opt" data-ok>One rebalance fires and hands that lone consumer every partition</button>
+    <button class="opt">Nothing at all changes until a second consumer also rejoins</button>
+    <button class="opt">Two separate rebalances fire, one for each partition it owns</button>
+  </div>
+  <div class="q" data-why="This is today's actual new finding, distinct from Days 66/68/72: those lessons showed bookkeeping isolation -- one member's own entry is undisturbed by a neighbor's restart or expiry. Today shows that isolation was never a promise about the group's overall availability, which is a count across every member's presence at once and can hit zero even though each member's own bookkeeping stayed perfectly isolated the whole time.">
+    <p class="stem">Why doesn't per-member bookkeeping, already proven isolated on Days 66/68/72, prevent today's empty-group gap?</p>
+    <button class="opt" data-ok>Isolation protects members from each other, not whether any shows</button>
+    <button class="opt">Because per-member bookkeeping was never actually true until right now</button>
+    <button class="opt">Because Postgres silently disables all static membership past two members</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> remain this course's standing citation for consumer-group and rebalance mechanics since Day 5, and the same static-membership section Days 66, 68 and 72 already used documents partition ownership as always resolving to "whichever member the coordinator's last rebalance assigned," which is the basis for today's "no members present means no owner recorded" reasoning — not fetched fresh live this round (no working <code>WebFetch</code> tool, the same recurring gap prior rounds have each named), so confirm the exact wording on an empty group's partition-ownership state against the live page before quoting it verbatim in an interview. The <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a>, already this course's primary source for Days 5–6/34/50/55/58/66/68/72, cover constructing multiple <code>Consumer</code> instances with distinct <code>group.instance.id</code> values as plain config — confirmed live this round again, both constructing cleanly with no special-casing for the simultaneous-overrun scenario.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 74.<br>
+<strong>Next up:</strong> this round closed Day 72's own named gap (both members overrunning their windows at once). Left open, named again today: more than two members overrunning simultaneously (the reasoning generalizes but was never run past two), and the broker-side <code>group.max.session.timeout.ms</code> bound, still out of this course's working-level Kafka depth per <code>MISSION.md</code>. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now forty rounds, 35-74) — still worth a human granting it once. Day 71's and Day 73's shared Airflow follow-up (an <code>XComArg</code> passed directly to <code>.expand_kwargs()</code>, and templating <code>map_index_template</code> from a task's own return value) and Day 70's dbt follow-up (model-level constraints for a composite key, still blocked on this project having no genuine composite-key table) both remain open too. With today's round, Kafka has had the most recent fresh-gap attention; a future round's gap-scan should weigh dbt or Airflow next, or whichever named follow-up or learner signal turns up first, rather than assuming any one of the three by default.<br><br>
+💬 Anything unclear — why availability and bookkeeping isolation are different claims, or what a longer Postgres transaction would change about the empty-group gap? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 142 · np.ptp(): max minus min in one call, and the narrow-dtype overflow trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 142 · ~20 min · 28 Nov 2026</p>
+<h1>np.ptp(): max minus min in one call, and the narrow-dtype overflow trap</h1>
+<p class="byline">Lesson 141's own closing note named <code>.mad()</code> as the nearest surfaced-but-not-built candidate — checked directly in a scratch sandbox first: <code>Series.mad()</code> raises <code>AttributeError</code> on pandas 3.1.1, removed from the library entirely back in pandas 2.0, so it is dead API and a poor pick for an interview-prep lesson. Ran this round's own fresh scan instead: grepped every lesson body and the glossary case-insensitively for <code>ptp(</code> and found zero hits anywhere across Lessons 1-141. <code>np.ptp()</code> is still a live, documented NumPy function, closely related to this course's own <code>.max()</code>/<code>.min()</code> and <code>np.percentile()</code> (Lesson 111) lessons, and it hides a genuinely sharp dtype trap worth a full lesson.</p>
+
+<h2>1 · ptp() is "peak to peak" — max minus min, confirmed directly</h2>
+<p>Confirmed directly (pandas 3.1.1, numpy 2.5.5):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">3</span>, <span class="kw">7</span>, <span class="kw">1</span>, <span class="kw">9</span>, <span class="kw">4</span>])
+
+np.ptp(arr)              <span class="cm"># 8  -- same as arr.max() - arr.min()</span>
+arr.max() - arr.min()    <span class="cm"># 8  -- confirmed identical</span></code></pre>
+<p><dfn data-en="short for 'peak to peak' -- a NumPy function returning the range of an array: max() minus min(), computed in one call rather than two. Works on a plain array, a pandas Series, or a whole DataFrame, but there is no Series.ptp()/DataFrame.ptp() method -- it only exists as the top-level np.ptp() function" data-vn="viết tắt 'peak to peak' -- hàm NumPy trả về RANGE (khoảng biến động) của mảng: max() trừ min(), tính trong 1 lần gọi thay vì 2; chạy được trên mảng thường, Series, hay cả DataFrame, nhưng KHÔNG có method Series.ptp()/DataFrame.ptp() -- chỉ tồn tại dưới dạng hàm np.ptp() gọi từ module numpy">np.ptp()</dfn> is short for "peak to peak" — the full range a column spans, from its lowest value to its highest. It is a convenience function only: nothing it computes is new, it just saves writing <code>.max() - .min()</code> as two separate calls. Confirmed directly, <code>np.ptp()</code> also runs directly on a pandas Series or DataFrame with no <code>.to_numpy()</code> conversion needed first, the same NumPy-function-on-pandas-data pattern Lesson 93's own <code>np.argmax()</code>/<code>np.argmin()</code> already confirmed:</p>
+<pre><code>s = pd.Series([<span class="kw">3</span>, <span class="kw">7</span>, <span class="kw">1</span>, <span class="kw">9</span>, <span class="kw">4</span>])
+np.ptp(s)   <span class="cm"># 8  -- works directly on a Series, no .to_numpy() needed</span>
+
+hasattr(s, <span class="str">"ptp"</span>)   <span class="cm"># False -- confirmed: no Series.ptp() method exists</span></code></pre>
+<p>Confirmed directly: unlike <code>.max()</code> and <code>.min()</code> themselves, which exist as both a pandas method <em>and</em> a NumPy function, <code>ptp</code> only exists as the top-level <code>np.ptp()</code> function — calling <code>.ptp()</code> as a Series or DataFrame method raises <code>AttributeError</code>, removed from pandas in the same 2.0 cleanup that dropped <code>.mad()</code>.</p>
+
+<h2>2 · axis= reduces one axis of a 2-D array or whole DataFrame, same pattern as np.median()</h2>
+<p>Confirmed directly, <code>np.ptp()</code> takes the same <code>axis=</code> parameter this course has used since <code>np.percentile()</code> (Lesson 111) and <code>np.median()</code> (Lesson 140):</p>
+<pre><code>df = pd.DataFrame({<span class="str">"a"</span>: [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], <span class="str">"b"</span>: [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">5</span>]})
+
+np.ptp(df, axis=<span class="kw">0</span>)   <span class="cm"># a 2, b 15  -- range DOWN each column</span>
+np.ptp(df)           <span class="cm"># 19         -- no axis: flattens first, one single number across the whole table</span></code></pre>
+<p>Confirmed directly, <code>np.ptp(df, axis=0)</code> matches column-by-column <code>.max() - .min()</code> exactly (<code>df["a"].max() - df["a"].min()</code> is <code>2</code>, <code>df["b"].max() - df["b"].min()</code> is <code>15</code>) — the same per-column reduction shape as <code>np.median(arr, axis=0)</code>, just with a different formula underneath.</p>
+
+<h2>3 · The real trap: narrow integer dtypes can silently overflow</h2>
+<p>Unlike Lesson 140's <code>np.median()</code> trap (a cross-library <code>NaN</code> mismatch), <code>np.ptp()</code>'s sharpest trap is dtype-driven and happens inside a single call, with no second library involved. Confirmed directly:</p>
+<pre><code>arr_i8 = np.array([<span class="kw">-128</span>, <span class="kw">127</span>], dtype=np.int8)
+
+arr_i8.max(), arr_i8.min()   <span class="cm"># (127, -128)  -- both look completely correct</span>
+np.ptp(arr_i8)                <span class="cm"># -1  -- WRONG; the true range is 255</span></code></pre>
+<div class="callout"><strong>Confirmed directly, why this happens:</strong> <code>np.ptp()</code> computes <code>max() - min()</code> in the array's own dtype, not in a safely wide one. <code>int8</code> can only hold <code>-128</code> to <code>127</code> — the true range, <code>255</code>, cannot fit in that dtype at all. The subtraction silently wraps around to <code>-1</code> instead of raising an error, confirmed directly to reproduce a NumPy <code>RuntimeWarning: overflow encountered in scalar subtract</code> rather than an exception, easy to miss in a busy script. Confirmed directly, this trap survives even when the narrow-dtype array sits inside a pandas Series — <code>np.ptp(pd.Series([-128, 127], dtype="int8"))</code> returns the identical wrong <code>-1</code>. The fix is widening the dtype first: <code>np.ptp(arr_i8.astype(np.int64))</code> confirmed directly returns the correct <code>255</code>. This is exactly the kind of trap Lesson 62's own memory-optimization <code>.astype()</code> downcasting can set up unintentionally — shrinking a column to <code>int8</code> to save memory, then calling <code>np.ptp()</code> on it later and getting a confidently wrong negative number back, no warning surfaced in most environments by default.</div>
+<p>Confirmed directly, <code>uint8</code> is not immune either, just differently bounded — a range that fits within <code>0..255</code> computes correctly (<code>np.ptp(np.array([10, 250], dtype=np.uint8))</code> is <code>240</code>, fits fine), but a float array never hits this trap at all, since floats do not wrap on overflow the way fixed-width integers do.</p>
+
+<h2>4 · NaN propagates, and an empty array raises instead of returning NaN</h2>
+<p>Confirmed directly, a <code>NaN</code> anywhere in the array poisons the whole result — the same propagation rule Lesson 140 confirmed for plain <code>np.median()</code>, not the pandas-side auto-skip behavior:</p>
+<pre><code>arr_nan = np.array([<span class="kw">3.0</span>, <span class="kw">7.0</span>, np.nan, <span class="kw">9.0</span>])
+np.ptp(arr_nan)   <span class="cm"># nan  -- one NaN poisons the whole range, no error</span></code></pre>
+<p>Confirmed directly, an empty array is where <code>np.ptp()</code> actually diverges from <code>np.median()</code>'s own quiet-<code>NaN</code> pattern: <code>np.ptp(np.array([]))</code> raises <code>ValueError: zero-size array to reduction operation maximum which has no identity</code> instead of returning <code>NaN</code> — because <code>ptp</code> is built directly from <code>.max()</code>/<code>.min()</code>, and neither has a sensible answer on zero elements, so it raises loudly rather than failing quietly this one time.</p>
+
+<div class="interview">
+<p><strong>Q: "What's np.ptp(), and is there anything to watch out for when using it?"</strong> A strong answer, out loud: <em>"ptp stands for peak-to-peak — it's just max() minus min() in one call, the full range a column spans. The one real trap is dtype: it computes the subtraction in the array's own dtype, so on a narrow type like int8, a genuinely wide range like -128 to 127 can silently overflow and come back as a small negative number instead of the correct 255 -- no error, just a wrong answer. That's exactly the kind of thing a prior memory-optimization pass that downcasts columns to save space can set up by accident. I'd widen the dtype with astype() before calling ptp() on anything that's been through aggressive downcasting, or just stick to max() - min() computed in a wider dtype if I'm not sure."</em> The signal: naming the exact failure (silent overflow, not a crash) and connecting it to dtype-optimization work rather than treating ptp() as a trivial, risk-free convenience function.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.ptp()</code>'s confirmed <code>max() - min()</code> definition, its confirmed ability to run directly on a NumPy array, a pandas Series, or a whole DataFrame despite no <code>Series.ptp()</code>/<code>DataFrame.ptp()</code> method existing, the confirmed <code>axis=</code> reduction on a 2-D array or DataFrame, the confirmed narrow-integer-dtype silent-overflow trap, and the confirmed contrast between <code>NaN</code>-propagation (matches <code>np.median()</code>) and empty-array behavior (raises <code>ValueError</code> instead of returning <code>NaN</code>, unlike <code>np.median()</code>). It does not cover interquartile range or other dispersion statistics beyond this simple min/max span, out of scope per <code>MISSION.md</code>'s "no deep statistics" line.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/142_np_ptp.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/142_np_ptp.py</code></pre>
+<p>Exercise 1 confirms the Section 1/2 basics: <code>np.ptp()</code> on a 1-D array matches <code>.max() - .min()</code> exactly, and <code>np.ptp(df, axis=0)</code> matches each column's own range. Exercise 2 confirms the Section 3 trap: casting the same two values to <code>int8</code> makes <code>np.ptp()</code> return a wrong negative number, while the identical values at a wider dtype return the correct range.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.ptp() stands for 'peak to peak' and is defined as max() minus min(), computed in one call. It is a convenience function only -- it does not compute anything that max() and min() couldn't already give separately.">
+    <p class="stem">Confirmed directly, what does <code>np.ptp(arr)</code> compute?</p>
+    <button class="opt" data-ok>the range, arr's own max minus its min</button>
+    <button class="opt">the count of unique values found inside arr</button>
+    <button class="opt">the average gap between each sorted neighbor pair</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.ptp() computes max() - min() in the array's own dtype. On int8 (range -128 to 127), the true range of 255 cannot fit in that dtype, so the subtraction silently overflows to a wrong negative number instead of raising an error or warning visibly in most setups.">
+    <p class="stem">Confirmed directly, what happens calling <code>np.ptp()</code> on an <code>int8</code> array holding both <code>-128</code> and <code>127</code>?</p>
+    <button class="opt" data-ok>it silently overflows, quietly returning a wrong answer right here</button>
+    <button class="opt">it raises a clear, loud OverflowError every single time, always</button>
+    <button class="opt">it auto-widens the dtype first, so 255 comes back right</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: there is no Series.ptp() or DataFrame.ptp() method -- that method was removed from pandas in version 2.0, the same cleanup that removed Series.mad(). np.ptp() is still the live, documented way to get the same range value, and it runs directly on a Series or DataFrame with no .to_numpy() conversion needed first.">
+    <p class="stem">Confirmed directly, does <code>pd.Series([1, 2, 3]).ptp()</code> work on pandas 3.1.1?</p>
+    <button class="opt" data-ok>No -- AttributeError, that method is gone from pandas now</button>
+    <button class="opt">Yes -- returns 2, identical to calling np.ptp() on it</button>
+    <button class="opt">Yes, but only once .to_numpy() is called first on it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy <a href="https://numpy.org/doc/stable/reference/generated/numpy.ptp.html"><code>numpy.ptp()</code></a> API reference (per <code>RESOURCES.md</code>'s NumPy fundamentals grouping, ~5 min) — the page documents the <code>axis=</code> parameter directly and notes the function operates in the array's own dtype; the narrow-dtype silent-overflow trap and the empty-array <code>ValueError</code> contrast with <code>np.median()</code> are confirmed directly in this lesson's own scratch sandbox (pandas 3.1.1, numpy 2.5.5).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.ptp()</code> is new today, added right after Lesson 141's <code>Series.cov()</code> entry.<br>
+<strong>Next lesson:</strong> this round's own fresh scan closed the one gap it found (<code>np.ptp()</code>) and separately confirmed <code>.mad()</code> is dead API (removed from pandas 2.0, not worth a lesson) — a future round's own fresh scan should start clean, with nothing pre-committed, per this course's standing convention.<br><br>
+💬 Anything unclear — the ptp()/max()-min() relationship, the int8 overflow trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

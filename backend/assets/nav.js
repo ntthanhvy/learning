@@ -298,6 +298,8 @@
       file: "lessons/0144-multi-tenant-efcore-hasqueryfilter.html" },
     { n: 145, date: "2026-11-27", title: "Naming more than one query filter",
       file: "lessons/0145-efcore-named-query-filters.html" },
+    { n: 146, date: "2026-11-28", title: "Two Includes, one JOIN, way too many rows",
+      file: "lessons/0146-ef-core-split-queries-cartesian-explosion.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 122 · binascii: bytes as hex text, and a fast checksum</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 122 · ~20 min · 28 Nov 2026</p>
+<h1><code>binascii</code>: bytes as hex text, and a fast checksum</h1>
+<p class="byline">Day 82's <code>base64</code> turned raw bytes into text safe for JSON or a URL. There's a second, plainer way to write bytes as text that shows up constantly in logs and debug output: hex — <code>"48656c6c6f"</code> instead of a wall of base64. <code>binascii</code> is the standard-library module underneath both <code>base64</code> and <code>bytes.hex()</code>, and it also carries a fast, non-cryptographic checksum — <code>crc32()</code> — a different tool from Day 59's <code>hashlib</code> digests.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep for <code>binascii\.</code> (not just the bare word, which would also match prose mentions in Days 120-121 naming it as a standing candidate) across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> came back zero-hit for real usage — confirming Day 121's own closing note, which named <code>binascii</code> the one remaining fresh zero-hit candidate before this cycle's review day. This is fresh day 3 of the current three-fresh-then-review cycle (Days 120-122); Day 123 is the next review day, covering Days 120-122. <code>calendar</code> and <code>socket</code> remain the two longest-standing ruled-out candidates (thin content and scope-depth respectively).</div>
+
+<h2>1 · hexlify / unhexlify: bytes as a hex string, and back</h2>
+<p><code>binascii.hexlify()</code> turns a <code>bytes</code> value into its hex-digit representation, two characters per byte — confirmed live:</p>
+<pre><code><span class="kw">import</span> binascii
+
+data = <span class="str">b"Hello, Python!"</span>
+hexed = binascii.hexlify(data)
+<span class="kw">print</span>(hexed)       <span class="cm"># confirmed live: b'48656c6c6f2c20507974686f6e21'</span>
+<span class="kw">print</span>(<span class="builtin">type</span>(hexed))  <span class="cm"># confirmed live: &lt;class 'bytes'&gt;</span>
+
+back = binascii.unhexlify(hexed)
+<span class="kw">print</span>(back == data)  <span class="cm"># confirmed live: True</span></code></pre>
+<p><dfn data-en="binascii.hexlify(data) returns a bytes object holding two hex digits per input byte -- confirmed live, hexlify(b'Hello, Python!') is b'48656c6c6f2c20507974686f6e21', exactly 28 characters for 14 input bytes; unhexlify() is its exact inverse, rebuilding the original bytes" data-vn="giữ nguyên &quot;hexlify&quot; — trả về bytes gồm 2 ký tự hex cho mỗi byte input; hexlify(b'Hello, Python!') ra b'48656c6c6f2c20507974686f6e21', đúng 28 ký tự cho 14 byte input; unhexlify() là nghịch đảo chính xác, dựng lại bytes gốc">binascii.hexlify()</dfn> is exactly what <a href="https://docs.python.org/3/library/stdtypes.html#bytes.hex"><code>bytes.hex()</code></a> calls underneath, just returning <code>bytes</code> instead of <code>str</code> — this is the module that has existed since before <code>bytes</code> grew its own convenience methods, and it's still what <code>base64</code> itself is built on.</p>
+
+<h2>2 · A readable separator, and what breaks unhexlify</h2>
+<p><code>hexlify()</code> takes an optional separator and a group size, for output a human can actually scan:</p>
+<pre><code><span class="kw">print</span>(binascii.hexlify(data, <span class="str">"-"</span>, 2))
+<span class="cm"># confirmed live: b'4865-6c6c-6f2c-2050-7974-686f-6e21'</span>
+
+<span class="kw">try</span>:
+    binascii.unhexlify(<span class="str">b"abc"</span>)       <span class="cm"># odd number of hex digits</span>
+<span class="kw">except</span> binascii.Error <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)  <span class="cm"># confirmed live: Odd-length string</span>
+
+<span class="kw">try</span>:
+    binascii.unhexlify(<span class="str">b"zz"</span>)       <span class="cm"># not valid hex digits</span>
+<span class="kw">except</span> binascii.Error <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)  <span class="cm"># confirmed live: Non-hexadecimal digit found</span></code></pre>
+<p><dfn data-en="binascii.Error is the exception unhexlify() and the module's other a2b_*/b2a_* functions raise on malformed input -- confirmed live, it is a real subclass of ValueError, so except ValueError also catches it; an odd number of hex digits or any character outside 0-9a-fA-F triggers it" data-vn="giữ nguyên &quot;binascii.Error&quot; — exception mà unhexlify() và các hàm a2b_*/b2a_* khác của module raise khi input sai định dạng; xác nhận trực tiếp là subclass thật của ValueError nên except ValueError cũng bắt được; số ký tự hex lẻ hoặc có ký tự ngoài 0-9a-fA-F đều gây lỗi này">binascii.Error</dfn> is a real, documented exception — confirmed directly as a subclass of <code>ValueError</code> — not a bare string check the caller has to write by hand.</p>
+
+<h2>3 · crc32: a fast checksum, not a security hash</h2>
+<p>Day 59 taught <code>hashlib</code> for content hashing and explicitly ruled out a fast general-purpose digest for anything security-sensitive. <code>binascii.crc32()</code> goes further the other direction: it's not cryptographic at all, it's a small, fast integer checksum meant for catching accidental corruption — in a zip entry, a network packet, a saved file — cheaply:</p>
+<pre><code><span class="kw">print</span>(binascii.crc32(data))         <span class="cm"># confirmed live: 1944741392</span>
+<span class="kw">print</span>(binascii.crc32(<span class="str">b""</span>))           <span class="cm"># confirmed live: 0</span>
+
+<span class="cm"># chunked, like hashlib's .update() -- pass the running value back in</span>
+checksum = 0
+<span class="kw">for</span> chunk <span class="kw">in</span> [<span class="str">b"Hello, "</span>, <span class="str">b"Python"</span>, <span class="str">b"!"</span>]:
+    checksum = binascii.crc32(chunk, checksum)
+<span class="kw">print</span>(checksum == binascii.crc32(data))  <span class="cm"># confirmed live: True</span></code></pre>
+<p><dfn data-en="binascii.crc32(data, value=0) returns a 32-bit integer checksum -- confirmed live, crc32(b'') is 0, and calling it across chunks while threading the running integer back in as the second argument produces the exact same result as one call over the whole concatenated data; unlike hashlib's digests, CRC32 is fast but not designed to resist a deliberate attacker constructing a collision" data-vn="giữ nguyên &quot;crc32&quot; — trả về checksum số nguyên 32-bit; xác nhận trực tiếp crc32(b'') ra 0, và gọi theo từng chunk, truyền lại giá trị chạy ở tham số thứ 2, cho đúng kết quả như gọi 1 lần trên toàn bộ data nối lại; khác hashlib, CRC32 nhanh nhưng KHÔNG được thiết kế để chống kẻ tấn công cố tình tạo va chạm (collision)">binascii.crc32()</dfn> takes the running checksum back as its second argument on each call, the same shape as Day 59's chunked <code>.update()</code> — but it answers "did this get corrupted by accident," never "can this be trusted," the line Day 59 already drew around <code>hashlib</code>.</p>
+
+<div class="callout"><strong>Where this connects to Day 82:</strong> <code>binascii.b2a_base64()</code>/<code>a2b_base64()</code> are the exact functions <code>base64.b64encode()</code>/<code>b64decode()</code> call underneath — confirmed live, <code>binascii.b2a_base64(data).rstrip(b"\n") == base64.b64encode(data)</code> is <code>True</code>. Reach for <code>base64</code> directly for that job; <code>binascii</code> is the layer below it, worth knowing exists but rarely called for base64 work by name.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither library uses <code>binascii</code> for anything in its public API — hex dumps and checksums here are a plain-bytes, protocol-level concern, not a data-table one. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/122_binascii.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/122_binascii.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: round-tripping bytes through <code>hexlify()</code>/<code>unhexlify()</code>, catching <code>binascii.Error</code> on malformed hex input, and computing a chunked <code>crc32()</code> checksum that matches the whole-data result.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="unhexlify() requires an even number of hex digits, since each byte needs exactly two -- confirmed live, binascii.unhexlify(b'abc') (3 digits) raised binascii.Error with the message 'Odd-length string', not a silently truncated or padded result.">
+    <p class="stem">What happens calling <code>binascii.unhexlify(b"abc")</code>, confirmed live?</p>
+    <button class="opt" data-ok>it raises binascii.Error, since 3 digits can't fill whole bytes</button>
+    <button class="opt">it silently drops the last digit, decoding just the two</button>
+    <button class="opt">it pads with an extra zero digit, then decodes three</button>
+  </div>
+  <div class="q" data-why="binascii.crc32() takes the running checksum as its optional second argument -- confirmed live, calling it once per chunk while threading that running integer back in produced the exact same result as one call over the whole concatenated bytes, the same chunked shape as Day 59's hashlib .update().">
+    <p class="stem">How does <code>binascii.crc32()</code> support checksumming data one chunk at a time, confirmed live?</p>
+    <button class="opt" data-ok>pass the running checksum value back as its own second argument</button>
+    <button class="opt">call .update() on the integer it returns, the way hashlib does</button>
+    <button class="opt">it cannot be chunked -- the whole value must be passed</button>
+  </div>
+  <div class="q" data-why="crc32 is a fast, non-cryptographic checksum meant for catching accidental corruption (a bad download, a damaged zip entry) -- confirmed live it is unrelated to hashlib's cryptographic digests from Day 59, which are designed to resist a deliberate attacker constructing a collision, something crc32 was never built to resist.">
+    <p class="stem">Why shouldn't <code>binascii.crc32()</code> replace a <code>hashlib</code> digest for verifying a file wasn't tampered with?</p>
+    <button class="opt" data-ok>it's fast, but was never designed to resist a deliberate attacker</button>
+    <button class="opt">it works on text only, never accepting raw bytes at all</button>
+    <button class="opt">it returns a hex string, not an integer, which breaks comparisons</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/binascii.html"><code>binascii</code></a> docs, especially <code>hexlify()</code>/<code>unhexlify()</code>, <code>binascii.Error</code>, and <code>crc32()</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day122">glossary</a> under Day 122.<br>
+Cadence note: today is fresh day 3 of the current three-fresh-then-review cycle (Days 120-122) — Day 123 should be the next review day, spanning Days 120-122. <code>calendar</code> and <code>socket</code> remain the two standing ruled-out candidates (thin content and scope-depth respectively); <code>selectors</code>, <code>sched</code>, and <code>signal</code> stay parked, skewing toward the OS/event-loop depth <code>MISSION.md</code> excludes, unless a heavier single-module topic doesn't turn up first for the next fresh cycle.<br><br>
+💬 Anything unclear — why hex and base64 share a module underneath, or when a checksum is enough and a real hash isn't? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

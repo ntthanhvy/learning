@@ -119,6 +119,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 120 — `guess_type()` for guessing a MIME type and compression encoding from a filename's extension alone (never from the file's real bytes), `guess_extension()` as its reverse direction, and `add_type()` for registering a project-specific extension the built-in table doesn't know.
 - [Docs: `tracemalloc`](https://docs.python.org/3/library/tracemalloc.html)
   Use for: Day 121 — `start()`/`is_tracing()` for turning allocation tracing on and checking it, `take_snapshot()`/`Snapshot.compare_to()` for pointing at the exact source line responsible for memory growth between two points in time (confirmed live against Day 1's mutable-default-argument trap), and `get_traced_memory()`/`reset_peak()` for a quick current/peak byte count without a full snapshot diff.
+- [Docs: `binascii`](https://docs.python.org/3/library/binascii.html)
+  Use for: Day 122 — `hexlify()`/`unhexlify()` for converting bytes to/from a hex-digit string (the function `bytes.hex()` calls underneath), `binascii.Error` as the real `ValueError` subclass raised on malformed hex input, and `crc32()` as a fast, chunked, non-cryptographic checksum distinct from Day 59's `hashlib` digests.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

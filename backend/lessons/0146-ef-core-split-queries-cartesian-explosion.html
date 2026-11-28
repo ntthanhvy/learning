@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 146 · Two Includes, one JOIN, way too many rows</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 146 · ~20 min</p>
+<h1>Two Includes, one JOIN, way too many rows</h1>
+<p class="byline">Lesson 106 fixed EF Core's N+1 problem with <code>Include()</code>: fold every related table into one query, one round trip, instead of a query per row. It also named the one case where <code>Include()</code> itself becomes the bottleneck, and left it for later: calling it twice for two <em>sibling</em> collections. Today's lesson is that follow-up — the problem is called <dfn data-en="a performance problem where SQL JOINs against two or more sibling collection navigations multiply together into a cross product, so a blog with 10 posts and 10 contributors returns 100 duplicated rows for that one blog instead of 20 -- gets worse as more sibling Includes are added to the same query" data-vn="cartesian explosion (giữ nguyên) — vấn đề performance khi JOIN tới 2+ collection navigation anh em (sibling) bị nhân tích với nhau thành cross product -- 1 blog có 10 post và 10 contributor sẽ trả về 100 dòng trùng lặp cho blog đó thay vì 20 -- càng tệ hơn khi thêm Include anh em khác vào cùng query">cartesian explosion</dfn>, and EF Core's fix is a method named exactly for what it does: <code>AsSplitQuery()</code>.</p>
+
+<h2>1 · One JOIN, two sibling collections, a cross product</h2>
+<p>Lesson 106's fix folded <code>Order.Items</code> into one query via <code>Include()</code>. That stays true for one collection. Add a second, sibling collection on the same entity and the shape changes:</p>
+<pre><code><span class="kw">var</span> blogs = <span class="kw">await</span> ctx.Blogs
+    .Include(b =&gt; b.Posts)
+    .Include(b =&gt; b.Contributors)
+    .ToListAsync();</code></pre>
+<p><code>Posts</code> and <code>Contributors</code> are both collection navigations hanging directly off <code>Blog</code> — siblings, same level. SQL has no way to <code>JOIN</code> two sibling one-to-many relationships into one result set without multiplying them: a blog with 10 posts and 10 contributors gets every post paired with every contributor, 100 rows back for that one blog instead of the 20 you'd expect from "10 posts plus 10 contributors." Microsoft's own docs name this exact 10-and-10-becomes-100 case. The bigger the lists, the worse the multiplication — three sibling collections of 10 each would multiply to 1,000 rows for one blog.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like the kind of thing a <code>GROUP BY</code> or a smarter <code>SELECT</code> shape should just avoid, the way a well-written GraphQL resolver avoids over-fetching. It's not a query-writing mistake — it's what a <code>JOIN</code> <em>is</em>, structurally, once two independent one-to-many relationships sit at the same level. The fix isn't a smarter JOIN; it's not using one JOIN for both.</div>
+
+<h2>2 · The nested case doesn't explode the same way</h2>
+<p>Not every two-<code>Include</code> query has this problem. Chaining a second <code>Include</code> through <code>ThenInclude</code> — nesting one level deeper rather than adding a sibling — stays linear:</p>
+<pre><code><span class="kw">var</span> blogs = <span class="kw">await</span> ctx.Blogs
+    .Include(b =&gt; b.Posts)
+    .ThenInclude(p =&gt; p.Comments)
+    .ToListAsync();</code></pre>
+<p>Here <code>Comments</code> belongs to <code>Post</code>, not to <code>Blog</code> directly — there's exactly one row per comment, no cross product, because the second JOIN walks further down the same chain instead of branching sideways. The rule worth keeping: cartesian explosion is about <em>sibling</em> collections on the same parent, not about the number of <code>Include</code> calls in a query.</p>
+
+<h2>3 · A quieter cost: duplicated columns, even with one collection</h2>
+<p>A single <code>Include()</code> has its own, smaller version of the same row-duplication idea. <code>ctx.Blogs.Include(b =&gt; b.Posts)</code> still returns one row per post, and every one of those rows repeats the parent blog's columns — <code>Id</code>, <code>Name</code>, and any other column on <code>Blog</code> included in the projection. Usually that's negligible. It stops being negligible if <code>Blog</code> happens to carry a large column (binary data, a long text field) — that column now travels over the wire once per post, not once per blog. The documented fix for that narrower case is a plain projection that leaves the big column out, not <code>AsSplitQuery()</code>:</p>
+<pre><code><span class="kw">var</span> blogs = <span class="kw">await</span> ctx.Blogs
+    .Select(b =&gt; <span class="kw">new</span> { b.Id, b.Name, b.Posts })
+    .ToListAsync();</code></pre>
+<p>That trades away change tracking on the result (Lesson 106's distinction again — a projection to an anonymous type isn't a tracked entity, so it can't be saved back through <code>SaveChanges</code>), the same trade <code>AsNoTracking()</code> makes on purpose.</p>
+
+<h2>4 · AsSplitQuery(): stop joining, issue one query per collection instead</h2>
+<p>For the sibling-collection case, EF Core's answer is a method that does exactly what its name says — split one query with multiple JOINs into multiple queries with none of the cross-product problem:</p>
+<pre><code><span class="kw">var</span> blogs = <span class="kw">await</span> ctx.Blogs
+    .Include(b =&gt; b.Posts)
+    .AsSplitQuery()
+    .ToListAsync();</code></pre>
+<p>This generates two separate <code>SELECT</code> statements instead of one <code>JOIN</code>ed query — one for <code>Blogs</code>, one for <code>Posts</code> filtered down to the matching blogs, matched back up in memory on the client side once both results arrive:</p>
+<pre><code><span class="kw">-- query 1</span>
+SELECT [b].[BlogId], [b].[Url] FROM [Blogs] AS [b] ORDER BY [b].[BlogId]
+<span class="kw">-- query 2</span>
+SELECT [p].[PostId], [p].[BlogId], [p].[Title]
+FROM [Blogs] AS [b]
+INNER JOIN [Posts] AS [p] ON [b].[BlogId] = [p].[BlogId]
+ORDER BY [b].[BlogId]</code></pre>
+<p>No sibling collection multiplies against another, because there's no longer a single result set for them to multiply inside. Each collection gets its own round trip, and each round trip returns exactly the rows that collection actually has.</p>
+
+<h2>5 · What split queries cost instead</h2>
+<p>Split queries trade one performance problem for a different set of trade-offs Microsoft's docs name explicitly, not a strictly-better option:</p>
+<table class="cmp">
+<thead><tr><th></th><th>Single query (JOIN, default)</th><th>Split query (<code>AsSplitQuery()</code>)</th></tr></thead>
+<tbody>
+<tr><th>Row multiplication</th><td>sibling collections cross-multiply</td><td>none — each collection is its own query</td></tr>
+<tr><th>Round trips</th><td>one</td><td>one per included collection</td></tr>
+<tr><th>Consistency under concurrent writes</th><td>guaranteed by the single query</td><td>not guaranteed — a write between the two queries can leave results inconsistent</td></tr>
+<tr><th>Client-side memory</th><td>one buffered result</td><td>earlier query's results held in memory until later queries finish</td></tr>
+</tbody>
+</table>
+<p>The consistency row is the one worth not skipping past: a single JOIN-based query is one round trip to a database that answers it from one consistent point in time. Two separate queries are two separate round trips — if another transaction commits a new post in the gap between them, the <code>Blogs</code> query and the <code>Posts</code> query can reflect two different moments, something a single query structurally cannot do. Microsoft's docs call out wrapping split queries in a serializable or snapshot transaction as the mitigation, with the caveat that doing so brings back a performance cost of its own.</p>
+<p>There's a second documented trap, specific to pairing split queries with pagination: ordering must be fully unique across <em>all</em> the split queries, not just the primary one. Ordering only by a non-unique column (date, say) can let each split query's database execution pick a different arbitrary row when ties exist, so <code>Skip</code>/<code>Take</code> on EF Core versions before 10 can return mismatched pages across queries that were supposed to describe the same window. Ordering by date <em>and</em> a unique id together closes that gap.</p>
+
+<h2>6 · Choosing per query, or globally</h2>
+<p><code>AsSplitQuery()</code> and its opposite, <code>AsSingleQuery()</code>, are both per-query operators — call one on a specific query to override whatever the context's default is:</p>
+<pre><code><span class="kw">var</span> blogs = <span class="kw">await</span> ctx.Blogs
+    .Include(b =&gt; b.Posts)
+    .AsSingleQuery()   <span class="kw">// force the JOIN shape, even if split is the context default</span>
+    .ToListAsync();</code></pre>
+<p>The default, with no configuration at all, is single query — the JOIN shape Lesson 106 already covered. EF Core knows this default can be the wrong call, though: it emits a warning whenever a query loads multiple collections and neither a global default nor a per-query <code>AsSingleQuery()</code>/<code>AsSplitQuery()</code> has been set, precisely so the cartesian-explosion case in section 1 doesn't ship unnoticed. The global default can be set once, on the provider options, if most of the app's multi-collection queries should split:</p>
+<pre><code><span class="kw">protected override void</span> OnConfiguring(DbContextOptionsBuilder optionsBuilder) {
+    optionsBuilder.UseSqlServer(connectionString,
+        o =&gt; o.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery));
+}</code></pre>
+
+<div class="interview">
+<p><strong>Q: "A list endpoint does <code>ctx.Orders.Include(o =&gt; o.Items).Include(o =&gt; o.Tags).ToListAsync()</code> and is returning way more rows than expected for a small number of orders. What's going on?"</strong> A strong answer, out loud: <em>"Items and Tags are both sibling collection navigations on Order, so that single query's JOINs produce a cross product — an order with 5 items and 5 tags comes back as 25 duplicated rows for that one order, not 10. I'd fix it with AsSplitQuery(), which issues one SQL query per included collection instead of one big JOIN, so neither collection multiplies against the other. I'd watch two things before shipping that: whether this endpoint also does Skip/Take pagination, since ordering has to be fully unique across the split queries or pages can mismatch, and whether concurrent writes between the split queries' round trips could leave the response inconsistent, since a single JOIN query doesn't have that gap."</em> The signal: naming cartesian explosion as a sibling-collection JOIN problem specifically (not "JOINs are slow"), and naming both AsSplitQuery() trade-offs rather than treating it as a free fix.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers cartesian explosion from sibling <code>Include()</code> calls, <code>AsSplitQuery()</code>/<code>AsSingleQuery()</code>, the consistency and round-trip trade-offs, the <code>Skip</code>/<code>Take</code> ordering caveat, and the global <code>UseQuerySplittingBehavior</code> default. It does not cover explicit loading (<code>Entry().Collection().Load()</code>) as a third loading strategy, one-to-one navigations (always loaded via JOIN regardless of split/single mode, per the same source), or query compilation/caching internals — named in the primary source but out of scope here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Posts and Contributors are both collection navigations directly on Blog -- siblings at the same level -- so a single JOIN-based query pairs every row from one collection with every row from the other, returning a cross product: 10 posts times 10 contributors is 100 duplicated rows for that one blog, not 20.">
+    <p class="stem">Why does <code>Include(b =&gt; b.Posts).Include(b =&gt; b.Contributors)</code> cause cartesian explosion?</p>
+    <button class="opt" data-ok>two sibling collections cross-multiply inside one single shared SQL JOIN</button>
+    <button class="opt">EF Core always re-runs the whole query ten full times</button>
+    <button class="opt">Contributors secretly triggers an entirely separate new N+1 query bug</button>
+    <button class="opt">Blog itself stores one duplicated row per each column name</button>
+  </div>
+  <div class="q" data-why="ThenInclude nests one level deeper along the same chain -- Comments belongs to Post, not directly to Blog -- so there is exactly one row per comment and no cross product. Cartesian explosion is specifically about sibling collections at the same level, not about the number of Include calls in a query.">
+    <p class="stem">Why doesn't <code>Include(b =&gt; b.Posts).ThenInclude(p =&gt; p.Comments)</code> explode the same way?</p>
+    <button class="opt" data-ok>Comments nests one level under Posts, not directly beside it</button>
+    <button class="opt">ThenInclude secretly disables every single JOIN inside that one query</button>
+    <button class="opt">Comments can never be loaded through any Include call used</button>
+    <button class="opt">a second Include call always overwrites the first one entirely</button>
+  </div>
+  <div class="q" data-why="AsSplitQuery() replaces one JOIN-based query with one separate SQL query per included collection, matched back together in memory on the client side -- so no two collections ever sit inside the same result set to multiply against each other.">
+    <p class="stem">What does calling <code>.AsSplitQuery()</code> actually change about the generated SQL?</p>
+    <button class="opt" data-ok>it issues one separate SQL query per each included collection</button>
+    <button class="opt">it merges every single included collection into one bigger JOIN</button>
+    <button class="opt">it disables all change tracking for that one query's results</button>
+    <button class="opt">it forces every query to run inside a new transaction</button>
+  </div>
+  <div class="q" data-why="A single JOIN-based query is answered from one consistent point in time by the database. Split queries are separate round trips, so a write committed by another transaction in the gap between them can leave the two result sets describing two different moments -- a gap a single query cannot have, which is exactly why Microsoft's docs name wrapping split queries in a serializable or snapshot transaction as the mitigation.">
+    <p class="stem">What consistency risk does <code>AsSplitQuery()</code> introduce that a single JOIN query never has?</p>
+    <button class="opt" data-ok>a concurrent write between round trips can leave results inconsistent</button>
+    <button class="opt">the database permanently rejects any later write to that table</button>
+    <button class="opt">every split query always returns a completely empty result set</button>
+    <button class="opt">change tracking starts silently duplicating every saved row on commit</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/querying/single-split-queries">Microsoft Learn: Single vs. Split Queries — EF Core</a> — confirmed live via <code>WebFetch</code> before writing. Source for the cartesian-explosion 10-posts-by-10-contributors example and its exact generated SQL (section 1), the <code>ThenInclude</code> non-exploding counterexample (section 2), the big-column data-duplication case and its projection fix (section 3), the <code>AsSplitQuery()</code> generated SQL (section 4), the documented consistency/round-trip/memory/reference-navigation trade-offs and the <code>Skip</code>/<code>Take</code> ordering warning (section 5), and the automatic-warning behavior plus <code>UseQuerySplittingBehavior</code> global default (section 6). Lesson 106's own Microsoft Learn Eager Loading and Tracking vs. No-Tracking sources still cover <code>Include()</code> and <code>AsNoTracking()</code> themselves in full and are not re-derived here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 106's <code>Include()</code>/<code>AsNoTracking()</code> material, which named this exact follow-up and left it for later, and on Lesson 144/145's own <code>Include()</code>-and-JOIN caveats for query filters. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 146 rounds — the honest next step remains a completion signal or a user-named track. Standing candidates worth checking fresh next time: explicit loading (<code>Entry().Collection().Load()</code>) as EF Core's third loading strategy, named in this lesson's own scope line as deferred; and HATEOAS (Lesson 97), checked twice already (Lessons 141, 142) and rejected both times on a thin-C#-angle basis — worth retiring unless picked deliberately as a cold-start C# feature rather than a direct port.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

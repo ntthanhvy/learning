@@ -290,6 +290,8 @@
       file: "lessons/0140-median-and-np-median.html" },
     { n: 141, date: "2026-11-27", title: "Series.cov() and np.cov(): the unscaled number behind corr(), and the matrix-shape trap",
       file: "lessons/0141-cov.html" },
+    { n: 142, date: "2026-11-28", title: "np.ptp(): max minus min in one call, and the narrow-dtype overflow trap",
+      file: "lessons/0142-np-ptp.html" },
   ];
 
   const REFS = [
